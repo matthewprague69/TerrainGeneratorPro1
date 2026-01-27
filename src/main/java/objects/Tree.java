@@ -399,6 +399,24 @@ public class Tree extends Feature {
             glVertex3f(x * topRadius, height, z * topRadius);
         }
         glEnd();
+
+        drawCylinderCap(baseRadius, 0f, -1f);
+        drawCylinderCap(topRadius, height, 1f);
+    }
+
+    private void drawCylinderCap(float radius, float y, float normalY) {
+        glNormal3f(0f, normalY, 0f);
+        glBegin(GL_TRIANGLE_FAN);
+        glTexCoord2f(0.5f, 0.5f);
+        glVertex3f(0f, y, 0f);
+        for (int i = 0; i <= SEGMENTS; i++) {
+            double angle = 2 * Math.PI * i / SEGMENTS;
+            float x = (float) Math.cos(angle) * radius;
+            float z = (float) Math.sin(angle) * radius;
+            glTexCoord2f(0.5f + x / (2 * radius), 0.5f + z / (2 * radius));
+            glVertex3f(x, y, z);
+        }
+        glEnd();
     }
 
     private void drawCrownLeafPlanes() {
