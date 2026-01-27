@@ -32,6 +32,8 @@ public class TerrainManager {
     private int shadowRenderDist;
     private int cacheRenderDist;
     private int cacheFeatureRenderDist;
+    private int lastUpdateChunkX = Integer.MIN_VALUE;
+    private int lastUpdateChunkZ = Integer.MIN_VALUE;
     private final long seed;
 
     private final Map<String, Integer> textureMap = new HashMap<>();
@@ -102,6 +104,14 @@ public class TerrainManager {
 
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        boolean movedChunk = pcx != lastUpdateChunkX || pcz != lastUpdateChunkZ;
+        if (!movedChunk) {
+            processPendingChunkGenerations();
+            processPendingFeatureGenerations(pcx, pcz);
+            return;
+        }
+        lastUpdateChunkX = pcx;
+        lastUpdateChunkZ = pcz;
         Set<Long> needed = new HashSet<>();
 
         for (int dx = -renderDist; dx <= renderDist; dx++) {
