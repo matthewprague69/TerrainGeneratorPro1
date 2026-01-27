@@ -11,8 +11,8 @@ import java.nio.FloatBuffer;
 import java.util.*;
 
 public class TerrainManager {
-    private static final int MAX_CHUNKS_PER_FRAME = 2;
-    private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 3;
+    private static final int MAX_CHUNKS_PER_FRAME = 4;
+    private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 6;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -174,8 +174,10 @@ public class TerrainManager {
     }
 
     private void processPendingChunkGenerations() {
+        int backlog = pendingChunks.size();
+        int budget = MAX_CHUNKS_PER_FRAME + Math.min(4, backlog / 16);
         int count = 0;
-        while (count < MAX_CHUNKS_PER_FRAME && !pendingChunks.isEmpty()) {
+        while (count < budget && !pendingChunks.isEmpty()) {
             long key = pendingChunks.poll();
             Integer pendingLod = pendingChunkLods.remove(key);
             if (pendingLod == null) {
@@ -211,8 +213,10 @@ public class TerrainManager {
     }
 
     private void processPendingFeatureGenerations(int pcx, int pcz) {
+        int backlog = pendingFeatureChunks.size();
+        int budget = MAX_FEATURE_CHUNKS_PER_FRAME + Math.min(6, backlog / 12);
         int count = 0;
-        while (count < MAX_FEATURE_CHUNKS_PER_FRAME && !pendingFeatureChunks.isEmpty()) {
+        while (count < budget && !pendingFeatureChunks.isEmpty()) {
             Chunk chunk = pendingFeatureChunks.poll();
             long key = key(chunk.cx, chunk.cz);
             pendingFeatureKeys.remove(key);
@@ -275,8 +279,8 @@ public class TerrainManager {
         float time = skyRenderer.getTimeOfDay();
         float brightness = getFogBrightness(time);
 
-        float fogEnd = Math.max(0f, (renderDist - 1) * Chunk.SIZE * scale);
-        float fogStart = Math.max(0f, fogEnd - (Chunk.SIZE * scale * 4.0f));
+        float fogEnd = Math.max(0f, (renderDist + 0.25f) * Chunk.SIZE * scale);
+        float fogStart = Math.max(0f, fogEnd - (Chunk.SIZE * scale * 6.0f));
         glFogf(GL_FOG_START, fogStart);
         glFogf(GL_FOG_END, fogEnd);
 
