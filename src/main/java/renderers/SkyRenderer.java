@@ -58,7 +58,7 @@ public class SkyRenderer {
         float[] sunDir = getSunDirection();
         float brightness = getSkyBrightness();
         float[] shadowDir = getShadowDirection();
-        float[] lightDir = new float[] { shadowDir[0], shadowDir[1], shadowDir[2], 0f };
+        float[] lightDir = new float[] { -shadowDir[0], -shadowDir[1], -shadowDir[2], 0f };
         FloatBuffer lightBuf = BufferUtils.createFloatBuffer(4).put(lightDir).flip();
         glLightfv(GL_LIGHT0, GL_POSITION, lightBuf);
 
