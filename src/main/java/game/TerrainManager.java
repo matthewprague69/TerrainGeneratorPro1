@@ -47,7 +47,7 @@ public class TerrainManager {
         this.scale = scale;
         this.renderDist = renderDist;
         this.featureRenderDist = featureRenderDist;
-        this.shadowRenderDist = Math.max(renderDist + 2, featureRenderDist + 2);
+        this.shadowRenderDist = Math.max(renderDist + 4, featureRenderDist + 2);
         this.cacheRenderDist = renderDist + 4;
         this.cacheFeatureRenderDist = featureRenderDist + 4;
         this.regionGenerator = new BiomeRegionGenerator(seed);
@@ -109,26 +109,6 @@ public class TerrainManager {
 
                 Chunk existing = chunks.get(k);
 
-                float chunkMinX = cx * Chunk.SIZE * scale;
-                float chunkMinZ = cz * Chunk.SIZE * scale;
-                float chunkMaxX = (cx + 1) * Chunk.SIZE * scale;
-                float chunkMaxZ = (cz + 1) * Chunk.SIZE * scale;
-
-// Use real Y bounds if chunk exists
-                float chunkMinY = -20f;
-                float chunkMaxY = 100f; // fallback default
-
-                /*if (existing != null) {
-                    BoundingBox box = existing.getBoundingBox();
-                    chunkMinY = box.minY;
-                    chunkMaxY = box.maxY;
-                }*/
-
-// Now frustum cull properly
-                if (!frustum.isBoxVisible(chunkMinX, chunkMinY, chunkMinZ, chunkMaxX, chunkMaxY, chunkMaxZ))
-                    continue;
-
-
                 needed.add(k);
 
 
@@ -156,10 +136,7 @@ public class TerrainManager {
         for (Chunk c : chunks.values()) {
             c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
 
-            BoundingBox box = c.getBoundingBox();
-            if (frustum.isBoxVisible(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ)) {
-                queueFeatureGeneration(c, pcx, pcz);
-            }
+            queueFeatureGeneration(c, pcx, pcz);
 
         }
 
@@ -298,8 +275,10 @@ public class TerrainManager {
         float time = skyRenderer.getTimeOfDay();
         float brightness = getFogBrightness(time);
 
-        glFogf(GL_FOG_START, renderDist * Chunk.SIZE * scale * 0.8f);
-        glFogf(GL_FOG_END, renderDist * Chunk.SIZE * scale * 1.0f);
+        float fogEnd = renderDist * Chunk.SIZE * scale;
+        float fogStart = Math.max(0f, fogEnd - (Chunk.SIZE * scale * 2.5f));
+        glFogf(GL_FOG_START, fogStart);
+        glFogf(GL_FOG_END, fogEnd);
 
         // --- New: match fog color to sky color ---
         float r = 0.6f * brightness;
@@ -364,6 +343,7 @@ public class TerrainManager {
         System.out.println("Render distance set to " + r);
         renderDist = Math.max(1, r);
         cacheRenderDist = renderDist + 4;
+        shadowRenderDist = Math.max(shadowRenderDist, renderDist + 4);
     }
 
     public int getRenderDistance() {
@@ -382,6 +362,7 @@ public class TerrainManager {
         System.out.println("Feature render distance set to " + r);
         featureRenderDist = Math.max(0, r);
         cacheFeatureRenderDist = featureRenderDist + 4;
+        shadowRenderDist = Math.max(shadowRenderDist, featureRenderDist + 2);
     }
 
     public int getFeatureRenderDistance() {
