@@ -13,7 +13,6 @@ import java.util.*;
 public class TerrainManager {
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final OpenSimplexNoise terrainNoise;
-    private final OpenSimplexNoise biomeNoise;
     private final BiomeRegionGenerator regionGenerator;
     private final SkyRenderer skyRenderer;
 
@@ -36,7 +35,6 @@ public class TerrainManager {
     public TerrainManager(long seed, float scale, int renderDist, int featureRenderDist,SkyRenderer skyRenderer) {
         this.seed = seed;
         this.terrainNoise = new OpenSimplexNoise(seed);
-        this.biomeNoise = new OpenSimplexNoise(seed + 12345);
         this.scale = scale;
         this.renderDist = renderDist;
         this.featureRenderDist = featureRenderDist;
@@ -65,23 +63,9 @@ public class TerrainManager {
         return regionGenerator.getBiomeAtChunk(cx, cz);
     }*/
     private Biome pickBiome(int cx, int cz) {
-        double nx = (cx * Chunk.SIZE + Chunk.SIZE / 2.0) * 0.002;
-        double nz = (cz * Chunk.SIZE + Chunk.SIZE / 2.0) * 0.002;
-        double value = (biomeNoise.eval(nx, nz) + 1) * 0.5;
-
-        // Normalize all spawn chances
-        double totalChance = Arrays.stream(Biome.values()).mapToDouble(b -> b.spawnChance).sum();
-        double threshold = value * totalChance;
-
-        double sum = 0;
-        for (Biome b : Biome.values()) {
-            sum += b.spawnChance;
-            if (threshold <= sum)
-                return b;
-        }
-
-        // Force last biome (should never happen if normalized properly)
-        return Biome.values()[Biome.values().length - 1];
+        double wx = (cx * Chunk.SIZE + Chunk.SIZE / 2.0) * scale;
+        double wz = (cz * Chunk.SIZE + Chunk.SIZE / 2.0) * scale;
+        return regionGenerator.getDominantBiome(wx, wz);
     }
 
     public List<Feature> getNearbyFeatures(float wx, float wz, int chunkRadius) {
@@ -278,26 +262,7 @@ public class TerrainManager {
     }
 
     public Map<Biome, Float> getBiomeWeights(double wx, double wz) {
-        double nx = wx * 0.001;
-        double nz = wz * 0.001;
-        double v = (biomeNoise.eval(nx, nz) + 1.0) / 2.0;
-
-        Map<Biome, Float> weights = new EnumMap<>(Biome.class);
-        float total = 0f;
-
-        for (Biome biome : Biome.values()) {
-            float distance = (float) Math.abs(v - biome.center);
-            float influence = 1f - (distance / biome.blendRadius);
-            influence = Math.max(0f, influence);
-            weights.put(biome, influence);
-            total += influence;
-        }
-
-        for (Biome biome : weights.keySet()) {
-            weights.put(biome, weights.get(biome) / total);
-        }
-
-        return weights;
+        return regionGenerator.getBiomeWeights(wx, wz);
     }
 
     public Biome getDominantBiome(double wx, double wz) {
