@@ -11,9 +11,9 @@ import java.nio.FloatBuffer;
 import java.util.*;
 
 public class TerrainManager {
-    private static final int MAX_CHUNKS_PER_FRAME = 6;
-    private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 4;
-    private static final long FEATURE_BUDGET_NS = 2_000_000L;
+    private static final int MAX_CHUNKS_PER_FRAME = 10;
+    private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 6;
+    private static final long FEATURE_BUDGET_NS = 4_000_000L;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -176,7 +176,7 @@ public class TerrainManager {
 
     private void processPendingChunkGenerations() {
         int backlog = pendingChunks.size();
-        int budget = MAX_CHUNKS_PER_FRAME + Math.min(6, backlog / 12);
+        int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
         int count = 0;
         while (count < budget && !pendingChunks.isEmpty()) {
             long key = pendingChunks.poll();
@@ -215,7 +215,7 @@ public class TerrainManager {
 
     private void processPendingFeatureGenerations(int pcx, int pcz) {
         int backlog = pendingFeatureChunks.size();
-        int budget = MAX_FEATURE_CHUNKS_PER_FRAME + Math.min(6, backlog / 16);
+        int budget = MAX_FEATURE_CHUNKS_PER_FRAME + Math.min(6, backlog / 14);
         int count = 0;
         long start = System.nanoTime();
         while (count < budget && !pendingFeatureChunks.isEmpty()) {
@@ -284,8 +284,8 @@ public class TerrainManager {
         float time = skyRenderer.getTimeOfDay();
         float brightness = getFogBrightness(time);
 
-        float fogEnd = Math.max(0f, (renderDist - 1f) * Chunk.SIZE * scale);
-        float fogStart = Math.max(0f, fogEnd - (Chunk.SIZE * scale * 5.0f));
+        float fogEnd = Math.max(0f, renderDist * Chunk.SIZE * scale);
+        float fogStart = Math.max(0f, (renderDist - 3f) * Chunk.SIZE * scale);
         glFogf(GL_FOG_START, fogStart);
         glFogf(GL_FOG_END, fogEnd);
 
