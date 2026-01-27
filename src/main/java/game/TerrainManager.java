@@ -48,7 +48,7 @@ public class TerrainManager {
         this.scale = scale;
         this.renderDist = renderDist;
         this.featureRenderDist = featureRenderDist;
-        this.shadowRenderDist = renderDist + 8;
+        this.shadowRenderDist = renderDist + 12;
         this.cacheRenderDist = renderDist + 4;
         this.cacheFeatureRenderDist = featureRenderDist + 4;
         this.regionGenerator = new BiomeRegionGenerator(seed);
@@ -352,7 +352,7 @@ public class TerrainManager {
         System.out.println("Render distance set to " + r);
         renderDist = Math.max(1, r);
         cacheRenderDist = renderDist + 4;
-        shadowRenderDist = Math.max(shadowRenderDist, renderDist + 8);
+        shadowRenderDist = Math.max(shadowRenderDist, renderDist + 12);
     }
 
     public int getRenderDistance() {
@@ -371,7 +371,7 @@ public class TerrainManager {
         System.out.println("Feature render distance set to " + r);
         featureRenderDist = Math.max(0, r);
         cacheFeatureRenderDist = featureRenderDist + 4;
-        shadowRenderDist = Math.max(shadowRenderDist, renderDist + 8);
+        shadowRenderDist = Math.max(shadowRenderDist, renderDist + 12);
     }
 
     public int getFeatureRenderDistance() {
