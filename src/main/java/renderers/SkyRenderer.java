@@ -61,11 +61,11 @@ public class SkyRenderer {
         float brightness = getSkyBrightness();
 
         if (brightness > 0f) {
-            // Daytime: sun shines from sun's direction
-            lightDir = new float[] { -sunDir[0], -sunDir[1], -sunDir[2], 0f };
-        } else {
-            // Nighttime: moon shines from opposite direction
+            // Daytime: light points toward the sun position
             lightDir = new float[] { sunDir[0], sunDir[1], sunDir[2], 0f };
+        } else {
+            // Nighttime: light points toward the moon (opposite the sun)
+            lightDir = new float[] { -sunDir[0], -sunDir[1], -sunDir[2], 0f };
         }
         FloatBuffer lightBuf = BufferUtils.createFloatBuffer(4).put(lightDir).flip();
         glLightfv(GL_LIGHT0, GL_POSITION, lightBuf);
