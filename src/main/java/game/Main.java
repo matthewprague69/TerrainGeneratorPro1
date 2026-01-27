@@ -178,11 +178,12 @@ public class Main {
             terrain.update(player.getX(), player.getZ(), frustum);
             sky.update(dt);
 
-            float[] lightDir = sky.getShadowDirection();
+            float[] shadowDir = sky.getShadowDirection();
+            float[] lightDir = sky.getLightDirection();
             float lightStrength = sky.getSkyBrightness();
             float[] lightMatrix = shadowRenderer.renderShadowMap(
                     terrain,
-                    lightDir,
+                    shadowDir,
                     player.getX(),
                     player.getY(),
                     player.getZ(),
