@@ -11,9 +11,9 @@ import java.nio.FloatBuffer;
 import java.util.*;
 
 public class TerrainManager {
-    private static final int MAX_CHUNKS_PER_FRAME = 10;
-    private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 6;
-    private static final long FEATURE_BUDGET_NS = 4_000_000L;
+    private static final int MAX_CHUNKS_PER_FRAME = 14;
+    private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 10;
+    private static final long FEATURE_BUDGET_NS = 8_000_000L;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -125,9 +125,9 @@ public class TerrainManager {
                  */
 
                 if (existing == null) {
-                    queueChunkGeneration(k, cx, cz, targetLOD);
+                    queueChunkGeneration(k, cx, cz, targetLOD, dist);
                 } else if (targetLOD < existing.getLOD()) {
-                    queueChunkGeneration(k, cx, cz, targetLOD);
+                    queueChunkGeneration(k, cx, cz, targetLOD, dist);
                 }
 
             }
@@ -164,22 +164,26 @@ public class TerrainManager {
         return chunks.get(key(cx, cz));
     }
 
-    private void queueChunkGeneration(long key, int cx, int cz, int targetLOD) {
+    private void queueChunkGeneration(long key, int cx, int cz, int targetLOD, int dist) {
         Integer existing = pendingChunkLods.get(key);
         if (existing != null) {
             pendingChunkLods.put(key, Math.min(existing, targetLOD));
             return;
         }
         pendingChunkLods.put(key, targetLOD);
-        pendingChunks.add(key);
+        if (dist <= 2) {
+            pendingChunks.addFirst(key);
+        } else {
+            pendingChunks.addLast(key);
+        }
     }
 
     private void processPendingChunkGenerations() {
         int backlog = pendingChunks.size();
-        int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
+        int budget = MAX_CHUNKS_PER_FRAME + Math.min(10, backlog / 8);
         int count = 0;
         while (count < budget && !pendingChunks.isEmpty()) {
-            long key = pendingChunks.poll();
+            long key = pendingChunks.pollFirst();
             Integer pendingLod = pendingChunkLods.remove(key);
             if (pendingLod == null) {
                 continue;
@@ -210,12 +214,17 @@ public class TerrainManager {
             return;
         }
         pendingFeatureKeys.add(key);
-        pendingFeatureChunks.add(chunk);
+        int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
+        if (dist <= 2) {
+            pendingFeatureChunks.addFirst(chunk);
+        } else {
+            pendingFeatureChunks.addLast(chunk);
+        }
     }
 
     private void processPendingFeatureGenerations(int pcx, int pcz) {
         int backlog = pendingFeatureChunks.size();
-        int budget = MAX_FEATURE_CHUNKS_PER_FRAME + Math.min(6, backlog / 14);
+        int budget = MAX_FEATURE_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
         int count = 0;
         long start = System.nanoTime();
         while (count < budget && !pendingFeatureChunks.isEmpty()) {
