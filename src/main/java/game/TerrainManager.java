@@ -11,7 +11,14 @@ import java.nio.FloatBuffer;
 import java.util.*;
 
 public class TerrainManager {
+    private static final int MAX_CHUNKS_PER_FRAME = 2;
+    private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 3;
+
     private final Map<Long, Chunk> chunks = new HashMap<>();
+    private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
+    private final Map<Long, Integer> pendingChunkLods = new HashMap<>();
+    private final ArrayDeque<Chunk> pendingFeatureChunks = new ArrayDeque<>();
+    private final Set<Long> pendingFeatureKeys = new HashSet<>();
     private final OpenSimplexNoise terrainNoise;
     private final BiomeRegionGenerator regionGenerator;
     private final SkyRenderer skyRenderer;
@@ -136,12 +143,10 @@ public class TerrainManager {
                  * targetLOD = 1;
                  */
 
-                if (existing == null || targetLOD < existing.getLOD()) {
-                    Biome b = pickBiome(cx, cz);
-                    Chunk upgraded = new Chunk(cx, cz, terrainNoise, scale, b, this, false, targetLOD);
-                    if (existing != null)
-                        existing.dispose();
-                    chunks.put(k, upgraded);
+                if (existing == null) {
+                    queueChunkGeneration(k, cx, cz, targetLOD);
+                } else if (targetLOD < existing.getLOD()) {
+                    queueChunkGeneration(k, cx, cz, targetLOD);
                 }
 
             }
@@ -153,7 +158,7 @@ public class TerrainManager {
 
             BoundingBox box = c.getBoundingBox();
             if (frustum.isBoxVisible(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ)) {
-                c.generateFeaturesIfNeeded(pcx, pcz, featureRenderDist);
+                queueFeatureGeneration(c, pcx, pcz);
             }
 
         }
@@ -172,10 +177,74 @@ public class TerrainManager {
                 it.remove();
             }
         }
+
+        processPendingChunkGenerations();
+        processPendingFeatureGenerations(pcx, pcz);
     }
 
     public Chunk getChunk(int cx, int cz) {
         return chunks.get(key(cx, cz));
+    }
+
+    private void queueChunkGeneration(long key, int cx, int cz, int targetLOD) {
+        Integer existing = pendingChunkLods.get(key);
+        if (existing != null) {
+            pendingChunkLods.put(key, Math.min(existing, targetLOD));
+            return;
+        }
+        pendingChunkLods.put(key, targetLOD);
+        pendingChunks.add(key);
+    }
+
+    private void processPendingChunkGenerations() {
+        int count = 0;
+        while (count < MAX_CHUNKS_PER_FRAME && !pendingChunks.isEmpty()) {
+            long key = pendingChunks.poll();
+            Integer pendingLod = pendingChunkLods.remove(key);
+            if (pendingLod == null) {
+                continue;
+            }
+            int cx = (int) (key >> 32);
+            int cz = (int) key;
+            Chunk existing = chunks.get(key);
+            int targetLOD = pendingLod;
+            if (existing != null && targetLOD >= existing.getLOD()) {
+                continue;
+            }
+            Biome b = pickBiome(cx, cz);
+            Chunk upgraded = new Chunk(cx, cz, terrainNoise, scale, b, this, false, targetLOD);
+            if (existing != null) {
+                existing.dispose();
+            }
+            chunks.put(key, upgraded);
+            count++;
+        }
+    }
+
+    private void queueFeatureGeneration(Chunk chunk, int pcx, int pcz) {
+        long key = key(chunk.cx, chunk.cz);
+        if (pendingFeatureKeys.contains(key)) {
+            return;
+        }
+        if (!chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+            return;
+        }
+        pendingFeatureKeys.add(key);
+        pendingFeatureChunks.add(chunk);
+    }
+
+    private void processPendingFeatureGenerations(int pcx, int pcz) {
+        int count = 0;
+        while (count < MAX_FEATURE_CHUNKS_PER_FRAME && !pendingFeatureChunks.isEmpty()) {
+            Chunk chunk = pendingFeatureChunks.poll();
+            long key = key(chunk.cx, chunk.cz);
+            pendingFeatureKeys.remove(key);
+            if (!chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                continue;
+            }
+            chunk.generateFeaturesIfNeeded(pcx, pcz, featureRenderDist);
+            count++;
+        }
     }
 
     public float getHeight(float wx, float wz) {

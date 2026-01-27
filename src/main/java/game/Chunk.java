@@ -155,6 +155,13 @@ public class Chunk {
         featuresGenerated = true;
     }
 
+    public boolean needsFeatureGeneration(int pcx, int pcz, int featureRenderDist) {
+        if (featuresGenerated) {
+            return false;
+        }
+        return Math.abs(cx - pcx) <= featureRenderDist && Math.abs(cz - pcz) <= featureRenderDist;
+    }
+
     public Biome getBiomeType() {
         return biome;
     }
