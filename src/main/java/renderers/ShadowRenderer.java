@@ -143,9 +143,9 @@ public class ShadowRenderer {
 
     private float[] buildLightViewMatrix(float[] lightDir, float centerX, float centerY, float centerZ) {
         float distance = 200f;
-        float eyeX = centerX - lightDir[0] * distance;
-        float eyeY = centerY - lightDir[1] * distance + 80f;
-        float eyeZ = centerZ - lightDir[2] * distance;
+        float eyeX = centerX + lightDir[0] * distance;
+        float eyeY = centerY + lightDir[1] * distance + 80f;
+        float eyeZ = centerZ + lightDir[2] * distance;
         return MatrixUtils.lookAt(eyeX, eyeY, eyeZ, centerX, centerY, centerZ, 0f, 1f, 0f);
     }
 
