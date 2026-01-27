@@ -8,6 +8,8 @@ public class BiomeRegionGenerator {
     private static final int BASE_REGION_SIZE = Chunk.SIZE * 8;
     private static final float MIN_RADIUS_SCALE = 0.6f;
     private static final float MAX_RADIUS_SCALE = 1.4f;
+    private static final float BLEND_BAND = 0.35f;
+    private static final float OUTER_BLEND_SCALE = 0.25f;
 
     private final long seed;
     private final int searchRadius;
@@ -47,11 +49,16 @@ public class BiomeRegionGenerator {
                     nearest = center;
                 }
 
-                if (dist > center.influenceRadius) {
+                float influence;
+                if (normalized <= 1.0) {
+                    influence = (float) (1.0 - normalized);
+                } else if (normalized <= 1.0 + BLEND_BAND) {
+                    float t = (float) ((1.0 + BLEND_BAND - normalized) / BLEND_BAND);
+                    influence = t * OUTER_BLEND_SCALE;
+                } else {
                     continue;
                 }
 
-                float influence = (float) (1.0 - normalized);
                 float weight = influence * influence;
                 weights.merge(center.biome, weight, Float::sum);
                 total += weight;
