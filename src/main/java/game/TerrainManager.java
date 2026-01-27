@@ -47,7 +47,7 @@ public class TerrainManager {
         this.scale = scale;
         this.renderDist = renderDist;
         this.featureRenderDist = featureRenderDist;
-        this.shadowRenderDist = Math.max(renderDist + 4, featureRenderDist + 2);
+        this.shadowRenderDist = renderDist + 8;
         this.cacheRenderDist = renderDist + 4;
         this.cacheFeatureRenderDist = featureRenderDist + 4;
         this.regionGenerator = new BiomeRegionGenerator(seed);
@@ -275,8 +275,8 @@ public class TerrainManager {
         float time = skyRenderer.getTimeOfDay();
         float brightness = getFogBrightness(time);
 
-        float fogEnd = renderDist * Chunk.SIZE * scale;
-        float fogStart = Math.max(0f, fogEnd - (Chunk.SIZE * scale * 2.5f));
+        float fogEnd = Math.max(0f, (renderDist - 1) * Chunk.SIZE * scale);
+        float fogStart = Math.max(0f, fogEnd - (Chunk.SIZE * scale * 4.0f));
         glFogf(GL_FOG_START, fogStart);
         glFogf(GL_FOG_END, fogEnd);
 
@@ -343,7 +343,7 @@ public class TerrainManager {
         System.out.println("Render distance set to " + r);
         renderDist = Math.max(1, r);
         cacheRenderDist = renderDist + 4;
-        shadowRenderDist = Math.max(shadowRenderDist, renderDist + 4);
+        shadowRenderDist = Math.max(shadowRenderDist, renderDist + 8);
     }
 
     public int getRenderDistance() {
@@ -362,7 +362,7 @@ public class TerrainManager {
         System.out.println("Feature render distance set to " + r);
         featureRenderDist = Math.max(0, r);
         cacheFeatureRenderDist = featureRenderDist + 4;
-        shadowRenderDist = Math.max(shadowRenderDist, featureRenderDist + 2);
+        shadowRenderDist = Math.max(shadowRenderDist, renderDist + 8);
     }
 
     public int getFeatureRenderDistance() {
