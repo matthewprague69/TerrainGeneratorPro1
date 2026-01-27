@@ -21,6 +21,8 @@ public class TerrainManager {
     private int renderDist;
     private int featureRenderDist;
     private int shadowRenderDist;
+    private int cacheRenderDist;
+    private int cacheFeatureRenderDist;
     private final long seed;
 
     private final Map<String, Integer> textureMap = new HashMap<>();
@@ -39,6 +41,8 @@ public class TerrainManager {
         this.renderDist = renderDist;
         this.featureRenderDist = featureRenderDist;
         this.shadowRenderDist = Math.max(renderDist + 2, featureRenderDist + 2);
+        this.cacheRenderDist = renderDist + 4;
+        this.cacheFeatureRenderDist = featureRenderDist + 4;
         this.regionGenerator = new BiomeRegionGenerator(seed);
 
 
@@ -145,7 +149,7 @@ public class TerrainManager {
 
         // Generate/unload features based on featureRenderDist
         for (Chunk c : chunks.values()) {
-            c.unloadFeaturesIfOutOfRange(pcx, pcz, featureRenderDist);
+            c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
 
             BoundingBox box = c.getBoundingBox();
             if (frustum.isBoxVisible(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ)) {
@@ -158,6 +162,12 @@ public class TerrainManager {
         for (Iterator<Map.Entry<Long, Chunk>> it = chunks.entrySet().iterator(); it.hasNext();) {
             Map.Entry<Long, Chunk> entry = it.next();
             if (!needed.contains(entry.getKey())) {
+                int cx = (int) (entry.getKey() >> 32);
+                int cz = (int) entry.getKey().intValue();
+                int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+                if (dist <= cacheRenderDist) {
+                    continue;
+                }
                 entry.getValue().dispose();
                 it.remove();
             }
@@ -284,6 +294,7 @@ public class TerrainManager {
     public void setRenderDistance(int r) {
         System.out.println("Render distance set to " + r);
         renderDist = Math.max(1, r);
+        cacheRenderDist = renderDist + 4;
     }
 
     public int getRenderDistance() {
@@ -301,6 +312,7 @@ public class TerrainManager {
     public void setFeatureRenderDistance(int r) {
         System.out.println("Feature render distance set to " + r);
         featureRenderDist = Math.max(0, r);
+        cacheFeatureRenderDist = featureRenderDist + 4;
     }
 
     public int getFeatureRenderDistance() {
