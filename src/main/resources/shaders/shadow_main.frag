@@ -18,7 +18,7 @@ float computeShadow(vec4 shadowCoord, vec3 normal, vec3 lightDir) {
     if (proj.z < 0.0 || proj.z > 1.0) {
         return 1.0;
     }
-    float bias = max(0.0005, 0.0025 * (1.0 - dot(normal, lightDir)));
+    float bias = max(0.0015, 0.006 * (1.0 - dot(normal, -lightDir)));
     float shadow = 0.0;
     float texel = 1.0 / 2048.0;
     for (int x = -1; x <= 1; x++) {
@@ -38,7 +38,7 @@ void main() {
     }
     vec3 normal = normalize(vNormal);
     vec3 lightDir = normalize((uViewMatrix * vec4(uLightDir, 0.0)).xyz);
-    float ndl = max(dot(normal, lightDir), 0.0);
+    float ndl = max(dot(normal, -lightDir), 0.0);
     float ambient = mix(0.25, 0.7, uLightStrength);
     float diffuse = ndl * mix(0.1, 0.8, uLightStrength);
     float lighting = ambient + diffuse;
