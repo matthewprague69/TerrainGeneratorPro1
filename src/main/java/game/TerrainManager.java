@@ -11,9 +11,10 @@ import java.nio.FloatBuffer;
 import java.util.*;
 
 public class TerrainManager {
-    private static final int MAX_CHUNKS_PER_FRAME = 14;
-    private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 10;
-    private static final long FEATURE_BUDGET_NS = 8_000_000L;
+    private static final int MAX_CHUNKS_PER_FRAME = 12;
+    private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 8;
+    private static final long CHUNK_BUDGET_NS = 4_000_000L;
+    private static final long FEATURE_BUDGET_NS = 6_000_000L;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -136,7 +137,10 @@ public class TerrainManager {
         // Generate/unload features based on featureRenderDist
         for (Chunk c : chunks.values()) {
             c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
-
+            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+            if (dist > cacheFeatureRenderDist) {
+                continue;
+            }
             queueFeatureGeneration(c, pcx, pcz);
 
         }
@@ -180,9 +184,13 @@ public class TerrainManager {
 
     private void processPendingChunkGenerations() {
         int backlog = pendingChunks.size();
-        int budget = MAX_CHUNKS_PER_FRAME + Math.min(10, backlog / 8);
+        int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
         int count = 0;
+        long start = System.nanoTime();
         while (count < budget && !pendingChunks.isEmpty()) {
+            if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                break;
+            }
             long key = pendingChunks.pollFirst();
             Integer pendingLod = pendingChunkLods.remove(key);
             if (pendingLod == null) {
@@ -224,7 +232,7 @@ public class TerrainManager {
 
     private void processPendingFeatureGenerations(int pcx, int pcz) {
         int backlog = pendingFeatureChunks.size();
-        int budget = MAX_FEATURE_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
+        int budget = MAX_FEATURE_CHUNKS_PER_FRAME + Math.min(6, backlog / 12);
         int count = 0;
         long start = System.nanoTime();
         while (count < budget && !pendingFeatureChunks.isEmpty()) {
@@ -307,6 +315,17 @@ public class TerrainManager {
         glFogfv(GL_FOG_COLOR, fogColor);
 
         glHint(GL_FOG_HINT, GL_NICEST);
+    }
+
+    public float[] getFogSettings() {
+        float time = skyRenderer.getTimeOfDay();
+        float brightness = getFogBrightness(time);
+        float fogEnd = Math.max(0f, renderDist * Chunk.SIZE * scale);
+        float fogStart = Math.max(0f, (renderDist - 3f) * Chunk.SIZE * scale);
+        float r = 0.6f * brightness;
+        float g = 0.75f * brightness;
+        float b = 1.0f * brightness;
+        return new float[] { fogStart, fogEnd, r, g, b };
     }
 
 
