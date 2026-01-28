@@ -766,10 +766,11 @@ public class Chunk {
                         float surfaceFromCarve = baseHeight - carveDepth * surfaceCarveRatio;
                         float riverSurfaceHeight = Math.min(baseHeight - ridgeOffset * 0.35f,
                                 Math.min(surfaceFromCarve + 0.2f, downhillSurface + surfaceNoise));
+                        riverSurfaceHeight = Math.max(WATER_LEVEL, riverSurfaceHeight);
                         float target = Math.min(bedHeight, riverSurfaceHeight - minRiverDepth);
                         float blended = (float) (baseHeight * (1.0 - bankBlend) + target * bankBlend);
                         heights[x][z] = blended;
-                        if (riverSurface != null && bankBlend > 0.0 && depthFactor > 0.02) {
+                        if (riverSurface != null && bankBlend > 0.0) {
                             riverSurface[x][z] = riverSurfaceHeight;
                         }
                     }
