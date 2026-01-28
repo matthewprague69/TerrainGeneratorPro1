@@ -287,9 +287,17 @@ public class Chunk {
     }
 
     public void drawWater() {
+        glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_LIGHTING_BIT);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDisable(GL_TEXTURE_2D);
+
+        glEnable(GL_LIGHTING);
+        glEnable(GL_COLOR_MATERIAL);
+        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+        float[] specular = new float[] { 0.6f, 0.7f, 0.8f, 0.9f };
+        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, specular);
+        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 48f);
 
         glDepthMask(false); // Disable depth writing for transparency
 
@@ -303,8 +311,7 @@ public class Chunk {
         glDepthMask(true); // Re-enable depth writing
 
         glDisable(GL_FOG); // <<< Disable again after drawing water
-        glEnable(GL_TEXTURE_2D);
-        glDisable(GL_BLEND);
+        glPopAttrib();
     }
 
 
