@@ -222,15 +222,10 @@ public class TerrainManager {
         Chunk existing = chunks.get(k);
         int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
         int targetLOD = 0;
-        if (dist >= Math.max(6, renderDist - 2)) {
-            targetLOD = 2;
-        } else if (dist >= Math.max(4, renderDist / 2)) {
-            targetLOD = 1;
-        }
 
         if (existing == null) {
             queueChunkGeneration(k, cx, cz, targetLOD, dist);
-        } else if (targetLOD < existing.getLOD()) {
+        } else if (existing.getLOD() != targetLOD) {
             queueChunkGeneration(k, cx, cz, targetLOD, dist);
         }
     }
