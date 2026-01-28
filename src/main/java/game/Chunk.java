@@ -723,7 +723,7 @@ public class Chunk {
         float height = Math.max(y1, Math.max(y2, y3));
         int tex = isRiverBed(x1, z1, y1) || isRiverBed(x2, z2, y2) || isRiverBed(x3, z3, y3)
                 ? manager.getTexture(biome.rockTex)
-                : pickTexture(height, slope);
+                : pickBlendedTexture(x1, z1, x2, z2, x3, z3, height, slope);
 
         FloatBuilder builder = builders.computeIfAbsent(tex, key -> new FloatBuilder());
         float[] normal = computeNormal(x1, z1, x2, z2, x3, z3);
@@ -746,7 +746,7 @@ public class Chunk {
         float height = Math.max(y1, Math.max(y2, y3));
         int tex = isRiverBed(x1, z1, y1) || isRiverBed(x2, z2, y2) || isRiverBed(x3, z3, y3)
                 ? manager.getTexture(biome.rockTex)
-                : pickTexture(height, slope);
+                : pickBlendedTexture(x1, z1, x2, z2, x3, z3, height, slope);
 
         float wx1 = (cx * SIZE + x1) * scale;
         float wz1 = (cz * SIZE + z1) * scale;
@@ -914,6 +914,10 @@ public class Chunk {
     }
 
     private int pickTexture(float height, float slope) {
+        return pickTextureForBiome(biome, height, slope);
+    }
+
+    private int pickTextureForBiome(Biome targetBiome, float height, float slope) {
         Random rand = new Random((int)(height * 1000 + slope * 1000));
 
 
@@ -938,13 +942,51 @@ public class Chunk {
 
         // --- Slope-based textures ---
         if (slope > ROCK_SLOPE_START) {
-            return manager.getTexture(biome.rockTex);
+            return manager.getTexture(targetBiome.rockTex);
         }
         if (slope > DIRT_SLOPE_START) {
-            return manager.getTexture(biome.dirtTex);
+            return manager.getTexture(targetBiome.dirtTex);
         }
 
-        return manager.getTexture(biome.grassTex);
+        return manager.getTexture(targetBiome.grassTex);
+    }
+
+    private int pickBlendedTexture(int x1, int z1, int x2, int z2, int x3, int z3, float height, float slope) {
+        float wx = (cx * SIZE + (x1 + x2 + x3) / 3f) * scale;
+        float wz = (cz * SIZE + (z1 + z2 + z3) / 3f) * scale;
+        Map<Biome, Float> weights = manager.getBiomeWeights(wx, wz);
+        Biome primary = biome;
+        Biome secondary = biome;
+        float primaryWeight = -1f;
+        float secondaryWeight = -1f;
+        for (Map.Entry<Biome, Float> entry : weights.entrySet()) {
+            float weight = entry.getValue();
+            if (weight > primaryWeight) {
+                secondary = primary;
+                secondaryWeight = primaryWeight;
+                primary = entry.getKey();
+                primaryWeight = weight;
+            } else if (weight > secondaryWeight) {
+                secondary = entry.getKey();
+                secondaryWeight = weight;
+            }
+        }
+
+        if (secondary == null || secondaryWeight <= 0.0f) {
+            return pickTextureForBiome(primary, height, slope);
+        }
+
+        float blend = secondaryWeight / Math.max(0.0001f, primaryWeight + secondaryWeight);
+        float noise = biomeBlendNoise(wx, wz);
+        Biome chosen = noise < blend ? secondary : primary;
+        return pickTextureForBiome(chosen, height, slope);
+    }
+
+    private float biomeBlendNoise(float wx, float wz) {
+        int ix = (int) Math.floor(wx * 0.25f);
+        int iz = (int) Math.floor(wz * 0.25f);
+        long seed = FeatureUtil.hashSeed(ix, 0, iz, manager.getSeed());
+        return ((seed >>> 8) & 0xffff) / (float) 0xffff;
     }
 
     private boolean isRiverCell(int x, int z) {
