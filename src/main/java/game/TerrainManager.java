@@ -142,14 +142,7 @@ public class TerrainManager {
 
         reprioritizePendingQueues(pcx, pcz);
 
-        // Generate/unload features based on featureRenderDist
-        for (Chunk c : chunks.values()) {
-            c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
-            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist <= cacheFeatureRenderDist) {
-                queueFeatureGeneration(c, pcx, pcz);
-            }
-        }
+        updateFeatureMaintenance(pcx, pcz, prevChunkX, prevChunkZ);
 
         // Dispose chunks no longer needed
         for (Iterator<Map.Entry<Long, Chunk>> it = chunks.entrySet().iterator(); it.hasNext();) {
@@ -232,6 +225,52 @@ public class TerrainManager {
 
     private void removeNeededChunk(int cx, int cz) {
         neededKeys.remove(key(cx, cz));
+    }
+
+    private void updateFeatureMaintenance(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
+        if (prevChunkX == Integer.MIN_VALUE || prevChunkZ == Integer.MIN_VALUE
+                || Math.abs(pcx - prevChunkX) > 1 || Math.abs(pcz - prevChunkZ) > 1) {
+            for (Chunk c : chunks.values()) {
+                c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
+                int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+                if (dist <= cacheFeatureRenderDist) {
+                    queueFeatureGeneration(c, pcx, pcz);
+                }
+            }
+            return;
+        }
+
+        int dx = pcx - prevChunkX;
+        int dz = pcz - prevChunkZ;
+        if (dx != 0) {
+            int newCol = pcx + cacheFeatureRenderDist * Integer.signum(dx);
+            int oldCol = pcx - cacheFeatureRenderDist - Integer.signum(dx);
+            for (int offset = -cacheFeatureRenderDist; offset <= cacheFeatureRenderDist; offset++) {
+                handleFeatureColumnChunk(newCol, pcz + offset, pcx, pcz);
+                handleFeatureColumnChunk(oldCol, pcz + offset, pcx, pcz);
+            }
+        }
+
+        if (dz != 0) {
+            int newRow = pcz + cacheFeatureRenderDist * Integer.signum(dz);
+            int oldRow = pcz - cacheFeatureRenderDist - Integer.signum(dz);
+            for (int offset = -cacheFeatureRenderDist; offset <= cacheFeatureRenderDist; offset++) {
+                handleFeatureColumnChunk(pcx + offset, newRow, pcx, pcz);
+                handleFeatureColumnChunk(pcx + offset, oldRow, pcx, pcz);
+            }
+        }
+    }
+
+    private void handleFeatureColumnChunk(int cx, int cz, int pcx, int pcz) {
+        Chunk c = chunks.get(key(cx, cz));
+        if (c == null) {
+            return;
+        }
+        c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
+        int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+        if (dist <= cacheFeatureRenderDist) {
+            queueFeatureGeneration(c, pcx, pcz);
+        }
     }
 
     public Chunk getChunk(int cx, int cz) {
@@ -458,6 +497,9 @@ public class TerrainManager {
 
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+            if (dist > renderDist) {
+                continue;
+            }
             c.drawTerrainAndFeatures(dist, featureDetailDistance, grassDetailDistance);
         }
 
@@ -465,7 +507,13 @@ public class TerrainManager {
     }
 
     public void drawWater() {
+        int pcx = lastUpdateChunkX;
+        int pcz = lastUpdateChunkZ;
         for (Chunk c : chunks.values()) {
+            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+            if (dist > renderDist) {
+                continue;
+            }
             c.drawWater();
         }
     }
