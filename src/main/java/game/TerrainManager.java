@@ -54,6 +54,7 @@ public class TerrainManager {
     private int shadowRenderDist;
     private int cacheRenderDist;
     private int cacheFeatureRenderDist;
+    private boolean renderDistanceDirty = true;
     private int lastUpdateChunkX = Integer.MIN_VALUE;
     private int lastUpdateChunkZ = Integer.MIN_VALUE;
     private final long seed;
@@ -128,6 +129,13 @@ public class TerrainManager {
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         drainCompletedChunkBuilds(pcx, pcz);
         drainCompletedFeatureGenerations(pcx, pcz);
+        if (renderDistanceDirty) {
+            rebuildNeededChunks(pcx, pcz);
+            reprioritizePendingQueues(pcx, pcz);
+            lastUpdateChunkX = pcx;
+            lastUpdateChunkZ = pcz;
+            renderDistanceDirty = false;
+        }
         boolean movedChunk = pcx != lastUpdateChunkX || pcz != lastUpdateChunkZ;
         if (!movedChunk) {
             processPendingChunkGenerations();
@@ -598,6 +606,7 @@ public class TerrainManager {
         renderDist = Math.max(1, r);
         cacheRenderDist = renderDist + 4;
         shadowRenderDist = Math.max(shadowRenderDist, renderDist + 12);
+        renderDistanceDirty = true;
     }
 
     public int getRenderDistance() {
@@ -617,6 +626,7 @@ public class TerrainManager {
         featureRenderDist = Math.max(0, r);
         cacheFeatureRenderDist = featureRenderDist + 4;
         shadowRenderDist = Math.max(shadowRenderDist, renderDist + 12);
+        renderDistanceDirty = true;
     }
 
     public int getFeatureRenderDistance() {
