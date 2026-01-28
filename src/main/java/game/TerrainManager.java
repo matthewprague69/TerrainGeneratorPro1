@@ -18,6 +18,8 @@ public class TerrainManager {
     private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 8;
     private static final long CHUNK_BUDGET_NS = 4_000_000L;
     private static final long FEATURE_BUDGET_NS = 6_000_000L;
+    private static final int MAX_APPLIED_CHUNKS_PER_FRAME = 4;
+    private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -355,7 +357,8 @@ public class TerrainManager {
 
     private void drainCompletedChunkBuilds(int pcx, int pcz) {
         Chunk.ChunkBuildData data;
-        while ((data = completedChunkBuilds.poll()) != null) {
+        int applied = 0;
+        while (applied < MAX_APPLIED_CHUNKS_PER_FRAME && (data = completedChunkBuilds.poll()) != null) {
             long key = key(data.cx, data.cz);
             inflightChunkKeys.remove(key);
             Integer pendingLod = pendingChunkLods.get(key);
@@ -378,12 +381,15 @@ public class TerrainManager {
             if (built.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
                 queueFeatureGeneration(built, pcx, pcz);
             }
+            applied++;
         }
     }
 
     private void drainCompletedFeatureGenerations(int pcx, int pcz) {
         Chunk.FeatureGenerationResult result;
-        while ((result = completedFeatureGenerations.poll()) != null) {
+        int applied = 0;
+        while (applied < MAX_APPLIED_FEATURES_PER_FRAME
+                && (result = completedFeatureGenerations.poll()) != null) {
             long key = key(result.cx, result.cz);
             inflightFeatureKeys.remove(key);
             Chunk chunk = chunks.get(key);
@@ -394,6 +400,7 @@ public class TerrainManager {
                 continue;
             }
             chunk.applyFeatureGenerationResult(result);
+            applied++;
         }
     }
 
