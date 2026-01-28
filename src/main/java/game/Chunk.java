@@ -690,12 +690,16 @@ public class Chunk {
         final double caveFreq = 0.06;
         final double caveThreshold = 0.55;
         final double caveDepth = 6.0;
+        final float caveMaxHeight = WATER_LEVEL - 1.0f;
         final double ravineChance = 1.0 / 300.0;
         final double ravineWidth = 0.12;
         final double ravineDepth = 30.0;
-        final double riverFreq = 0.0025;
-        final double riverWidth = 0.06;
+        final double riverFreq = 0.0018;
+        final double riverWidth = 0.045;
+        final double riverBlendWidth = 0.08;
         final double riverDepth = 6.0;
+        final double riverMaskFreq = 0.0009;
+        final double riverMaskThreshold = 0.25;
 
         long chunkSeed = FeatureUtil.hashSeed(cx, 12345, cz, seed);
         Random rand = new Random(chunkSeed);
@@ -714,7 +718,7 @@ public class Chunk {
                 double wz = (cz * SIZE + z) * scale;
 
                 double caveNoise = terrainNoise.eval(wx * caveFreq + 1000.0, wz * caveFreq - 500.0);
-                if (caveNoise > caveThreshold) {
+                if (caveNoise > caveThreshold && heights[x][z] < caveMaxHeight) {
                     double t = (caveNoise - caveThreshold) / (1.0 - caveThreshold);
                     heights[x][z] -= (float) (caveDepth * t);
                 }
@@ -734,14 +738,18 @@ public class Chunk {
 
                 double riverNoise = terrainNoise.eval(wx * riverFreq + 2200.0, wz * riverFreq - 1300.0);
                 double riverBand = Math.abs(riverNoise);
-                if (riverBand < riverWidth) {
-                    double t = (riverWidth - riverBand) / riverWidth;
-                    double shaped = t * t;
-                    double bankBlend = t * t * (3.0 - 2.0 * t);
-                    float riverFloor = WATER_LEVEL - 0.6f;
-                    float target = (float) (heights[x][z] - riverDepth * shaped);
-                    float blended = (float) (heights[x][z] * (1.0 - bankBlend) + target * bankBlend);
-                    heights[x][z] = Math.min(blended, riverFloor);
+                if (riverBand < riverBlendWidth) {
+                    double riverMask = terrainNoise.eval(wx * riverMaskFreq - 3400.0, wz * riverMaskFreq + 2600.0);
+                    if (Math.abs(riverMask) < riverMaskThreshold) {
+                        double t = (riverBlendWidth - riverBand) / riverBlendWidth;
+                        double bankBlend = t * t * (3.0 - 2.0 * t);
+                        double depthFactor = riverBand < riverWidth ? (riverWidth - riverBand) / riverWidth : 0.0;
+                        double shaped = depthFactor * depthFactor;
+                        float riverFloor = WATER_LEVEL - 0.6f;
+                        float target = (float) (heights[x][z] - riverDepth * shaped);
+                        float blended = (float) (heights[x][z] * (1.0 - bankBlend) + target * bankBlend);
+                        heights[x][z] = Math.min(blended, riverFloor);
+                    }
                 }
             }
         }
