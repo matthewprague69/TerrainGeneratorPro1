@@ -178,11 +178,12 @@ public class Main {
             terrain.update(player.getX(), player.getZ(), frustum);
             sky.update(dt);
 
-            float[] lightDir = sky.getShadowDirection();
+            float[] shadowDir = sky.getShadowDirection();
+            float[] lightDir = sky.getLightDirection();
             float lightStrength = sky.getSkyBrightness();
             float[] lightMatrix = shadowRenderer.renderShadowMap(
                     terrain,
-                    lightDir,
+                    shadowDir,
                     player.getX(),
                     player.getY(),
                     player.getZ(),
@@ -206,7 +207,12 @@ public class Main {
             float[] viewMatrix = readModelViewMatrix();
             float[] viewInverse = util.MatrixUtils.invert(viewMatrix);
 
-            shadowRenderer.beginScenePass(lightMatrix, lightDir, lightStrength, viewMatrix, viewInverse);
+            float[] fogSettings = terrain.getFogSettings();
+            float fogStart = fogSettings[0];
+            float fogEnd = fogSettings[1];
+            float[] fogColor = new float[] { fogSettings[2], fogSettings[3], fogSettings[4] };
+            shadowRenderer.beginScenePass(lightMatrix, lightDir, lightStrength, viewMatrix, viewInverse,
+                    fogStart, fogEnd, fogColor);
             terrain.drawTerrainAndFeatures(player.getX(), player.getZ());
             shadowRenderer.endScenePass();
             terrain.drawWater();
