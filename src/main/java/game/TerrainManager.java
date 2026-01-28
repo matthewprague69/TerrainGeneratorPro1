@@ -417,7 +417,23 @@ public class TerrainManager {
             if (built.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
                 queueFeatureGeneration(built, pcx, pcz);
             }
+            refreshNeighborEdges(built);
             applied++;
+        }
+    }
+
+    private void refreshNeighborEdges(Chunk chunk) {
+        Chunk right = getChunk(chunk.cx + 1, chunk.cz);
+        if (right != null) {
+            right.refreshAfterNeighborUpdate();
+        }
+        Chunk bottom = getChunk(chunk.cx, chunk.cz + 1);
+        if (bottom != null) {
+            bottom.refreshAfterNeighborUpdate();
+        }
+        Chunk bottomRight = getChunk(chunk.cx + 1, chunk.cz + 1);
+        if (bottomRight != null) {
+            bottomRight.refreshAfterNeighborUpdate();
         }
     }
 

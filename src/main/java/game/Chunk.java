@@ -1003,6 +1003,12 @@ public class Chunk {
         disposeGrassBatch();
     }
 
+    public void refreshAfterNeighborUpdate() {
+        stitchEdges();
+        buildTerrainBuffers();
+        buildWaterDisplayList();
+    }
+
     public OpenSimplexNoise getTerrainNoise() {
         return terrainNoise;
     }
