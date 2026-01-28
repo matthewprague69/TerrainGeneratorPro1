@@ -24,6 +24,7 @@ public class TerrainManager {
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
     private final Map<Long, Integer> pendingChunkLods = new HashMap<>();
+    private final Set<Long> pendingChunkQueueKeys = new HashSet<>();
     private final ArrayDeque<Chunk> pendingFeatureChunks = new ArrayDeque<>();
     private final Set<Long> pendingFeatureKeys = new HashSet<>();
     private final Set<Long> neededKeys = new HashSet<>();
@@ -239,13 +240,18 @@ public class TerrainManager {
         Integer existing = pendingChunkLods.get(key);
         if (existing != null) {
             pendingChunkLods.put(key, Math.min(existing, targetLOD));
+        } else {
+            pendingChunkLods.put(key, targetLOD);
+        }
+        if (inflightChunkKeys.contains(key)) {
             return;
         }
-        pendingChunkLods.put(key, targetLOD);
-        if (dist <= 2) {
-            pendingChunks.addFirst(key);
-        } else {
-            pendingChunks.addLast(key);
+        if (pendingChunkQueueKeys.add(key)) {
+            if (dist <= 2) {
+                pendingChunks.addFirst(key);
+            } else {
+                pendingChunks.addLast(key);
+            }
         }
     }
 
@@ -261,6 +267,7 @@ public class TerrainManager {
                 int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
                 if (dist > cacheRenderDist) {
                     pendingChunkLods.remove(key);
+                    pendingChunkQueueKeys.remove(key);
                     iterator.remove();
                     continue;
                 }
@@ -315,12 +322,16 @@ public class TerrainManager {
                 break;
             }
             long key = pendingChunks.pollFirst();
+            pendingChunkQueueKeys.remove(key);
             Integer pendingLod = pendingChunkLods.remove(key);
             if (pendingLod == null) {
                 continue;
             }
             if (inflightChunkKeys.contains(key)) {
                 pendingChunkLods.put(key, pendingLod);
+                if (pendingChunkQueueKeys.add(key)) {
+                    pendingChunks.addLast(key);
+                }
                 continue;
             }
             int cx = (int) (key >> 32);
@@ -395,11 +406,18 @@ public class TerrainManager {
         while (applied < MAX_APPLIED_CHUNKS_PER_FRAME && (data = completedChunkBuilds.poll()) != null) {
             long key = key(data.cx, data.cz);
             inflightChunkKeys.remove(key);
+            int dist = Math.max(Math.abs(data.cx - pcx), Math.abs(data.cz - pcz));
             Integer pendingLod = pendingChunkLods.get(key);
             if (pendingLod != null && pendingLod < data.lod) {
+                if (pendingChunkQueueKeys.add(key)) {
+                    if (dist <= 2) {
+                        pendingChunks.addFirst(key);
+                    } else {
+                        pendingChunks.addLast(key);
+                    }
+                }
                 continue;
             }
-            int dist = Math.max(Math.abs(data.cx - pcx), Math.abs(data.cz - pcz));
             if (dist > cacheRenderDist) {
                 continue;
             }
@@ -450,12 +468,15 @@ public class TerrainManager {
 
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
-        int featureDetailDistance = Math.max(1, featureRenderDist - 1);
+        int featureNearDistance = Math.max(1, featureRenderDist - 1);
+        int featureMidDistance = Math.max(featureNearDistance + 1, featureRenderDist);
+        int featureFarDistance = Math.max(featureMidDistance + 2, featureRenderDist + 2);
         int grassDetailDistance = Math.max(1, featureRenderDist - 2);
 
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            c.drawTerrainAndFeatures(dist, featureDetailDistance, grassDetailDistance);
+            c.drawTerrainAndFeatures(dist, featureNearDistance, featureMidDistance, featureFarDistance,
+                    grassDetailDistance);
         }
 
         disableFog();
@@ -470,15 +491,17 @@ public class TerrainManager {
     public void drawDepth(float wx, float wz) {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
-        int featureDetailDistance = Math.max(1, featureRenderDist - 1);
-        int grassDetailDistance = Math.max(1, featureRenderDist - 2);
+        int featureNearDistance = Math.max(1, featureRenderDist - 1);
+        int featureMidDistance = Math.max(featureNearDistance + 1, featureRenderDist);
+        int featureFarDistance = Math.max(featureMidDistance + 2, featureRenderDist + 2);
+        int shadowFeatureDistance = Math.max(1, featureRenderDist);
 
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
             if (dist > shadowRenderDist) {
                 continue;
             }
-            c.renderDepth(dist, featureDetailDistance, grassDetailDistance);
+            c.renderDepth(dist, featureNearDistance, featureMidDistance, featureFarDistance, shadowFeatureDistance);
         }
     }
 

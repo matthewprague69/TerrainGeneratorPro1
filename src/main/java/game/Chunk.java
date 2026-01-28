@@ -363,7 +363,13 @@ public class Chunk {
         }
     }
 
-    public void drawTerrainAndFeatures(int chunkDistance, int featureDetailDistance, int grassDetailDistance) {
+    private static final int FEATURE_LOD_NEAR = 0;
+    private static final int FEATURE_LOD_MID = 1;
+    private static final int FEATURE_LOD_FAR = 2;
+    private static final int FEATURE_LOD_NONE = 3;
+
+    public void drawTerrainAndFeatures(int chunkDistance, int featureNearDistance, int featureMidDistance,
+            int featureFarDistance, int grassDetailDistance) {
         glEnable(GL_TEXTURE_2D);
         glColor3f(1f, 1f, 1f);
 
@@ -374,13 +380,21 @@ public class Chunk {
 
         glDisable(GL_TEXTURE_2D);
 
-        boolean simplified = chunkDistance > featureDetailDistance;
+        int featureLod = getFeatureLod(chunkDistance, featureNearDistance, featureMidDistance, featureFarDistance);
+        if (featureLod == FEATURE_LOD_NONE) {
+            return;
+        }
+        boolean simplified = featureLod != FEATURE_LOD_NEAR;
+        boolean far = featureLod == FEATURE_LOD_FAR;
         // Draw features if they are above water
         for (Feature f : features) {
             if (f instanceof Grass) {
                 continue;
             }
-            if (simplified && f instanceof Flower) {
+            if (far && (f instanceof Flower)) {
+                continue;
+            }
+            if (far && !(f instanceof Tree) && !(f instanceof Cactus)) {
                 continue;
             }
             if (f.y >= WATER_LEVEL) {
@@ -423,6 +437,8 @@ public class Chunk {
                 addTriangle(builders, x + step, z, x + step, z + step, x, z + step, y10, y11, y01, texScale);
             }
         }
+        float skirtDepth = 2.5f;
+        addSkirtEdges(builders, texScale, step, skirtDepth);
 
         for (Map.Entry<Integer, FloatBuilder> entry : builders.entrySet()) {
             FloatBuilder builder = entry.getValue();
@@ -435,6 +451,54 @@ public class Chunk {
             glBindBuffer(GL_ARRAY_BUFFER, 0);
             terrainBatches.add(new TerrainBatch(entry.getKey(), vboId, builder.size / STRIDE_FLOATS));
         }
+    }
+
+    private void addSkirtEdges(Map<Integer, FloatBuilder> builders, float texScale, int step, float skirtDepth) {
+        int max = SIZE;
+        for (int x = 0; x < SIZE; x += step) {
+            if (x + step > SIZE) {
+                continue;
+            }
+            addSkirtQuad(builders, x, 0, x + step, 0, heights[x][0], heights[x + step][0], texScale, skirtDepth);
+            addSkirtQuad(builders, x, max, x + step, max, heights[x][max], heights[x + step][max], texScale,
+                    skirtDepth);
+        }
+        for (int z = 0; z < SIZE; z += step) {
+            if (z + step > SIZE) {
+                continue;
+            }
+            addSkirtQuad(builders, 0, z, 0, z + step, heights[0][z], heights[0][z + step], texScale, skirtDepth);
+            addSkirtQuad(builders, max, z, max, z + step, heights[max][z], heights[max][z + step], texScale,
+                    skirtDepth);
+        }
+    }
+
+    private void addSkirtQuad(Map<Integer, FloatBuilder> builders, int x1, int z1, int x2, int z2, float y1, float y2,
+            float texScale, float skirtDepth) {
+        addSkirtTriangle(builders, x1, z1, x2, z2, x2, z2, y1, y2, y2 - skirtDepth, texScale);
+        addSkirtTriangle(builders, x1, z1, x2, z2, x1, z1, y1, y2 - skirtDepth, y1 - skirtDepth, texScale);
+    }
+
+    private void addSkirtTriangle(Map<Integer, FloatBuilder> builders, int x1, int z1, int x2, int z2, int x3, int z3,
+            float y1, float y2, float y3, float texScale) {
+        float slope = (computeSlope(x1, z1) + computeSlope(x2, z2)) * 0.5f;
+        float height = Math.max(y1, Math.max(y2, y3));
+        int tex = isRiverBed(x1, z1, y1) || isRiverBed(x2, z2, y2) || isRiverBed(x3, z3, y3)
+                ? manager.getTexture(biome.rockTex)
+                : pickTexture(height, slope);
+
+        FloatBuilder builder = builders.computeIfAbsent(tex, key -> new FloatBuilder());
+        float wx1 = (cx * SIZE + x1) * scale;
+        float wz1 = (cz * SIZE + z1) * scale;
+        float wx2 = (cx * SIZE + x2) * scale;
+        float wz2 = (cz * SIZE + z2) * scale;
+        float wx3 = (cx * SIZE + x3) * scale;
+        float wz3 = (cz * SIZE + z3) * scale;
+        float[] normal = computeNormalExplicit(wx1, y1, wz1, wx2, y2, wz2, wx3, y3, wz3);
+
+        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx2, y2, wz2, normal, x2 * texScale, z2 * texScale);
+        builder.putVertex(wx3, y3, wz3, normal, x3 * texScale, z3 * texScale);
     }
 
     private void buildWaterGeometry() {
@@ -575,7 +639,8 @@ public class Chunk {
         glDisableClientState(GL_VERTEX_ARRAY);
     }
 
-    public void renderDepth(int chunkDistance, int featureDetailDistance, int grassDetailDistance) {
+    public void renderDepth(int chunkDistance, int featureNearDistance, int featureMidDistance, int featureFarDistance,
+            int shadowFeatureDistance) {
         if (terrainBatches.isEmpty()) {
             return;
         }
@@ -592,11 +657,14 @@ public class Chunk {
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glDisableClientState(GL_VERTEX_ARRAY);
 
-        if (chunkDistance <= grassDetailDistance) {
+        int featureLod = getFeatureLod(chunkDistance, featureNearDistance, featureMidDistance, featureFarDistance);
+        if (featureLod == FEATURE_LOD_NONE || featureLod == FEATURE_LOD_FAR || chunkDistance > shadowFeatureDistance) {
+            return;
+        }
+        if (featureLod == FEATURE_LOD_NEAR) {
             renderGrassBatchDepth();
         }
-
-        boolean simplified = chunkDistance > featureDetailDistance;
+        boolean simplified = featureLod != FEATURE_LOD_NEAR;
         for (Feature f : features) {
             if (f instanceof Grass) {
                 continue;
@@ -612,6 +680,20 @@ public class Chunk {
                 }
             }
         }
+    }
+
+    private int getFeatureLod(int chunkDistance, int featureNearDistance, int featureMidDistance,
+            int featureFarDistance) {
+        if (chunkDistance > featureFarDistance) {
+            return FEATURE_LOD_NONE;
+        }
+        if (chunkDistance > featureMidDistance) {
+            return FEATURE_LOD_FAR;
+        }
+        if (chunkDistance > featureNearDistance) {
+            return FEATURE_LOD_MID;
+        }
+        return FEATURE_LOD_NEAR;
     }
 
     private void addTriangle(Map<Integer, FloatBuilder> builders, int x1, int z1, int x2, int z2, int x3, int z3,
@@ -1049,6 +1131,22 @@ public class Chunk {
 
         float[] u = { p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2] };
         float[] v = { p3[0] - p1[0], p3[1] - p1[1], p3[2] - p1[2] };
+
+        float nx = u[1] * v[2] - u[2] * v[1];
+        float ny = u[2] * v[0] - u[0] * v[2];
+        float nz = u[0] * v[1] - u[1] * v[0];
+
+        float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (len == 0f) {
+            return new float[] { 0f, 1f, 0f };
+        }
+        return new float[] { nx / len, ny / len, nz / len };
+    }
+
+    private float[] computeNormalExplicit(float x1, float y1, float z1, float x2, float y2, float z2,
+            float x3, float y3, float z3) {
+        float[] u = { x2 - x1, y2 - y1, z2 - z1 };
+        float[] v = { x3 - x1, y3 - y1, z3 - z1 };
 
         float nx = u[1] * v[2] - u[2] * v[1];
         float ny = u[2] * v[0] - u[0] * v[2];
