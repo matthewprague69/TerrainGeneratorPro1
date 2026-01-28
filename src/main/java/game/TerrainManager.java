@@ -401,6 +401,7 @@ public class TerrainManager {
     }
 
     private void processPendingFeatureGenerations(int pcx, int pcz) {
+        prunePendingFeatureQueue(pcx, pcz, 32);
         int backlog = pendingFeatureChunks.size();
         int budget = MAX_FEATURE_CHUNKS_PER_FRAME + Math.min(6, backlog / 12);
         int count = 0;
@@ -434,7 +435,8 @@ public class TerrainManager {
     private void drainCompletedChunkBuilds(int pcx, int pcz) {
         Chunk.ChunkBuildData data;
         int applied = 0;
-        while (applied < MAX_APPLIED_CHUNKS_PER_FRAME && (data = completedChunkBuilds.poll()) != null) {
+        int maxApplied = MAX_APPLIED_CHUNKS_PER_FRAME + Math.min(4, completedChunkBuilds.size() / 8);
+        while (applied < maxApplied && (data = completedChunkBuilds.poll()) != null) {
             long key = key(data.cx, data.cz);
             inflightChunkKeys.remove(key);
             Integer pendingLod = pendingChunkLods.get(key);
@@ -464,7 +466,8 @@ public class TerrainManager {
     private void drainCompletedFeatureGenerations(int pcx, int pcz) {
         Chunk.FeatureGenerationResult result;
         int applied = 0;
-        while (applied < MAX_APPLIED_FEATURES_PER_FRAME
+        int maxApplied = MAX_APPLIED_FEATURES_PER_FRAME + Math.min(6, completedFeatureGenerations.size() / 10);
+        while (applied < maxApplied
                 && (result = completedFeatureGenerations.poll()) != null) {
             long key = key(result.cx, result.cz);
             inflightFeatureKeys.remove(key);
@@ -477,6 +480,30 @@ public class TerrainManager {
             }
             chunk.applyFeatureGenerationResult(result);
             applied++;
+        }
+    }
+
+    private void prunePendingFeatureQueue(int pcx, int pcz, int budget) {
+        if (pendingFeatureChunks.isEmpty()) {
+            return;
+        }
+        Iterator<Chunk> iterator = pendingFeatureChunks.iterator();
+        int checked = 0;
+        while (iterator.hasNext() && checked < budget) {
+            Chunk chunk = iterator.next();
+            long key = key(chunk.cx, chunk.cz);
+            if (chunks.get(key) != chunk) {
+                pendingFeatureKeys.remove(key);
+                iterator.remove();
+                checked++;
+                continue;
+            }
+            int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
+            if (dist > cacheFeatureRenderDist || !chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                pendingFeatureKeys.remove(key);
+                iterator.remove();
+            }
+            checked++;
         }
     }
 
