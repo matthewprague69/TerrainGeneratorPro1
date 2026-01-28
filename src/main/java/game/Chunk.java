@@ -1,6 +1,7 @@
 package game;
 import generators.LakeGenerator;
 import objects.BatchableFeature;
+import objects.Cactus;
 import objects.Feature;
 import objects.Flower;
 import objects.Grass;
@@ -17,6 +18,13 @@ import java.util.*;
 
 public class Chunk {
     public static final int SIZE = 30;
+    private static final float SKIRT_DEPTH = 6f;
+    private enum FeatureLod {
+        FULL,
+        SIMPLIFIED,
+        FAR,
+        CULLED
+    }
     public final int cx, cz;
     private final OpenSimplexNoise terrainNoise;
     private final float scale;
@@ -374,21 +382,18 @@ public class Chunk {
 
         glDisable(GL_TEXTURE_2D);
 
-        boolean simplified = chunkDistance > featureDetailDistance;
+        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
+                featureDetailDistance + 3);
         // Draw features if they are above water
         for (Feature f : features) {
             if (f instanceof Grass) {
                 continue;
             }
-            if (simplified && f instanceof Flower) {
+            if (!shouldDrawFeatureForLod(f, lod)) {
                 continue;
             }
             if (f.y >= WATER_LEVEL) {
-                if (simplified) {
-                    f.drawSimplified();
-                } else {
-                    f.draw();
-                }
+                drawFeatureForLod(f, lod);
             }
         }
     }
@@ -423,6 +428,8 @@ public class Chunk {
                 addTriangle(builders, x + step, z, x + step, z + step, x, z + step, y10, y11, y01, texScale);
             }
         }
+
+        addSkirts(builders, step, texScale);
 
         for (Map.Entry<Integer, FloatBuilder> entry : builders.entrySet()) {
             FloatBuilder builder = entry.getValue();
@@ -596,22 +603,115 @@ public class Chunk {
             renderGrassBatchDepth();
         }
 
-        boolean simplified = chunkDistance > featureDetailDistance;
+        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
+                featureDetailDistance + 2);
         for (Feature f : features) {
             if (f instanceof Grass) {
                 continue;
             }
-            if (simplified && f instanceof Flower) {
+            if (!shouldDrawFeatureForLod(f, lod)) {
                 continue;
             }
             if (f.y >= WATER_LEVEL) {
-                if (simplified) {
-                    f.drawSimplified();
-                } else {
-                    f.drawDepth();
-                }
+                drawFeatureDepthForLod(f, lod);
             }
         }
+    }
+
+    private FeatureLod getFeatureLod(int chunkDistance, int simplifiedDistance, int farDistance, int cullDistance) {
+        if (chunkDistance > cullDistance) {
+            return FeatureLod.CULLED;
+        }
+        if (chunkDistance > farDistance) {
+            return FeatureLod.FAR;
+        }
+        if (chunkDistance > simplifiedDistance) {
+            return FeatureLod.SIMPLIFIED;
+        }
+        return FeatureLod.FULL;
+    }
+
+    private boolean shouldDrawFeatureForLod(Feature feature, FeatureLod lod) {
+        if (lod == FeatureLod.CULLED) {
+            return false;
+        }
+        if (lod == FeatureLod.FAR) {
+            return feature instanceof Tree || feature instanceof Lake;
+        }
+        if (lod == FeatureLod.SIMPLIFIED) {
+            return !(feature instanceof Flower) && !(feature instanceof Cactus);
+        }
+        return true;
+    }
+
+    private void drawFeatureForLod(Feature feature, FeatureLod lod) {
+        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.FAR) {
+            feature.drawSimplified();
+        } else {
+            feature.draw();
+        }
+    }
+
+    private void drawFeatureDepthForLod(Feature feature, FeatureLod lod) {
+        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.FAR) {
+            feature.drawSimplified();
+        } else {
+            feature.drawDepth();
+        }
+    }
+
+    private void addSkirts(Map<Integer, FloatBuilder> builders, int step, float texScale) {
+        for (int x = 0; x < SIZE; x += step) {
+            if (x + step > SIZE) {
+                continue;
+            }
+            addSkirtQuad(builders, x, 0, x + step, 0, heights[x][0], heights[x + step][0], texScale);
+            addSkirtQuad(builders, x, SIZE, x + step, SIZE, heights[x][SIZE], heights[x + step][SIZE], texScale);
+        }
+
+        for (int z = 0; z < SIZE; z += step) {
+            if (z + step > SIZE) {
+                continue;
+            }
+            addSkirtQuad(builders, 0, z, 0, z + step, heights[0][z], heights[0][z + step], texScale);
+            addSkirtQuad(builders, SIZE, z, SIZE, z + step, heights[SIZE][z], heights[SIZE][z + step], texScale);
+        }
+    }
+
+    private void addSkirtQuad(Map<Integer, FloatBuilder> builders, int x1, int z1, int x2, int z2,
+                              float y1, float y2, float texScale) {
+        int tex = manager.getTexture(biome.rockTex);
+        FloatBuilder builder = builders.computeIfAbsent(tex, key -> new FloatBuilder());
+        float[] normal = computeSkirtNormal(x1, z1, x2, z2);
+
+        float wx1 = (cx * SIZE + x1) * scale;
+        float wz1 = (cz * SIZE + z1) * scale;
+        float wx2 = (cx * SIZE + x2) * scale;
+        float wz2 = (cz * SIZE + z2) * scale;
+
+        float y1b = y1 - SKIRT_DEPTH;
+        float y2b = y2 - SKIRT_DEPTH;
+
+        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx2, y2, wz2, normal, x2 * texScale, z2 * texScale);
+        builder.putVertex(wx2, y2b, wz2, normal, x2 * texScale, z2 * texScale);
+
+        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx2, y2b, wz2, normal, x2 * texScale, z2 * texScale);
+        builder.putVertex(wx1, y1b, wz1, normal, x1 * texScale, z1 * texScale);
+    }
+
+    private float[] computeSkirtNormal(int x1, int z1, int x2, int z2) {
+        float dx = (x2 - x1) * scale;
+        float dz = (z2 - z1) * scale;
+        float nx = dz;
+        float ny = 0f;
+        float nz = -dx;
+        float length = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (length < 0.0001f) {
+            return new float[] { 0f, 1f, 0f };
+        }
+        return new float[] { nx / length, ny / length, nz / length };
     }
 
     private void addTriangle(Map<Integer, FloatBuilder> builders, int x1, int z1, int x2, int z2, int x3, int z3,

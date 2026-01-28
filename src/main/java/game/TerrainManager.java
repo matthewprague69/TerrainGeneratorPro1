@@ -397,7 +397,9 @@ public class TerrainManager {
             inflightChunkKeys.remove(key);
             Integer pendingLod = pendingChunkLods.get(key);
             if (pendingLod != null && pendingLod < data.lod) {
-                continue;
+                if (!pendingChunks.contains(key)) {
+                    pendingChunks.addFirst(key);
+                }
             }
             int dist = Math.max(Math.abs(data.cx - pcx), Math.abs(data.cz - pcz));
             if (dist > cacheRenderDist) {
