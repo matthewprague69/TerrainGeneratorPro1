@@ -21,6 +21,7 @@ public class TerrainManager {
     private final Map<Long, Integer> pendingChunkLods = new HashMap<>();
     private final ArrayDeque<Chunk> pendingFeatureChunks = new ArrayDeque<>();
     private final Set<Long> pendingFeatureKeys = new HashSet<>();
+    private final Set<Long> neededKeys = new HashSet<>();
     private final OpenSimplexNoise terrainNoise;
     private final BiomeRegionGenerator regionGenerator;
     private final SkyRenderer skyRenderer;
@@ -112,7 +113,7 @@ public class TerrainManager {
         }
         lastUpdateChunkX = pcx;
         lastUpdateChunkZ = pcz;
-        Set<Long> needed = new HashSet<>();
+        neededKeys.clear();
 
         for (int dx = -renderDist; dx <= renderDist; dx++) {
             for (int dz = -renderDist; dz <= renderDist; dz++) {
@@ -121,7 +122,7 @@ public class TerrainManager {
 
                 Chunk existing = chunks.get(k);
 
-                needed.add(k);
+                neededKeys.add(k);
 
 
                 int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
@@ -158,7 +159,7 @@ public class TerrainManager {
         // Dispose chunks no longer needed
         for (Iterator<Map.Entry<Long, Chunk>> it = chunks.entrySet().iterator(); it.hasNext();) {
             Map.Entry<Long, Chunk> entry = it.next();
-            if (!needed.contains(entry.getKey())) {
+            if (!neededKeys.contains(entry.getKey())) {
                 int cx = (int) (entry.getKey() >> 32);
                 int cz = (int) entry.getKey().intValue();
                 int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
