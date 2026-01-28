@@ -618,7 +618,7 @@ public class Chunk {
             float y1, float y2, float y3, float texScale) {
         float slope = (computeSlope(x1, z1) + computeSlope(x2, z2) + computeSlope(x3, z3)) / 3f;
         float height = Math.max(y1, Math.max(y2, y3));
-        int tex = isRiverCell(x1, z1) || isRiverCell(x2, z2) || isRiverCell(x3, z3)
+        int tex = isRiverBed(x1, z1, y1) || isRiverBed(x2, z2, y2) || isRiverBed(x3, z3, y3)
                 ? manager.getTexture(biome.rockTex)
                 : pickTexture(height, slope);
 
@@ -641,7 +641,7 @@ public class Chunk {
             float texScale) {
         float slope = (computeSlope(x1, z1) + computeSlope(x2, z2) + computeSlope(x3, z3)) / 3f;
         float height = Math.max(y1, Math.max(y2, y3));
-        int tex = isRiverCell(x1, z1) || isRiverCell(x2, z2) || isRiverCell(x3, z3)
+        int tex = isRiverBed(x1, z1, y1) || isRiverBed(x2, z2, y2) || isRiverBed(x3, z3, y3)
                 ? manager.getTexture(biome.rockTex)
                 : pickTexture(height, slope);
 
@@ -716,11 +716,14 @@ public class Chunk {
     private static void applyCavesAndRavines(float[][] heights, float[][] riverSurface, int cx, int cz, float scale,
                                              OpenSimplexNoise terrainNoise, long seed) {
         final double riverFreq = 0.0018;
-        final double riverWidth = 0.08;
-        final double riverBlendWidth = 0.18;
-        final double riverDepth = 6.5;
+        final double riverWidth = 0.065;
+        final double riverBlendWidth = 0.14;
+        final double riverDepth = 5.4;
         final double riverMaskFreq = 0.0009;
-        final double riverMaskThreshold = 0.35;
+        final double riverMaskThreshold = 0.38;
+        final float ridgeOffset = 0.7f;
+        final float surfaceNoiseAmp = 0.35f;
+        final float flowSlopeScale = 0.00045f;
 
         for (int x = 0; x <= SIZE; x++) {
             for (int z = 0; z <= SIZE; z++) {
@@ -737,17 +740,17 @@ public class Chunk {
                     if (maskBlend > 0.001) {
                         double t = (riverBlendWidth - riverBand) / riverBlendWidth;
                         double bankBlend = t * t * (3.0 - 2.0 * t) * maskBlend;
-                        double localWidth = riverWidth * (0.85 + 0.5 * (terrainNoise.eval(wx * 0.002, wz * 0.002) * 0.5 + 0.5));
+                        double localWidth = riverWidth * (0.8 + 0.35 * (terrainNoise.eval(wx * 0.002, wz * 0.002) * 0.5 + 0.5));
                         double depthFactor = riverBand < localWidth ? (localWidth - riverBand) / localWidth : 0.0;
                         depthFactor = depthFactor * depthFactor * (3.0 - 2.0 * depthFactor) * maskBlend;
                         float baseHeight = heights[x][z];
-                        float surfaceNoise = (float) (terrainNoise.eval(wx * 0.0012 + 1200.0, wz * 0.0012 - 800.0) * 1.5);
+                        float surfaceNoise = (float) (terrainNoise.eval(wx * 0.00012 + 1200.0, wz * 0.00012 - 800.0) * surfaceNoiseAmp);
                         double flowAngle = terrainNoise.eval(wx * 0.0006 - 2000.0, wz * 0.0006 + 1500.0) * Math.PI;
                         double flowX = Math.cos(flowAngle);
                         double flowZ = Math.sin(flowAngle);
-                        float flowSlope = (float) ((wx * flowX + wz * flowZ) * 0.0003);
-                        float riverSurfaceHeight = baseHeight - 0.8f + surfaceNoise - flowSlope;
-                        riverSurfaceHeight = Math.min(baseHeight - 0.3f, riverSurfaceHeight);
+                        float flowSlope = (float) ((wx * flowX + wz * flowZ) * flowSlopeScale);
+                        float riverSurfaceHeight = baseHeight - ridgeOffset + surfaceNoise - flowSlope;
+                        riverSurfaceHeight = Math.min(baseHeight - ridgeOffset * 0.5f, riverSurfaceHeight);
                         float depthNoise = (float) (terrainNoise.eval(wx * 0.004 - 2200.0, wz * 0.004 + 1900.0) * 0.5 + 0.5);
                         float target = baseHeight - (float) (riverDepth * (0.6f + 0.6f * depthNoise) * depthFactor);
                         float blended = (float) (baseHeight * (1.0 - bankBlend) + target * bankBlend);
@@ -828,6 +831,13 @@ public class Chunk {
 
     private boolean isRiverCell(int x, int z) {
         return riverSurface[x][z] > Float.NEGATIVE_INFINITY / 2;
+    }
+
+    private boolean isRiverBed(int x, int z, float height) {
+        if (!isRiverCell(x, z)) {
+            return false;
+        }
+        return height <= riverSurface[x][z] + 0.02f;
     }
 
 
