@@ -28,6 +28,7 @@ public class Main {
     private final int windowedWidth = 1600;
     private final int windowedHeight = 1200;
     private long primaryMonitor;
+    private boolean menuOpen = false;
 
     private void init() {
         GLFWErrorCallback.createPrint(System.err).set();
@@ -62,7 +63,11 @@ public class Main {
 
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         glfwSetCursorPos(window, 400, 300);
-        glfwSetCursorPosCallback(window, (win, xpos, ypos) -> player.onMouseMove(xpos, ypos));
+        glfwSetCursorPosCallback(window, (win, xpos, ypos) -> {
+            if (!menuOpen) {
+                player.onMouseMove(xpos, ypos);
+            }
+        });
 
         primaryMonitor = glfwGetPrimaryMonitor();
         glfwShowWindow(window);
@@ -127,6 +132,18 @@ public class Main {
         UIRenderer.end2D();
     }
 
+    private void drawMenuOverlay() {
+        UIRenderer.begin2D(windowedWidth, windowedHeight);
+        glColor3f(1f, 1f, 1f);
+        PixelTextRenderer.drawText("PAUSE MENU (ESC)", 30, 1120, 1.4f);
+        PixelTextRenderer.drawText("1 / 2  Terrain render distance: " + terrain.getRenderDistance(), 30, 1080, 1.0f);
+        PixelTextRenderer.drawText("3 / 4  Feature render distance: " + terrain.getFeatureRenderDistance(), 30, 1055, 1.0f);
+        PixelTextRenderer.drawText("5 / 6  Shadow render distance: " + terrain.getShadowRenderDistance(), 30, 1030, 1.0f);
+        PixelTextRenderer.drawText("Time of day: " + String.format("%.2f", sky.getTimeOfDay()), 30, 1005, 1.0f);
+        PixelTextRenderer.drawText("Close menu: ESC", 30, 980, 1.0f);
+        UIRenderer.end2D();
+    }
+
     private void loop() {
         glEnable(GL_DEPTH_TEST);
 
@@ -136,6 +153,13 @@ public class Main {
         boolean prevT = false;
         boolean prevZ = false;
         boolean prevP = false;
+        boolean prevEsc = false;
+        boolean prev1 = false;
+        boolean prev2 = false;
+        boolean prev3 = false;
+        boolean prev4 = false;
+        boolean prev5 = false;
+        boolean prev6 = false;
 
         while (!glfwWindowShouldClose(window)) {
             double now = glfwGetTime();
@@ -143,6 +167,14 @@ public class Main {
             lastTime = now;
 
             glfwPollEvents();
+
+            boolean currEsc = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+            if (currEsc && !prevEsc) {
+                menuOpen = !menuOpen;
+                glfwSetInputMode(window, GLFW_CURSOR,
+                        menuOpen ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+            }
+            prevEsc = currEsc;
 
             if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) {
                 toggleFullscreen();
@@ -157,32 +189,70 @@ public class Main {
             boolean shiftHeld = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
                     || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
 
-            // T: Adjust render distance
-            if (currT && !prevT) {
-                int delta = shiftHeld ? -1 : 1;
-                terrain.setRenderDistance(terrain.getRenderDistance() + delta);
-            }
+            if (!menuOpen) {
+                // T: Adjust render distance
+                if (currT && !prevT) {
+                    int delta = shiftHeld ? -1 : 1;
+                    terrain.setRenderDistance(terrain.getRenderDistance() + delta);
+                }
 
-            // Z: Adjust feature render distance
-            if (currZ && !prevZ) {
-                int delta = shiftHeld ? -1 : 1;
-                terrain.setFeatureRenderDistance(terrain.getFeatureRenderDistance() + delta);
+                // Z: Adjust feature render distance
+                if (currZ && !prevZ) {
+                    int delta = shiftHeld ? -1 : 1;
+                    terrain.setFeatureRenderDistance(terrain.getFeatureRenderDistance() + delta);
+                }
+            } else {
+                boolean curr1 = glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS;
+                boolean curr2 = glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS;
+                boolean curr3 = glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS;
+                boolean curr4 = glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS;
+                boolean curr5 = glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS;
+                boolean curr6 = glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS;
+
+                if (curr1 && !prev1) {
+                    terrain.setRenderDistance(terrain.getRenderDistance() + 1);
+                }
+                if (curr2 && !prev2) {
+                    terrain.setRenderDistance(terrain.getRenderDistance() - 1);
+                }
+                if (curr3 && !prev3) {
+                    terrain.setFeatureRenderDistance(terrain.getFeatureRenderDistance() + 1);
+                }
+                if (curr4 && !prev4) {
+                    terrain.setFeatureRenderDistance(terrain.getFeatureRenderDistance() - 1);
+                }
+                if (curr5 && !prev5) {
+                    terrain.setShadowRenderDistance(terrain.getShadowRenderDistance() + 1);
+                }
+                if (curr6 && !prev6) {
+                    terrain.setShadowRenderDistance(terrain.getShadowRenderDistance() - 1);
+                }
+
+                prev1 = curr1;
+                prev2 = curr2;
+                prev3 = curr3;
+                prev4 = curr4;
+                prev5 = curr5;
+                prev6 = curr6;
             }
 
             // Update previous key states
             prevT = currT;
             prevZ = currZ;
 
-            player.update(window, dt);
+            if (!menuOpen) {
+                player.update(window, dt);
+            }
             Frustum frustum = Frustum.fromOpenGL();
             terrain.update(player.getX(), player.getZ(), frustum);
             sky.update(dt);
 
-            float[] lightDir = sky.getShadowDirection();
+            float[] shadowDir = sky.getShadowDirection();
+            float[] lightDir = sky.getLightDirection();
             float lightStrength = sky.getSkyBrightness();
             float[] lightMatrix = shadowRenderer.renderShadowMap(
                     terrain,
-                    lightDir,
+                    shadowDir,
                     player.getX(),
                     player.getY(),
                     player.getZ(),
@@ -206,13 +276,22 @@ public class Main {
             float[] viewMatrix = readModelViewMatrix();
             float[] viewInverse = util.MatrixUtils.invert(viewMatrix);
 
-            shadowRenderer.beginScenePass(lightMatrix, lightDir, lightStrength, viewMatrix, viewInverse);
+            float[] fogSettings = terrain.getFogSettings();
+            float fogStart = fogSettings[0];
+            float fogEnd = fogSettings[1];
+            float[] fogColor = new float[] { fogSettings[2], fogSettings[3], fogSettings[4] };
+            shadowRenderer.beginScenePass(lightMatrix, lightDir, lightStrength, viewMatrix, viewInverse,
+                    fogStart, fogEnd, fogColor);
             terrain.drawTerrainAndFeatures(player.getX(), player.getZ());
             shadowRenderer.endScenePass();
             terrain.drawWater();
 
             sky.renderSunAndMoon(player.getX(), player.getY(), player.getZ());
-            drawInfoOverlay();
+            if (menuOpen) {
+                drawMenuOverlay();
+            } else {
+                drawInfoOverlay();
+            }
 
             glfwSwapBuffers(window);
 
