@@ -407,7 +407,7 @@ public class Chunk {
     private void buildTerrainBuffers() {
         disposeTerrainBuffers();
         Map<Integer, FloatBuilder> builders = new HashMap<>();
-        float texScale = 0.2f;
+        float texScale = 0.2f / (1f + lod * 0.5f);
         int step = (int) Math.pow(2, lod);
         for (int z = 0; z < SIZE; z += step) {
             for (int x = 0; x < SIZE; x += step) {
