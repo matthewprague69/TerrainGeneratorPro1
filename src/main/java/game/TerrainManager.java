@@ -45,6 +45,7 @@ public class TerrainManager {
     private final OpenSimplexNoise terrainNoise;
     private final BiomeRegionGenerator regionGenerator;
     private final SkyRenderer skyRenderer;
+    private final FloatBuffer fogColorBuffer = BufferUtils.createFloatBuffer(4);
 
 
     private final float scale;
@@ -133,39 +134,11 @@ public class TerrainManager {
             processPendingFeatureGenerations(pcx, pcz);
             return;
         }
+        int prevChunkX = lastUpdateChunkX;
+        int prevChunkZ = lastUpdateChunkZ;
         lastUpdateChunkX = pcx;
         lastUpdateChunkZ = pcz;
-        neededKeys.clear();
-
-        for (int dx = -renderDist; dx <= renderDist; dx++) {
-            for (int dz = -renderDist; dz <= renderDist; dz++) {
-                int cx = pcx + dx, cz = pcz + dz;
-                long k = key(cx, cz);
-
-                Chunk existing = chunks.get(k);
-
-                neededKeys.add(k);
-
-
-                int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
-                int targetLOD = 0;
-                /*
-                 * if (dist >= 15)
-                 * targetLOD = 3;
-                 * else if (dist >= 10)
-                 * targetLOD = 2;
-                 * else if (dist >= 5)
-                 * targetLOD = 1;
-                 */
-
-                if (existing == null) {
-                    queueChunkGeneration(k, cx, cz, targetLOD, dist);
-                } else if (targetLOD < existing.getLOD()) {
-                    queueChunkGeneration(k, cx, cz, targetLOD, dist);
-                }
-
-            }
-        }
+        updateNeededChunks(pcx, pcz, prevChunkX, prevChunkZ);
 
         reprioritizePendingQueues(pcx, pcz);
 
@@ -195,6 +168,70 @@ public class TerrainManager {
 
         processPendingChunkGenerations();
         processPendingFeatureGenerations(pcx, pcz);
+    }
+
+    private void updateNeededChunks(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
+        if (neededKeys.isEmpty() || Math.abs(pcx - prevChunkX) > 1 || Math.abs(pcz - prevChunkZ) > 1) {
+            rebuildNeededChunks(pcx, pcz);
+            return;
+        }
+
+        int dx = pcx - prevChunkX;
+        int dz = pcz - prevChunkZ;
+        if (dx != 0) {
+            int newCol = pcx + renderDist * Integer.signum(dx);
+            int oldCol = pcx - renderDist - Integer.signum(dx);
+            for (int offset = -renderDist; offset <= renderDist; offset++) {
+                addNeededChunk(newCol, pcz + offset, pcx, pcz);
+                removeNeededChunk(oldCol, pcz + offset);
+            }
+        }
+
+        if (dz != 0) {
+            int newRow = pcz + renderDist * Integer.signum(dz);
+            int oldRow = pcz - renderDist - Integer.signum(dz);
+            for (int offset = -renderDist; offset <= renderDist; offset++) {
+                addNeededChunk(pcx + offset, newRow, pcx, pcz);
+                removeNeededChunk(pcx + offset, oldRow);
+            }
+        }
+    }
+
+    private void rebuildNeededChunks(int pcx, int pcz) {
+        neededKeys.clear();
+
+        for (int dx = -renderDist; dx <= renderDist; dx++) {
+            for (int dz = -renderDist; dz <= renderDist; dz++) {
+                addNeededChunk(pcx + dx, pcz + dz, pcx, pcz);
+            }
+        }
+    }
+
+    private void addNeededChunk(int cx, int cz, int pcx, int pcz) {
+        long k = key(cx, cz);
+        neededKeys.add(k);
+
+        Chunk existing = chunks.get(k);
+        int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+        int targetLOD = 0;
+        /*
+         * if (dist >= 15)
+         * targetLOD = 3;
+         * else if (dist >= 10)
+         * targetLOD = 2;
+         * else if (dist >= 5)
+         * targetLOD = 1;
+         */
+
+        if (existing == null) {
+            queueChunkGeneration(k, cx, cz, targetLOD, dist);
+        } else if (targetLOD < existing.getLOD()) {
+            queueChunkGeneration(k, cx, cz, targetLOD, dist);
+        }
+    }
+
+    private void removeNeededChunk(int cx, int cz) {
+        neededKeys.remove(key(cx, cz));
     }
 
     public Chunk getChunk(int cx, int cz) {
@@ -465,8 +502,9 @@ public class TerrainManager {
         float g = 0.75f * brightness;
         float b = 1.0f * brightness;
 
-        FloatBuffer fogColor = BufferUtils.createFloatBuffer(4).put(new float[]{ r, g, b, 1f }).flip();
-        glFogfv(GL_FOG_COLOR, fogColor);
+        fogColorBuffer.clear();
+        fogColorBuffer.put(r).put(g).put(b).put(1f).flip();
+        glFogfv(GL_FOG_COLOR, fogColorBuffer);
 
         glHint(GL_FOG_HINT, GL_NICEST);
     }
