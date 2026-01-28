@@ -140,6 +140,10 @@ public class Player {
             pitch = -89f;
     }
 
+    public void resetMouse() {
+        firstMouse = true;
+    }
+
     // Getters for player position
     public float getX() {
         return x;
