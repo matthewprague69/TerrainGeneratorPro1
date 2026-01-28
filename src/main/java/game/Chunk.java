@@ -209,7 +209,7 @@ public class Chunk {
             }
         }
 
-        applyCavesAndRavines(heights, cx, cz, scale, terrainNoise);
+        applyCavesAndRavines(heights, cx, cz, scale, terrainNoise, manager.getSeed());
 
         LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, lakes, manager);
         return new ChunkBuildData(cx, cz, lod, biome, heights, featureMask, lakeMask, lakes);
@@ -257,7 +257,7 @@ public class Chunk {
             }
         }
 
-        applyCavesAndRavines(heights, cx, cz, scale, terrainNoise);
+        applyCavesAndRavines(heights, cx, cz, scale, terrainNoise, manager.getSeed());
 
 
         LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, features, manager);
@@ -686,16 +686,27 @@ public class Chunk {
     }
 
     private static void applyCavesAndRavines(float[][] heights, int cx, int cz, float scale,
-                                             OpenSimplexNoise terrainNoise) {
+                                             OpenSimplexNoise terrainNoise, long seed) {
         final double caveFreq = 0.06;
         final double caveThreshold = 0.55;
         final double caveDepth = 6.0;
-        final double ravineFreq = 0.004;
-        final double ravineWidth = 0.05;
-        final double ravineDepth = 20.0;
-        final double riverFreq = 0.005;
-        final double riverWidth = 0.035;
-        final double riverDepth = 4.0;
+        final double ravineChance = 1.0 / 300.0;
+        final double ravineWidth = 0.12;
+        final double ravineDepth = 30.0;
+        final double riverFreq = 0.0025;
+        final double riverWidth = 0.06;
+        final double riverDepth = 6.0;
+
+        long chunkSeed = FeatureUtil.hashSeed(cx, 12345, cz, seed);
+        Random rand = new Random(chunkSeed);
+        boolean hasRavine = rand.nextDouble() < ravineChance;
+        double ravineAngle = rand.nextDouble() * Math.PI * 2.0;
+        double ravineDirX = Math.cos(ravineAngle);
+        double ravineDirZ = Math.sin(ravineAngle);
+        double ravinePerpX = -ravineDirZ;
+        double ravinePerpZ = ravineDirX;
+        double centerX = (cx * SIZE + SIZE * 0.5 + (rand.nextDouble() - 0.5) * SIZE) * scale;
+        double centerZ = (cz * SIZE + SIZE * 0.5 + (rand.nextDouble() - 0.5) * SIZE) * scale;
 
         for (int x = 0; x <= SIZE; x++) {
             for (int z = 0; z <= SIZE; z++) {
@@ -708,18 +719,29 @@ public class Chunk {
                     heights[x][z] -= (float) (caveDepth * t);
                 }
 
-                double ravineNoise = terrainNoise.eval(wx * ravineFreq - 700.0, wz * ravineFreq + 900.0);
-                double ravineBand = Math.abs(ravineNoise);
-                if (ravineBand < ravineWidth) {
-                    double t = (ravineWidth - ravineBand) / ravineWidth;
-                    heights[x][z] -= (float) (ravineDepth * t);
+                if (hasRavine) {
+                    double dx = wx - centerX;
+                    double dz = wz - centerZ;
+                    double dist = Math.abs(dx * ravinePerpX + dz * ravinePerpZ);
+                    if (dist < ravineWidth) {
+                        double along = dx * ravineDirX + dz * ravineDirZ;
+                        double depthNoise = terrainNoise.eval(along * 0.02, 0.0) * 0.5 + 0.5;
+                        double t = (ravineWidth - dist) / ravineWidth;
+                        double depth = ravineDepth * t * (0.6 + 0.4 * depthNoise);
+                        heights[x][z] -= (float) depth;
+                    }
                 }
 
                 double riverNoise = terrainNoise.eval(wx * riverFreq + 2200.0, wz * riverFreq - 1300.0);
                 double riverBand = Math.abs(riverNoise);
                 if (riverBand < riverWidth) {
                     double t = (riverWidth - riverBand) / riverWidth;
-                    heights[x][z] -= (float) (riverDepth * t);
+                    double shaped = t * t;
+                    heights[x][z] -= (float) (riverDepth * shaped);
+                    float riverFloor = WATER_LEVEL - 0.6f;
+                    if (heights[x][z] > riverFloor) {
+                        heights[x][z] = riverFloor;
+                    }
                 }
             }
         }
