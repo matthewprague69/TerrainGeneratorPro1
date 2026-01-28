@@ -328,6 +328,9 @@ public class TerrainManager {
             }
             if (inflightChunkKeys.contains(key)) {
                 pendingChunkLods.put(key, pendingLod);
+                if (!pendingChunks.contains(key)) {
+                    pendingChunks.addFirst(key);
+                }
                 continue;
             }
             int cx = (int) (key >> 32);
