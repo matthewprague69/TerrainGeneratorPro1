@@ -209,6 +209,8 @@ public class Chunk {
             }
         }
 
+        applyCavesAndRavines(heights, cx, cz, scale, terrainNoise);
+
         LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, lakes, manager);
         return new ChunkBuildData(cx, cz, lod, biome, heights, featureMask, lakeMask, lakes);
     }
@@ -254,6 +256,8 @@ public class Chunk {
                 heights[x][z] = (float) blendedHeight;
             }
         }
+
+        applyCavesAndRavines(heights, cx, cz, scale, terrainNoise);
 
 
         LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, features, manager);
@@ -679,6 +683,36 @@ public class Chunk {
         }
 
         return (count > 0) ? totalSlope / count : 1f; // 1f is max slope fallback
+    }
+
+    private static void applyCavesAndRavines(float[][] heights, int cx, int cz, float scale,
+                                             OpenSimplexNoise terrainNoise) {
+        final double caveFreq = 0.06;
+        final double caveThreshold = 0.55;
+        final double caveDepth = 6.0;
+        final double ravineFreq = 0.01;
+        final double ravineWidth = 0.08;
+        final double ravineDepth = 12.0;
+
+        for (int x = 0; x <= SIZE; x++) {
+            for (int z = 0; z <= SIZE; z++) {
+                double wx = (cx * SIZE + x) * scale;
+                double wz = (cz * SIZE + z) * scale;
+
+                double caveNoise = terrainNoise.eval(wx * caveFreq + 1000.0, wz * caveFreq - 500.0);
+                if (caveNoise > caveThreshold) {
+                    double t = (caveNoise - caveThreshold) / (1.0 - caveThreshold);
+                    heights[x][z] -= (float) (caveDepth * t);
+                }
+
+                double ravineNoise = terrainNoise.eval(wx * ravineFreq - 700.0, wz * ravineFreq + 900.0);
+                double ravineBand = Math.abs(ravineNoise);
+                if (ravineBand < ravineWidth) {
+                    double t = (ravineWidth - ravineBand) / ravineWidth;
+                    heights[x][z] -= (float) (ravineDepth * t);
+                }
+            }
+        }
     }
 
     private float computeSlope(int x, int z) {
