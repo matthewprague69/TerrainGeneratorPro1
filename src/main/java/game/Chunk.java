@@ -737,11 +737,11 @@ public class Chunk {
                 if (riverBand < riverWidth) {
                     double t = (riverWidth - riverBand) / riverWidth;
                     double shaped = t * t;
-                    heights[x][z] -= (float) (riverDepth * shaped);
+                    double bankBlend = t * t * (3.0 - 2.0 * t);
                     float riverFloor = WATER_LEVEL - 0.6f;
-                    if (heights[x][z] > riverFloor) {
-                        heights[x][z] = riverFloor;
-                    }
+                    float target = (float) (heights[x][z] - riverDepth * shaped);
+                    float blended = (float) (heights[x][z] * (1.0 - bankBlend) + target * bankBlend);
+                    heights[x][z] = Math.min(blended, riverFloor);
                 }
             }
         }
