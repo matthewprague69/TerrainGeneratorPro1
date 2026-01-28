@@ -50,6 +50,82 @@ public class Chunk {
     public static final float FEATURE_SLOPE_SPAWN_THRESHOLD = DIRT_SLOPE_START;
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
 
+    public static class ChunkBuildData {
+        public final int cx;
+        public final int cz;
+        public final int lod;
+        public final Biome biome;
+        public final float[][] heights;
+        public final boolean[][] featureMask;
+        public final boolean[][] lakeMask;
+        public final List<Feature> lakes;
+
+        public ChunkBuildData(int cx, int cz, int lod, Biome biome, float[][] heights, boolean[][] featureMask,
+                              boolean[][] lakeMask, List<Feature> lakes) {
+            this.cx = cx;
+            this.cz = cz;
+            this.lod = lod;
+            this.biome = biome;
+            this.heights = heights;
+            this.featureMask = featureMask;
+            this.lakeMask = lakeMask;
+            this.lakes = lakes;
+        }
+    }
+
+    public static class FeatureSpawn {
+        public final FeatureSpawner spawner;
+        public final float x;
+        public final float y;
+        public final float z;
+        public final long seed;
+
+        public FeatureSpawn(FeatureSpawner spawner, float x, float y, float z, long seed) {
+            this.spawner = spawner;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.seed = seed;
+        }
+    }
+
+    public static class FeatureGenerationInput {
+        public final int cx;
+        public final int cz;
+        public final float scale;
+        public final Biome biome;
+        public final float[][] heights;
+        public final boolean[][] featureMask;
+        public final boolean[][] lakeMask;
+        public final long seed;
+
+        public FeatureGenerationInput(int cx, int cz, float scale, Biome biome, float[][] heights,
+                                      boolean[][] featureMask, boolean[][] lakeMask, long seed) {
+            this.cx = cx;
+            this.cz = cz;
+            this.scale = scale;
+            this.biome = biome;
+            this.heights = heights;
+            this.featureMask = featureMask;
+            this.lakeMask = lakeMask;
+            this.seed = seed;
+        }
+    }
+
+    public static class FeatureGenerationResult {
+        public final int cx;
+        public final int cz;
+        public final List<FeatureSpawn> spawns;
+        public final boolean[][] featureMask;
+
+        public FeatureGenerationResult(int cx, int cz, List<FeatureSpawn> spawns, boolean[][] featureMask) {
+            this.cx = cx;
+            this.cz = cz;
+            this.spawns = spawns;
+            this.featureMask = featureMask;
+        }
+    }
+
 
 
 
@@ -65,6 +141,78 @@ public class Chunk {
         this.biome = biome;
         this.lod = lod;
         generate(generateFeatures);
+    }
+
+    public Chunk(int cx, int cz, OpenSimplexNoise terrainNoise, float scale, Biome biome, TerrainManager manager,
+                 int lod, ChunkBuildData data) {
+        this.cx = cx;
+        this.cz = cz;
+        this.terrainNoise = terrainNoise;
+        this.scale = scale;
+        this.manager = manager;
+        this.biome = biome;
+        this.lod = lod;
+        if (data != null) {
+            applyPrecomputedData(data);
+            stitchEdges();
+            buildTerrainBuffers();
+            buildWaterDisplayList();
+            buildGrassBatch();
+        } else {
+            generate(false);
+        }
+    }
+
+    public static ChunkBuildData generateChunkData(int cx, int cz, OpenSimplexNoise terrainNoise, float scale,
+                                                   Biome biome, TerrainManager manager, int lod) {
+        final int OCTAVES = 4;
+        final double PERSISTENCE = 0.35;
+        final double macroFreq = 0.002;
+        final double macroAmp = 2.0;
+
+        float[][] heights = new float[SIZE + 1][SIZE + 1];
+        boolean[][] featureMask = new boolean[SIZE][SIZE];
+        boolean[][] lakeMask = new boolean[SIZE][SIZE];
+        List<Feature> lakes = new ArrayList<>();
+
+        for (int x = 0; x <= SIZE; x++) {
+            for (int z = 0; z <= SIZE; z++) {
+                double wx = (cx * SIZE + x) * scale;
+                double wz = (cz * SIZE + z) * scale;
+
+                Map<Biome, Float> weights = manager.getBiomeWeights(wx, wz);
+                double blendedHeight = 0;
+
+                for (Map.Entry<Biome, Float> entry : weights.entrySet()) {
+                    Biome entryBiome = entry.getKey();
+                    float weight = entry.getValue();
+
+                    double freq = entryBiome.frequency;
+                    double amp = entryBiome.amplitude * 0.5;
+                    double sum = 0;
+
+                    for (int o = 0; o < OCTAVES; o++) {
+                        double offset = o * 100.0;
+                        double val = terrainNoise.eval((wx + offset) * freq, (wz - offset) * freq);
+                        val = (val * val * val) * 1.2;
+                        sum += val * amp;
+                        freq *= 1.7;
+                        amp *= PERSISTENCE;
+                    }
+
+                    double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
+                    double biomeHeight = entryBiome.baseHeight + sum + elevationOffset;
+                    blendedHeight += biomeHeight * weight;
+                }
+
+                heights[x][z] = (float) blendedHeight;
+            }
+        }
+
+        applyCavesAndRavines(heights, cx, cz, scale, terrainNoise, manager.getSeed());
+
+        LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, lakes, manager);
+        return new ChunkBuildData(cx, cz, lod, biome, heights, featureMask, lakeMask, lakes);
     }
 
     private void generate(boolean generateFeatures) {
@@ -109,8 +257,10 @@ public class Chunk {
             }
         }
 
+        applyCavesAndRavines(heights, cx, cz, scale, terrainNoise, manager.getSeed());
 
-        LakeGenerator.generateLakes(this, biome, heights, featureMask, features, manager);
+
+        LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, features, manager);
         if (generateFeatures)
             generateFeatures();
         stitchEdges();
@@ -153,6 +303,31 @@ public class Chunk {
 
         generateFeatures();
         featuresGenerated = true;
+    }
+
+    public boolean needsFeatureGeneration(int pcx, int pcz, int featureRenderDist) {
+        if (featuresGenerated) {
+            return false;
+        }
+        return Math.abs(cx - pcx) <= featureRenderDist && Math.abs(cz - pcz) <= featureRenderDist;
+    }
+
+    public FeatureGenerationInput createFeatureGenerationInput() {
+        return new FeatureGenerationInput(cx, cz, scale, biome, copyHeights(heights),
+                copyMask(featureMask), copyMask(lakeMask), manager.getSeed());
+    }
+
+    public void applyFeatureGenerationResult(FeatureGenerationResult result) {
+        if (featuresGenerated || result == null) {
+            return;
+        }
+        copyMaskInto(result.featureMask, featureMask);
+        for (FeatureSpawn spawn : result.spawns) {
+            Feature f = spawn.spawner.spawn(spawn.x, spawn.y, spawn.z, spawn.seed);
+            features.add(f);
+        }
+        featuresGenerated = true;
+        buildGrassBatch();
     }
 
     public Biome getBiomeType() {
@@ -486,57 +661,9 @@ public class Chunk {
     }
 
     private void generateFeatures() {
-        if (biome.features == null || biome.features.isEmpty())
-            return;
-
-        long chunkSeed = FeatureUtil.hashSeed(cx, 0, cz, manager.getSeed());
-        Random rand = new Random(chunkSeed);
-
-        for (int x = 0; x < SIZE; x++) {
-            for (int z = 0; z < SIZE; z++) {
-                if (featureMask[x][z] || lakeMask[x][z])
-                    continue;
-
-                float height = heights[x][z];
-                float slope = computeSlope(x, z);
-
-                if (height < FEATURE_MIN_HEIGHT || height > FEATURE_MAX_HEIGHT)
-                    continue;
-
-                if (height > FEATURE_MAX_HEIGHT || slope > FEATURE_SLOPE_SPAWN_THRESHOLD)
-                    continue;
-
-
-                float wx = (cx * SIZE + x + 0.5f) * scale;
-                float wz = (cz * SIZE + z + 0.5f) * scale;
-
-                // --- Adjust feature height DOWNWARD based on slope ---
-                float slopeAdjustment = slope * 2.0f; // You can tweak 2.0f to make it stronger/weaker
-                float wy = height - slopeAdjustment;
-
-                for (Map.Entry<FeatureSpawner, Float> entry : biome.features.entrySet()) {
-                    if (entry.getKey() instanceof LakeSpawner)
-                        continue;
-                    if (entry.getKey().getClass().getSimpleName().contains("TreeSpawner")) {
-                        if (height > FEATURE_TREE_MAX_HEIGHT)
-                            continue;
-                    }
-
-                    if (rand.nextFloat() < entry.getValue()) {
-                        int ix = cx * SIZE + x;
-                        int iz = cz * SIZE + z;
-                        int iy = Math.round(height * 1000);
-                        long seed = FeatureUtil.hashSeed(ix, iy, iz, manager.getSeed());
-
-                        Feature f = entry.getKey().spawn(wx, wy, wz, seed);
-                        features.add(f);
-                        featureMask[x][z] = true;
-                        break;
-                    }
-                }
-            }
-        }
-        buildGrassBatch();
+        FeatureGenerationResult result = generateFeatureSpawns(
+                new FeatureGenerationInput(cx, cz, scale, biome, heights, featureMask, lakeMask, manager.getSeed()));
+        applyFeatureGenerationResult(result);
     }
 
     private float averageSurroundingSlope(int centerX, int centerZ, int radius) {
@@ -558,7 +685,87 @@ public class Chunk {
         return (count > 0) ? totalSlope / count : 1f; // 1f is max slope fallback
     }
 
+    private static void applyCavesAndRavines(float[][] heights, int cx, int cz, float scale,
+                                             OpenSimplexNoise terrainNoise, long seed) {
+        final double caveFreq = 0.06;
+        final double caveThreshold = 0.55;
+        final double caveDepth = 6.0;
+        final float caveMaxHeight = WATER_LEVEL - 1.0f;
+        final double ravineChance = 1.0 / 300.0;
+        final double ravineWidth = 0.12;
+        final double ravineDepth = 30.0;
+        final double riverFreq = 0.0018;
+        final double riverWidth = 0.035;
+        final double riverBlendWidth = 0.08;
+        final double riverDepth = 3.5;
+        final double riverMaskFreq = 0.0009;
+        final double riverMaskThreshold = 0.25;
+        final double riverSurfaceOffset = 1.2;
+        final double riverSurfaceNoiseAmp = 0.6;
+
+        long chunkSeed = FeatureUtil.hashSeed(cx, 12345, cz, seed);
+        Random rand = new Random(chunkSeed);
+        boolean hasRavine = rand.nextDouble() < ravineChance;
+        double ravineAngle = rand.nextDouble() * Math.PI * 2.0;
+        double ravineDirX = Math.cos(ravineAngle);
+        double ravineDirZ = Math.sin(ravineAngle);
+        double ravinePerpX = -ravineDirZ;
+        double ravinePerpZ = ravineDirX;
+        double centerX = (cx * SIZE + SIZE * 0.5 + (rand.nextDouble() - 0.5) * SIZE) * scale;
+        double centerZ = (cz * SIZE + SIZE * 0.5 + (rand.nextDouble() - 0.5) * SIZE) * scale;
+
+        for (int x = 0; x <= SIZE; x++) {
+            for (int z = 0; z <= SIZE; z++) {
+                double wx = (cx * SIZE + x) * scale;
+                double wz = (cz * SIZE + z) * scale;
+
+                double caveNoise = terrainNoise.eval(wx * caveFreq + 1000.0, wz * caveFreq - 500.0);
+                if (caveNoise > caveThreshold && heights[x][z] < caveMaxHeight) {
+                    double t = (caveNoise - caveThreshold) / (1.0 - caveThreshold);
+                    heights[x][z] -= (float) (caveDepth * t);
+                }
+
+                if (hasRavine) {
+                    double dx = wx - centerX;
+                    double dz = wz - centerZ;
+                    double dist = Math.abs(dx * ravinePerpX + dz * ravinePerpZ);
+                    if (dist < ravineWidth) {
+                        double along = dx * ravineDirX + dz * ravineDirZ;
+                        double depthNoise = terrainNoise.eval(along * 0.02, 0.0) * 0.5 + 0.5;
+                        double t = (ravineWidth - dist) / ravineWidth;
+                        double depth = ravineDepth * t * (0.6 + 0.4 * depthNoise);
+                        heights[x][z] -= (float) depth;
+                    }
+                }
+
+                double riverNoise = terrainNoise.eval(wx * riverFreq + 2200.0, wz * riverFreq - 1300.0);
+                double warpNoise = terrainNoise.eval(wx * riverFreq * 1.6 - 500.0, wz * riverFreq * 1.6 + 900.0);
+                double riverBand = Math.abs(riverNoise + warpNoise * 0.15);
+                if (riverBand < riverBlendWidth) {
+                    double riverMask = terrainNoise.eval(wx * riverMaskFreq - 3400.0, wz * riverMaskFreq + 2600.0);
+                    if (Math.abs(riverMask) < riverMaskThreshold) {
+                        double t = (riverBlendWidth - riverBand) / riverBlendWidth;
+                        double bankBlend = t * t * (3.0 - 2.0 * t);
+                        double depthFactor = riverBand < riverWidth ? (riverWidth - riverBand) / riverWidth : 0.0;
+                        depthFactor = depthFactor * depthFactor * (3.0 - 2.0 * depthFactor);
+                        float riverSurfaceNoise = (float) (terrainNoise.eval(wx * 0.002 + 1200.0, wz * 0.002 - 800.0)
+                                * riverSurfaceNoiseAmp);
+                        float riverSurface = (float) (heights[x][z] - riverSurfaceOffset + riverSurfaceNoise);
+                        float riverFloor = riverSurface - (float) (riverDepth * depthFactor);
+                        float target = Math.min(heights[x][z], riverFloor);
+                        float blended = (float) (heights[x][z] * (1.0 - bankBlend) + target * bankBlend);
+                        heights[x][z] = blended;
+                    }
+                }
+            }
+        }
+    }
+
     private float computeSlope(int x, int z) {
+        return computeSlope(heights, x, z);
+    }
+
+    private static float computeSlope(float[][] heights, int x, int z) {
         int x0 = Math.max(0, x - 1);
         int x1 = Math.min(SIZE, x + 1);
         int z0 = Math.max(0, z - 1);
@@ -662,6 +869,102 @@ public class Chunk {
 
     public float getScale() {
         return scale;
+    }
+
+    private void applyPrecomputedData(ChunkBuildData data) {
+        copyHeightsInto(data.heights, heights);
+        copyMaskInto(data.featureMask, featureMask);
+        copyMaskInto(data.lakeMask, lakeMask);
+        if (data.lakes != null) {
+            features.addAll(data.lakes);
+        }
+        featuresGenerated = false;
+    }
+
+    private static float[][] copyHeights(float[][] source) {
+        float[][] copy = new float[source.length][];
+        for (int i = 0; i < source.length; i++) {
+            copy[i] = Arrays.copyOf(source[i], source[i].length);
+        }
+        return copy;
+    }
+
+    private static boolean[][] copyMask(boolean[][] source) {
+        boolean[][] copy = new boolean[source.length][];
+        for (int i = 0; i < source.length; i++) {
+            copy[i] = Arrays.copyOf(source[i], source[i].length);
+        }
+        return copy;
+    }
+
+    private static void copyHeightsInto(float[][] source, float[][] target) {
+        for (int i = 0; i < source.length && i < target.length; i++) {
+            System.arraycopy(source[i], 0, target[i], 0, Math.min(source[i].length, target[i].length));
+        }
+    }
+
+    private static void copyMaskInto(boolean[][] source, boolean[][] target) {
+        for (int i = 0; i < source.length && i < target.length; i++) {
+            System.arraycopy(source[i], 0, target[i], 0, Math.min(source[i].length, target[i].length));
+        }
+    }
+
+    public static FeatureGenerationResult generateFeatureSpawns(FeatureGenerationInput input) {
+        List<FeatureSpawn> spawns = new ArrayList<>();
+        if (input.biome.features == null || input.biome.features.isEmpty()) {
+            return new FeatureGenerationResult(input.cx, input.cz, spawns, input.featureMask);
+        }
+
+        long chunkSeed = FeatureUtil.hashSeed(input.cx, 0, input.cz, input.seed);
+        Random rand = new Random(chunkSeed);
+
+        for (int x = 0; x < SIZE; x++) {
+            for (int z = 0; z < SIZE; z++) {
+                if (input.featureMask[x][z] || input.lakeMask[x][z]) {
+                    continue;
+                }
+
+                float height = input.heights[x][z];
+                float slope = computeSlope(input.heights, x, z);
+
+                if (height < FEATURE_MIN_HEIGHT || height > FEATURE_MAX_HEIGHT) {
+                    continue;
+                }
+
+                if (height > FEATURE_MAX_HEIGHT || slope > FEATURE_SLOPE_SPAWN_THRESHOLD) {
+                    continue;
+                }
+
+                float wx = (input.cx * SIZE + x + 0.5f) * input.scale;
+                float wz = (input.cz * SIZE + z + 0.5f) * input.scale;
+                float slopeAdjustment = slope * 2.0f;
+                float wy = height - slopeAdjustment;
+
+                for (Map.Entry<FeatureSpawner, Float> entry : input.biome.features.entrySet()) {
+                    if (entry.getKey() instanceof LakeSpawner) {
+                        continue;
+                    }
+                    if (entry.getKey().getClass().getSimpleName().contains("TreeSpawner")) {
+                        if (height > FEATURE_TREE_MAX_HEIGHT) {
+                            continue;
+                        }
+                    }
+
+                    if (rand.nextFloat() < entry.getValue()) {
+                        int ix = input.cx * SIZE + x;
+                        int iz = input.cz * SIZE + z;
+                        int iy = Math.round(height * 1000);
+                        long seed = FeatureUtil.hashSeed(ix, iy, iz, input.seed);
+
+                        spawns.add(new FeatureSpawn(entry.getKey(), wx, wy, wz, seed));
+                        input.featureMask[x][z] = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return new FeatureGenerationResult(input.cx, input.cz, spawns, input.featureMask);
     }
 
     public int getLOD() {

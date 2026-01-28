@@ -28,6 +28,9 @@ public class ShadowRenderer {
     private final int sceneLightStrengthLoc;
     private final int sceneViewMatrixLoc;
     private final int sceneViewInverseLoc;
+    private final int sceneFogStartLoc;
+    private final int sceneFogEndLoc;
+    private final int sceneFogColorLoc;
     private float[] lastLightMatrix = MatrixUtils.identity();
 
     public ShadowRenderer(int shadowSize) {
@@ -64,6 +67,9 @@ public class ShadowRenderer {
         sceneLightStrengthLoc = sceneShader.getUniformLocation("uLightStrength");
         sceneViewMatrixLoc = sceneShader.getUniformLocation("uViewMatrix");
         sceneViewInverseLoc = sceneShader.getUniformLocation("uViewInverse");
+        sceneFogStartLoc = sceneShader.getUniformLocation("uFogStart");
+        sceneFogEndLoc = sceneShader.getUniformLocation("uFogEnd");
+        sceneFogColorLoc = sceneShader.getUniformLocation("uFogColor");
     }
 
     public float[] renderShadowMap(TerrainManager terrain, float[] lightDir, float centerX, float centerY, float centerZ,
@@ -101,7 +107,8 @@ public class ShadowRenderer {
     }
 
     public void beginScenePass(float[] lightMatrix, float[] lightDir, float lightStrength,
-                               float[] viewMatrix, float[] viewInverse) {
+                               float[] viewMatrix, float[] viewInverse,
+                               float fogStart, float fogEnd, float[] fogColor) {
         active = this;
         sceneShader.use();
         sceneShader.setUniformMatrix4(sceneLightMatrixLoc, toBuffer(lightMatrix));
@@ -109,6 +116,9 @@ public class ShadowRenderer {
         sceneShader.setUniformMatrix4(sceneViewInverseLoc, toBuffer(viewInverse));
         sceneShader.setUniform3f(sceneLightDirLoc, lightDir[0], lightDir[1], lightDir[2]);
         sceneShader.setUniform1f(sceneLightStrengthLoc, lightStrength);
+        sceneShader.setUniform1f(sceneFogStartLoc, fogStart);
+        sceneShader.setUniform1f(sceneFogEndLoc, fogEnd);
+        sceneShader.setUniform3f(sceneFogColorLoc, fogColor[0], fogColor[1], fogColor[2]);
         sceneShader.setUniform1i(sceneShadowMapLoc, 1);
         sceneShader.setUniform1i(sceneDiffuseLoc, 0);
         sceneShader.setUniform1i(sceneUseTextureLoc, 1);
