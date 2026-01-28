@@ -9,6 +9,9 @@ import java.nio.FloatBuffer;
 
 
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class TerrainManager {
     private static final int MAX_CHUNKS_PER_FRAME = 12;
@@ -22,7 +25,21 @@ public class TerrainManager {
     private final ArrayDeque<Chunk> pendingFeatureChunks = new ArrayDeque<>();
     private final Set<Long> pendingFeatureKeys = new HashSet<>();
     private final Set<Long> neededKeys = new HashSet<>();
-    private final ArrayDeque<Chunk> featureMaintenanceQueue = new ArrayDeque<>();
+    private final Set<Long> inflightChunkKeys = new HashSet<>();
+    private final Set<Long> inflightFeatureKeys = new HashSet<>();
+    private final ConcurrentLinkedQueue<Chunk.ChunkBuildData> completedChunkBuilds = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Chunk.FeatureGenerationResult> completedFeatureGenerations =
+            new ConcurrentLinkedQueue<>();
+    private final ExecutorService chunkGenerator = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "chunk-generator");
+        t.setDaemon(true);
+        return t;
+    });
+    private final ExecutorService featureGenerator = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "feature-generator");
+        t.setDaemon(true);
+        return t;
+    });
     private final OpenSimplexNoise terrainNoise;
     private final BiomeRegionGenerator regionGenerator;
     private final SkyRenderer skyRenderer;
@@ -106,9 +123,10 @@ public class TerrainManager {
 
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        drainCompletedChunkBuilds(pcx, pcz);
+        drainCompletedFeatureGenerations(pcx, pcz);
         boolean movedChunk = pcx != lastUpdateChunkX || pcz != lastUpdateChunkZ;
         if (!movedChunk) {
-            processFeatureMaintenanceQueue(pcx, pcz);
             processPendingChunkGenerations();
             processPendingFeatureGenerations(pcx, pcz);
             return;
@@ -148,9 +166,13 @@ public class TerrainManager {
         }
 
         // Generate/unload features based on featureRenderDist
-        featureMaintenanceQueue.clear();
-        featureMaintenanceQueue.addAll(chunks.values());
-        processFeatureMaintenanceQueue(pcx, pcz);
+        for (Chunk c : chunks.values()) {
+            c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
+            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+            if (dist <= cacheFeatureRenderDist) {
+                queueFeatureGeneration(c, pcx, pcz);
+            }
+        }
 
         // Dispose chunks no longer needed
         for (Iterator<Map.Entry<Long, Chunk>> it = chunks.entrySet().iterator(); it.hasNext();) {
@@ -203,26 +225,31 @@ public class TerrainManager {
             if (pendingLod == null) {
                 continue;
             }
+            if (inflightChunkKeys.contains(key)) {
+                pendingChunkLods.put(key, pendingLod);
+                continue;
+            }
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            Chunk existing = chunks.get(key);
             int targetLOD = pendingLod;
+            Biome b = pickBiome(cx, cz);
+            Chunk existing = chunks.get(key);
             if (existing != null && targetLOD >= existing.getLOD()) {
                 continue;
             }
-            Biome b = pickBiome(cx, cz);
-            Chunk upgraded = new Chunk(cx, cz, terrainNoise, scale, b, this, false, targetLOD);
-            if (existing != null) {
-                existing.dispose();
-            }
-            chunks.put(key, upgraded);
+            inflightChunkKeys.add(key);
+            chunkGenerator.submit(() -> {
+                Chunk.ChunkBuildData data =
+                        Chunk.generateChunkData(cx, cz, terrainNoise, scale, b, this, targetLOD);
+                completedChunkBuilds.add(data);
+            });
             count++;
         }
     }
 
     private void queueFeatureGeneration(Chunk chunk, int pcx, int pcz) {
         long key = key(chunk.cx, chunk.cz);
-        if (pendingFeatureKeys.contains(key)) {
+        if (pendingFeatureKeys.contains(key) || inflightFeatureKeys.contains(key)) {
             return;
         }
         if (!chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
@@ -249,25 +276,66 @@ public class TerrainManager {
             Chunk chunk = pendingFeatureChunks.poll();
             long key = key(chunk.cx, chunk.cz);
             pendingFeatureKeys.remove(key);
+            if (chunks.get(key) != chunk) {
+                continue;
+            }
+            if (inflightFeatureKeys.contains(key)) {
+                continue;
+            }
             if (!chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
                 continue;
             }
-            chunk.generateFeaturesIfNeeded(pcx, pcz, featureRenderDist);
+            Chunk.FeatureGenerationInput input = chunk.createFeatureGenerationInput();
+            inflightFeatureKeys.add(key);
+            featureGenerator.submit(() -> {
+                Chunk.FeatureGenerationResult result = Chunk.generateFeatureSpawns(input);
+                completedFeatureGenerations.add(result);
+            });
             count++;
         }
     }
 
-    private void processFeatureMaintenanceQueue(int pcx, int pcz) {
-        int processed = 0;
-        int budget = MAX_FEATURE_CHUNKS_PER_FRAME * 4;
-        while (processed < budget && !featureMaintenanceQueue.isEmpty()) {
-            Chunk c = featureMaintenanceQueue.pollFirst();
-            c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
-            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist <= cacheFeatureRenderDist) {
-                queueFeatureGeneration(c, pcx, pcz);
+    private void drainCompletedChunkBuilds(int pcx, int pcz) {
+        Chunk.ChunkBuildData data;
+        while ((data = completedChunkBuilds.poll()) != null) {
+            long key = key(data.cx, data.cz);
+            inflightChunkKeys.remove(key);
+            Integer pendingLod = pendingChunkLods.get(key);
+            if (pendingLod != null && pendingLod < data.lod) {
+                continue;
             }
-            processed++;
+            int dist = Math.max(Math.abs(data.cx - pcx), Math.abs(data.cz - pcz));
+            if (dist > cacheRenderDist) {
+                continue;
+            }
+            Chunk existing = chunks.get(key);
+            if (existing != null && data.lod >= existing.getLOD()) {
+                continue;
+            }
+            Chunk built = new Chunk(data.cx, data.cz, terrainNoise, scale, data.biome, this, data.lod, data);
+            if (existing != null) {
+                existing.dispose();
+            }
+            chunks.put(key, built);
+            if (built.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                queueFeatureGeneration(built, pcx, pcz);
+            }
+        }
+    }
+
+    private void drainCompletedFeatureGenerations(int pcx, int pcz) {
+        Chunk.FeatureGenerationResult result;
+        while ((result = completedFeatureGenerations.poll()) != null) {
+            long key = key(result.cx, result.cz);
+            inflightFeatureKeys.remove(key);
+            Chunk chunk = chunks.get(key);
+            if (chunk == null) {
+                continue;
+            }
+            if (!chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                continue;
+            }
+            chunk.applyFeatureGenerationResult(result);
         }
     }
 
