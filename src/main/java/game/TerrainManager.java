@@ -22,6 +22,7 @@ public class TerrainManager {
     private final ArrayDeque<Chunk> pendingFeatureChunks = new ArrayDeque<>();
     private final Set<Long> pendingFeatureKeys = new HashSet<>();
     private final Set<Long> neededKeys = new HashSet<>();
+    private final ArrayDeque<Chunk> featureMaintenanceQueue = new ArrayDeque<>();
     private final OpenSimplexNoise terrainNoise;
     private final BiomeRegionGenerator regionGenerator;
     private final SkyRenderer skyRenderer;
@@ -107,6 +108,7 @@ public class TerrainManager {
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         boolean movedChunk = pcx != lastUpdateChunkX || pcz != lastUpdateChunkZ;
         if (!movedChunk) {
+            processFeatureMaintenanceQueue(pcx, pcz);
             processPendingChunkGenerations();
             processPendingFeatureGenerations(pcx, pcz);
             return;
@@ -146,15 +148,9 @@ public class TerrainManager {
         }
 
         // Generate/unload features based on featureRenderDist
-        for (Chunk c : chunks.values()) {
-            c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
-            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > cacheFeatureRenderDist) {
-                continue;
-            }
-            queueFeatureGeneration(c, pcx, pcz);
-
-        }
+        featureMaintenanceQueue.clear();
+        featureMaintenanceQueue.addAll(chunks.values());
+        processFeatureMaintenanceQueue(pcx, pcz);
 
         // Dispose chunks no longer needed
         for (Iterator<Map.Entry<Long, Chunk>> it = chunks.entrySet().iterator(); it.hasNext();) {
@@ -258,6 +254,20 @@ public class TerrainManager {
             }
             chunk.generateFeaturesIfNeeded(pcx, pcz, featureRenderDist);
             count++;
+        }
+    }
+
+    private void processFeatureMaintenanceQueue(int pcx, int pcz) {
+        int processed = 0;
+        int budget = MAX_FEATURE_CHUNKS_PER_FRAME * 4;
+        while (processed < budget && !featureMaintenanceQueue.isEmpty()) {
+            Chunk c = featureMaintenanceQueue.pollFirst();
+            c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
+            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+            if (dist <= cacheFeatureRenderDist) {
+                queueFeatureGeneration(c, pcx, pcz);
+            }
+            processed++;
         }
     }
 
