@@ -239,6 +239,13 @@ public class TerrainManager {
         Integer existing = pendingChunkLods.get(key);
         if (existing != null) {
             pendingChunkLods.put(key, Math.min(existing, targetLOD));
+            if (!pendingChunks.contains(key)) {
+                if (dist <= 2) {
+                    pendingChunks.addFirst(key);
+                } else {
+                    pendingChunks.addLast(key);
+                }
+            }
             return;
         }
         pendingChunkLods.put(key, targetLOD);
