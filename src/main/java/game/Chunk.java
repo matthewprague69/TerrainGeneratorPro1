@@ -716,15 +716,16 @@ public class Chunk {
     private static void applyCavesAndRavines(float[][] heights, float[][] riverSurface, int cx, int cz, float scale,
                                              OpenSimplexNoise terrainNoise, long seed) {
         final double riverFreq = 0.0018;
-        final double riverWidth = 0.065;
-        final double riverBlendWidth = 0.14;
-        final double riverDepth = 5.4;
+        final double riverWidth = 0.06;
+        final double riverBlendWidth = 0.12;
+        final double riverDepth = 8.0;
         final double riverMaskFreq = 0.0009;
         final double riverMaskThreshold = 0.38;
         final float ridgeOffset = 0.7f;
-        final float surfaceNoiseAmp = 0.25f;
-        final float flowSlopeScale = 0.0006f;
-        final float minRiverDepth = 1.1f;
+        final float surfaceNoiseAmp = 0.2f;
+        final float flowSlopeScale = 0.00075f;
+        final float minRiverDepth = 1.8f;
+        final float surfaceCarveRatio = 0.6f;
 
         for (int x = 0; x <= SIZE; x++) {
             for (int z = 0; z <= SIZE; z++) {
@@ -741,7 +742,7 @@ public class Chunk {
                     if (maskBlend > 0.001) {
                         double t = (riverBlendWidth - riverBand) / riverBlendWidth;
                         double bankBlend = t * t * (3.0 - 2.0 * t) * maskBlend;
-                        double localWidth = riverWidth * (0.78 + 0.32 * (terrainNoise.eval(wx * 0.002, wz * 0.002) * 0.5 + 0.5));
+                        double localWidth = riverWidth * (0.76 + 0.28 * (terrainNoise.eval(wx * 0.002, wz * 0.002) * 0.5 + 0.5));
                         double depthFactor = riverBand < localWidth ? (localWidth - riverBand) / localWidth : 0.0;
                         depthFactor = depthFactor * depthFactor * (3.0 - 2.0 * depthFactor);
                         depthFactor = Math.max(depthFactor, bankBlend * 0.2) * maskBlend;
@@ -752,11 +753,16 @@ public class Chunk {
                         double flowZ = Math.sin(flowAngle);
                         float flowCoord = (float) (wx * flowX + wz * flowZ);
                         float flowSlope = flowCoord * flowSlopeScale;
-                        float riverSurfaceHeight = baseHeight - ridgeOffset + surfaceNoise - flowSlope;
-                        riverSurfaceHeight = Math.min(baseHeight - ridgeOffset * 0.5f, riverSurfaceHeight);
+                        float downhillSurface = (float) (terrainNoise.eval(wx * 0.00015 + 5000.0, wz * 0.00015 - 5000.0) * 4.0)
+                                - flowSlope;
                         float depthNoise = (float) (terrainNoise.eval(wx * 0.004 - 2200.0, wz * 0.004 + 1900.0) * 0.5 + 0.5);
-                        float target = baseHeight - (float) (riverDepth * (0.6f + 0.6f * depthNoise) * depthFactor);
-                        target = Math.min(target, riverSurfaceHeight - minRiverDepth);
+                        float carveDepth = (float) (riverDepth * (0.7f + 0.6f * depthNoise) * depthFactor);
+                        carveDepth = Math.max(carveDepth, minRiverDepth * (float) Math.max(0.15, depthFactor));
+                        float bedHeight = baseHeight - carveDepth;
+                        float surfaceFromCarve = baseHeight - carveDepth * surfaceCarveRatio;
+                        float riverSurfaceHeight = Math.min(baseHeight - ridgeOffset * 0.5f,
+                                Math.min(surfaceFromCarve, downhillSurface + surfaceNoise));
+                        float target = Math.min(bedHeight, riverSurfaceHeight - minRiverDepth);
                         float blended = (float) (baseHeight * (1.0 - bankBlend) + target * bankBlend);
                         heights[x][z] = blended;
                         if (riverSurface != null && bankBlend > 0.0 && depthFactor > 0.02) {
