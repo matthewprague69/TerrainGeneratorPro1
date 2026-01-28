@@ -696,7 +696,7 @@ public class Chunk {
         final double ravineDepth = 30.0;
         final double riverFreq = 0.0018;
         final double riverWidth = 0.045;
-        final double riverBlendWidth = 0.08;
+        final double riverBlendWidth = 0.12;
         final double riverDepth = 6.0;
         final double riverMaskFreq = 0.0009;
         final double riverMaskThreshold = 0.25;
@@ -737,16 +737,18 @@ public class Chunk {
                 }
 
                 double riverNoise = terrainNoise.eval(wx * riverFreq + 2200.0, wz * riverFreq - 1300.0);
-                double riverBand = Math.abs(riverNoise);
+                double warpNoise = terrainNoise.eval(wx * riverFreq * 1.6 - 500.0, wz * riverFreq * 1.6 + 900.0);
+                double riverBand = Math.abs(riverNoise + warpNoise * 0.15);
                 if (riverBand < riverBlendWidth) {
                     double riverMask = terrainNoise.eval(wx * riverMaskFreq - 3400.0, wz * riverMaskFreq + 2600.0);
                     if (Math.abs(riverMask) < riverMaskThreshold) {
                         double t = (riverBlendWidth - riverBand) / riverBlendWidth;
                         double bankBlend = t * t * (3.0 - 2.0 * t);
                         double depthFactor = riverBand < riverWidth ? (riverWidth - riverBand) / riverWidth : 0.0;
-                        double shaped = depthFactor * depthFactor;
-                        float riverFloor = WATER_LEVEL - 0.6f;
-                        float target = (float) (heights[x][z] - riverDepth * shaped);
+                        depthFactor = depthFactor * depthFactor * (3.0 - 2.0 * depthFactor);
+                        float riverFloorNoise = (float) (terrainNoise.eval(wx * 0.003 + 1200.0, wz * 0.003 - 800.0) * 1.2);
+                        float riverFloor = Math.min(WATER_LEVEL - 0.2f, WATER_LEVEL - 0.8f + riverFloorNoise);
+                        float target = (float) (heights[x][z] - riverDepth * depthFactor);
                         float blended = (float) (heights[x][z] * (1.0 - bankBlend) + target * bankBlend);
                         heights[x][z] = Math.min(blended, riverFloor);
                     }
