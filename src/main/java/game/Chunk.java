@@ -98,17 +98,19 @@ public class Chunk {
         public final float scale;
         public final Biome biome;
         public final float[][] heights;
+        public final float[][] riverSurface;
         public final boolean[][] featureMask;
         public final boolean[][] lakeMask;
         public final long seed;
 
         public FeatureGenerationInput(int cx, int cz, float scale, Biome biome, float[][] heights,
-                                      boolean[][] featureMask, boolean[][] lakeMask, long seed) {
+                                      float[][] riverSurface, boolean[][] featureMask, boolean[][] lakeMask, long seed) {
             this.cx = cx;
             this.cz = cz;
             this.scale = scale;
             this.biome = biome;
             this.heights = heights;
+            this.riverSurface = riverSurface;
             this.featureMask = featureMask;
             this.lakeMask = lakeMask;
             this.seed = seed;
@@ -319,7 +321,7 @@ public class Chunk {
     }
 
     public FeatureGenerationInput createFeatureGenerationInput() {
-        return new FeatureGenerationInput(cx, cz, scale, biome, copyHeights(heights),
+        return new FeatureGenerationInput(cx, cz, scale, biome, copyHeights(heights), copyHeights(riverSurface),
                 copyMask(featureMask), copyMask(lakeMask), manager.getSeed());
     }
 
@@ -467,25 +469,17 @@ public class Chunk {
                     float wx2 = (cx * SIZE + x + step) * scale;
                     float wz2 = (cz * SIZE + z + step) * scale;
 
-                    float waterY = WATER_LEVEL;
-                    if (hasRiverWater) {
-                        float sum = 0f;
-                        int count = 0;
-                        if (r00 > Float.NEGATIVE_INFINITY / 2) { sum += r00; count++; }
-                        if (r10 > Float.NEGATIVE_INFINITY / 2) { sum += r10; count++; }
-                        if (r01 > Float.NEGATIVE_INFINITY / 2) { sum += r01; count++; }
-                        if (r11 > Float.NEGATIVE_INFINITY / 2) { sum += r11; count++; }
-                        if (count > 0) {
-                            waterY = sum / count;
-                        }
-                    }
+                    float wy1 = r00 > Float.NEGATIVE_INFINITY / 2 ? r00 : WATER_LEVEL;
+                    float wy2 = r10 > Float.NEGATIVE_INFINITY / 2 ? r10 : WATER_LEVEL;
+                    float wy3 = r11 > Float.NEGATIVE_INFINITY / 2 ? r11 : WATER_LEVEL;
+                    float wy4 = r01 > Float.NEGATIVE_INFINITY / 2 ? r01 : WATER_LEVEL;
 
                     glBegin(GL_QUADS);
                     glNormal3f(0f, 1f, 0f);
-                    glVertex3f(wx1, waterY, wz1);
-                    glVertex3f(wx2, waterY, wz1);
-                    glVertex3f(wx2, waterY, wz2);
-                    glVertex3f(wx1, waterY, wz2);
+                    glVertex3f(wx1, wy1, wz1);
+                    glVertex3f(wx2, wy2, wz1);
+                    glVertex3f(wx2, wy3, wz2);
+                    glVertex3f(wx1, wy4, wz2);
                     glEnd();
                 }
             }
@@ -624,7 +618,9 @@ public class Chunk {
             float y1, float y2, float y3, float texScale) {
         float slope = (computeSlope(x1, z1) + computeSlope(x2, z2) + computeSlope(x3, z3)) / 3f;
         float height = Math.max(y1, Math.max(y2, y3));
-        int tex = pickTexture(height, slope);
+        int tex = isRiverCell(x1, z1) || isRiverCell(x2, z2) || isRiverCell(x3, z3)
+                ? manager.getTexture(biome.rockTex)
+                : pickTexture(height, slope);
 
         FloatBuilder builder = builders.computeIfAbsent(tex, key -> new FloatBuilder());
         float[] normal = computeNormal(x1, z1, x2, z2, x3, z3);
@@ -645,7 +641,9 @@ public class Chunk {
             float texScale) {
         float slope = (computeSlope(x1, z1) + computeSlope(x2, z2) + computeSlope(x3, z3)) / 3f;
         float height = Math.max(y1, Math.max(y2, y3));
-        int tex = pickTexture(height, slope);
+        int tex = isRiverCell(x1, z1) || isRiverCell(x2, z2) || isRiverCell(x3, z3)
+                ? manager.getTexture(biome.rockTex)
+                : pickTexture(height, slope);
 
         float wx1 = (cx * SIZE + x1) * scale;
         float wz1 = (cz * SIZE + z1) * scale;
@@ -691,7 +689,8 @@ public class Chunk {
 
     private void generateFeatures() {
         FeatureGenerationResult result = generateFeatureSpawns(
-                new FeatureGenerationInput(cx, cz, scale, biome, heights, featureMask, lakeMask, manager.getSeed()));
+                new FeatureGenerationInput(cx, cz, scale, biome, heights, riverSurface, featureMask, lakeMask,
+                        manager.getSeed()));
         applyFeatureGenerationResult(result);
     }
 
@@ -827,6 +826,10 @@ public class Chunk {
         return manager.getTexture(biome.grassTex);
     }
 
+    private boolean isRiverCell(int x, int z) {
+        return riverSurface[x][z] > Float.NEGATIVE_INFINITY / 2;
+    }
+
 
 
     public float getHeight(float wx, float wz) {
@@ -938,6 +941,9 @@ public class Chunk {
         for (int x = 0; x < SIZE; x++) {
             for (int z = 0; z < SIZE; z++) {
                 if (input.featureMask[x][z] || input.lakeMask[x][z]) {
+                    continue;
+                }
+                if (input.riverSurface != null && input.riverSurface[x][z] > Float.NEGATIVE_INFINITY / 2) {
                     continue;
                 }
 
