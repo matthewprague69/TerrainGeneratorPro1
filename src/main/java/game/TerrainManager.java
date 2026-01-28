@@ -165,6 +165,8 @@ public class TerrainManager {
             }
         }
 
+        reprioritizePendingQueues(pcx, pcz);
+
         // Generate/unload features based on featureRenderDist
         for (Chunk c : chunks.values()) {
             c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
@@ -208,6 +210,62 @@ public class TerrainManager {
             pendingChunks.addFirst(key);
         } else {
             pendingChunks.addLast(key);
+        }
+    }
+
+    private void reprioritizePendingQueues(int pcx, int pcz) {
+        if (!pendingChunks.isEmpty()) {
+            ArrayDeque<Long> near = new ArrayDeque<>();
+            ArrayDeque<Long> far = new ArrayDeque<>();
+            Iterator<Long> iterator = pendingChunks.iterator();
+            while (iterator.hasNext()) {
+                long key = iterator.next();
+                int cx = (int) (key >> 32);
+                int cz = (int) key;
+                int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+                if (dist > cacheRenderDist) {
+                    pendingChunkLods.remove(key);
+                    iterator.remove();
+                    continue;
+                }
+                if (dist <= 2) {
+                    near.addLast(key);
+                } else {
+                    far.addLast(key);
+                }
+                iterator.remove();
+            }
+            pendingChunks.addAll(near);
+            pendingChunks.addAll(far);
+        }
+
+        if (!pendingFeatureChunks.isEmpty()) {
+            ArrayDeque<Chunk> near = new ArrayDeque<>();
+            ArrayDeque<Chunk> far = new ArrayDeque<>();
+            Iterator<Chunk> iterator = pendingFeatureChunks.iterator();
+            while (iterator.hasNext()) {
+                Chunk chunk = iterator.next();
+                long key = key(chunk.cx, chunk.cz);
+                if (chunks.get(key) != chunk) {
+                    pendingFeatureKeys.remove(key);
+                    iterator.remove();
+                    continue;
+                }
+                int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
+                if (dist > cacheFeatureRenderDist || !chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                    pendingFeatureKeys.remove(key);
+                    iterator.remove();
+                    continue;
+                }
+                if (dist <= 2) {
+                    near.addLast(chunk);
+                } else {
+                    far.addLast(chunk);
+                }
+                iterator.remove();
+            }
+            pendingFeatureChunks.addAll(near);
+            pendingFeatureChunks.addAll(far);
         }
     }
 
