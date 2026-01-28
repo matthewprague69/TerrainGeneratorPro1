@@ -695,11 +695,13 @@ public class Chunk {
         final double ravineWidth = 0.12;
         final double ravineDepth = 30.0;
         final double riverFreq = 0.0018;
-        final double riverWidth = 0.045;
-        final double riverBlendWidth = 0.12;
-        final double riverDepth = 6.0;
+        final double riverWidth = 0.035;
+        final double riverBlendWidth = 0.08;
+        final double riverDepth = 3.5;
         final double riverMaskFreq = 0.0009;
         final double riverMaskThreshold = 0.25;
+        final double riverSurfaceOffset = 1.2;
+        final double riverSurfaceNoiseAmp = 0.6;
 
         long chunkSeed = FeatureUtil.hashSeed(cx, 12345, cz, seed);
         Random rand = new Random(chunkSeed);
@@ -746,11 +748,13 @@ public class Chunk {
                         double bankBlend = t * t * (3.0 - 2.0 * t);
                         double depthFactor = riverBand < riverWidth ? (riverWidth - riverBand) / riverWidth : 0.0;
                         depthFactor = depthFactor * depthFactor * (3.0 - 2.0 * depthFactor);
-                        float riverFloorNoise = (float) (terrainNoise.eval(wx * 0.003 + 1200.0, wz * 0.003 - 800.0) * 1.2);
-                        float riverFloor = Math.min(WATER_LEVEL - 0.2f, WATER_LEVEL - 0.8f + riverFloorNoise);
-                        float target = (float) (heights[x][z] - riverDepth * depthFactor);
+                        float riverSurfaceNoise = (float) (terrainNoise.eval(wx * 0.002 + 1200.0, wz * 0.002 - 800.0)
+                                * riverSurfaceNoiseAmp);
+                        float riverSurface = (float) (heights[x][z] - riverSurfaceOffset + riverSurfaceNoise);
+                        float riverFloor = riverSurface - (float) (riverDepth * depthFactor);
+                        float target = Math.min(heights[x][z], riverFloor);
                         float blended = (float) (heights[x][z] * (1.0 - bankBlend) + target * bankBlend);
-                        heights[x][z] = Math.min(blended, riverFloor);
+                        heights[x][z] = blended;
                     }
                 }
             }
