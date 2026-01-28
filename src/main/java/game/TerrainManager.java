@@ -141,6 +141,7 @@ public class TerrainManager {
         updateNeededChunks(pcx, pcz, prevChunkX, prevChunkZ);
 
         reprioritizePendingQueues(pcx, pcz);
+        refreshChunkLods(pcx, pcz);
 
         // Generate/unload features based on featureRenderDist
         for (Chunk c : chunks.values()) {
@@ -168,6 +169,24 @@ public class TerrainManager {
 
         processPendingChunkGenerations();
         processPendingFeatureGenerations(pcx, pcz);
+    }
+
+    private void refreshChunkLods(int pcx, int pcz) {
+        for (Chunk chunk : chunks.values()) {
+            int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
+            if (dist > renderDist) {
+                continue;
+            }
+            int targetLOD = 0;
+            if (dist >= Math.max(6, renderDist - 2)) {
+                targetLOD = 2;
+            } else if (dist >= Math.max(4, renderDist / 2)) {
+                targetLOD = 1;
+            }
+            if (targetLOD < chunk.getLOD()) {
+                queueChunkGeneration(key(chunk.cx, chunk.cz), chunk.cx, chunk.cz, targetLOD, dist);
+            }
+        }
     }
 
     private void updateNeededChunks(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
