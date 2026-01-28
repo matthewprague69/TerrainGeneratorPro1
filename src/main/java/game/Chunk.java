@@ -721,7 +721,7 @@ public class Chunk {
         final double riverDepth = 8.0;
         final double riverMaskFreq = 0.0009;
         final double riverMaskThreshold = 0.38;
-        final float ridgeOffset = 0.7f;
+        final float ridgeOffset = 0.55f;
         final float surfaceNoiseAmp = 0.2f;
         final float flowSlopeScale = 0.00075f;
         final float minRiverDepth = 1.8f;
@@ -742,7 +742,11 @@ public class Chunk {
                     if (maskBlend > 0.001) {
                         double t = (riverBlendWidth - riverBand) / riverBlendWidth;
                         double bankBlend = t * t * (3.0 - 2.0 * t) * maskBlend;
-                        double localWidth = riverWidth * (0.76 + 0.28 * (terrainNoise.eval(wx * 0.002, wz * 0.002) * 0.5 + 0.5));
+                        float localSlope = computeSlope(heights, x, z);
+                        float slopeBoost = Math.min(1.0f, localSlope * 0.9f);
+                        double localWidth = riverWidth
+                                * (0.76 + 0.28 * (terrainNoise.eval(wx * 0.002, wz * 0.002) * 0.5 + 0.5))
+                                * (1.0 + 0.6 * slopeBoost);
                         double depthFactor = riverBand < localWidth ? (localWidth - riverBand) / localWidth : 0.0;
                         depthFactor = depthFactor * depthFactor * (3.0 - 2.0 * depthFactor);
                         depthFactor = Math.max(depthFactor, bankBlend * 0.2) * maskBlend;
@@ -760,8 +764,8 @@ public class Chunk {
                         carveDepth = Math.max(carveDepth, minRiverDepth * (float) Math.max(0.15, depthFactor));
                         float bedHeight = baseHeight - carveDepth;
                         float surfaceFromCarve = baseHeight - carveDepth * surfaceCarveRatio;
-                        float riverSurfaceHeight = Math.min(baseHeight - ridgeOffset * 0.5f,
-                                Math.min(surfaceFromCarve, downhillSurface + surfaceNoise));
+                        float riverSurfaceHeight = Math.min(baseHeight - ridgeOffset * 0.35f,
+                                Math.min(surfaceFromCarve + 0.2f, downhillSurface + surfaceNoise));
                         float target = Math.min(bedHeight, riverSurfaceHeight - minRiverDepth);
                         float blended = (float) (baseHeight * (1.0 - bankBlend) + target * bankBlend);
                         heights[x][z] = blended;
