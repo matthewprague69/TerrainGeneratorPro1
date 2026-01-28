@@ -690,9 +690,12 @@ public class Chunk {
         final double caveFreq = 0.06;
         final double caveThreshold = 0.55;
         final double caveDepth = 6.0;
-        final double ravineFreq = 0.01;
-        final double ravineWidth = 0.08;
-        final double ravineDepth = 12.0;
+        final double ravineFreq = 0.004;
+        final double ravineWidth = 0.05;
+        final double ravineDepth = 20.0;
+        final double riverFreq = 0.005;
+        final double riverWidth = 0.035;
+        final double riverDepth = 4.0;
 
         for (int x = 0; x <= SIZE; x++) {
             for (int z = 0; z <= SIZE; z++) {
@@ -710,6 +713,13 @@ public class Chunk {
                 if (ravineBand < ravineWidth) {
                     double t = (ravineWidth - ravineBand) / ravineWidth;
                     heights[x][z] -= (float) (ravineDepth * t);
+                }
+
+                double riverNoise = terrainNoise.eval(wx * riverFreq + 2200.0, wz * riverFreq - 1300.0);
+                double riverBand = Math.abs(riverNoise);
+                if (riverBand < riverWidth) {
+                    double t = (riverWidth - riverBand) / riverWidth;
+                    heights[x][z] -= (float) (riverDepth * t);
                 }
             }
         }
