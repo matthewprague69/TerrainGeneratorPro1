@@ -415,17 +415,17 @@ public class Chunk {
         float texScale = 0.2f / (1f + lod * 0.5f);
         int step = (int) Math.pow(2, lod);
         for (int z = 0; z < SIZE; z += step) {
+            int z2 = Math.min(z + step, SIZE);
             for (int x = 0; x < SIZE; x += step) {
-                if (x + step > SIZE || z + step > SIZE)
-                    continue;
+                int x2 = Math.min(x + step, SIZE);
 
                 float y00 = heights[x][z];
-                float y10 = heights[x + step][z];
-                float y01 = heights[x][z + step];
-                float y11 = heights[x + step][z + step];
+                float y10 = heights[x2][z];
+                float y01 = heights[x][z2];
+                float y11 = heights[x2][z2];
 
-                addTriangle(builders, x, z, x + step, z, x, z + step, y00, y10, y01, texScale);
-                addTriangle(builders, x + step, z, x + step, z + step, x, z + step, y10, y11, y01, texScale);
+                addTriangle(builders, x, z, x2, z, x, z2, y00, y10, y01, texScale);
+                addTriangle(builders, x2, z, x2, z2, x, z2, y10, y11, y01, texScale);
             }
         }
 
@@ -448,19 +448,19 @@ public class Chunk {
         int step = (int) Math.pow(2, lod);
 
         for (int z = 0; z < SIZE; z += step) {
+            int z2 = Math.min(z + step, SIZE);
             for (int x = 0; x < SIZE; x += step) {
-                if (x + step > SIZE || z + step > SIZE)
-                    continue;
+                int x2 = Math.min(x + step, SIZE);
 
                 float y00 = heights[x][z];
-                float y10 = heights[x + step][z];
-                float y01 = heights[x][z + step];
-                float y11 = heights[x + step][z + step];
+                float y10 = heights[x2][z];
+                float y01 = heights[x][z2];
+                float y11 = heights[x2][z2];
 
                 float r00 = riverSurface[x][z];
-                float r10 = riverSurface[x + step][z];
-                float r01 = riverSurface[x][z + step];
-                float r11 = riverSurface[x + step][z + step];
+                float r10 = riverSurface[x2][z];
+                float r01 = riverSurface[x][z2];
+                float r11 = riverSurface[x2][z2];
                 boolean hasRiverWater = r00 > Float.NEGATIVE_INFINITY / 2
                         || r10 > Float.NEGATIVE_INFINITY / 2
                         || r01 > Float.NEGATIVE_INFINITY / 2
@@ -473,8 +473,8 @@ public class Chunk {
                 if (needsWater) {
                     float wx1 = (cx * SIZE + x) * scale;
                     float wz1 = (cz * SIZE + z) * scale;
-                    float wx2 = (cx * SIZE + x + step) * scale;
-                    float wz2 = (cz * SIZE + z + step) * scale;
+                    float wx2 = (cx * SIZE + x2) * scale;
+                    float wz2 = (cz * SIZE + z2) * scale;
 
                     float wy1 = r00 > Float.NEGATIVE_INFINITY / 2 ? r00 : WATER_LEVEL;
                     float wy2 = r10 > Float.NEGATIVE_INFINITY / 2 ? r10 : WATER_LEVEL;
@@ -662,19 +662,15 @@ public class Chunk {
 
     private void addSkirts(Map<Integer, FloatBuilder> builders, int step, float texScale) {
         for (int x = 0; x < SIZE; x += step) {
-            if (x + step > SIZE) {
-                continue;
-            }
-            addSkirtQuad(builders, x, 0, x + step, 0, heights[x][0], heights[x + step][0], texScale);
-            addSkirtQuad(builders, x, SIZE, x + step, SIZE, heights[x][SIZE], heights[x + step][SIZE], texScale);
+            int x2 = Math.min(x + step, SIZE);
+            addSkirtQuad(builders, x, 0, x2, 0, heights[x][0], heights[x2][0], texScale);
+            addSkirtQuad(builders, x, SIZE, x2, SIZE, heights[x][SIZE], heights[x2][SIZE], texScale);
         }
 
         for (int z = 0; z < SIZE; z += step) {
-            if (z + step > SIZE) {
-                continue;
-            }
-            addSkirtQuad(builders, 0, z, 0, z + step, heights[0][z], heights[0][z + step], texScale);
-            addSkirtQuad(builders, SIZE, z, SIZE, z + step, heights[SIZE][z], heights[SIZE][z + step], texScale);
+            int z2 = Math.min(z + step, SIZE);
+            addSkirtQuad(builders, 0, z, 0, z2, heights[0][z], heights[0][z2], texScale);
+            addSkirtQuad(builders, SIZE, z, SIZE, z2, heights[SIZE][z], heights[SIZE][z2], texScale);
         }
     }
 
