@@ -43,9 +43,26 @@ public class SkyRenderer {
 
     public void renderSkybox() {
         float brightness = getSkyBrightness();
-        float r = 0.6f * brightness;
-        float g = 0.75f * brightness;
-        float b = 1.0f * brightness;
+        float sunrise = smoothstep(0.2f, 0.3f, timeOfDay);
+        float sunset = 1f - smoothstep(0.7f, 0.8f, timeOfDay);
+        float twilight = Math.max(sunrise, sunset);
+
+        float[] base = new float[] { 0.6f, 0.75f, 1.0f };
+        float[] dawn = new float[] { 1.0f, 0.55f, 0.35f };
+        float[] dusk = new float[] { 0.95f, 0.45f, 0.65f };
+        float total = sunrise + sunset;
+        float dawnWeight = total > 0f ? sunrise / total : 0f;
+        float duskWeight = total > 0f ? sunset / total : 0f;
+        float[] twilightColor = new float[] {
+                dawn[0] * dawnWeight + dusk[0] * duskWeight,
+                dawn[1] * dawnWeight + dusk[1] * duskWeight,
+                dawn[2] * dawnWeight + dusk[2] * duskWeight
+        };
+        float[] sky = lerpColor(base, twilightColor, twilight);
+        float intensity = 0.25f + 0.75f * brightness;
+        float r = sky[0] * intensity;
+        float g = sky[1] * intensity;
+        float b = sky[2] * intensity;
         glClearColor(r, g, b, 1f);
     }
 
@@ -56,28 +73,27 @@ public class SkyRenderer {
         glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
 
         float[] sunDir = getSunDirection();
-        float[] lightDir;
-
         float brightness = getSkyBrightness();
-
-        if (brightness > 0f) {
-            // Daytime: sun shines from sun's direction
-            lightDir = new float[] { -sunDir[0], -sunDir[1], -sunDir[2], 0f };
-        } else {
-            // Nighttime: moon shines from opposite direction
-            lightDir = new float[] { sunDir[0], sunDir[1], sunDir[2], 0f };
-        }
-        FloatBuffer lightBuf = BufferUtils.createFloatBuffer(4).put(lightDir).flip();
+        float[] lightDir = getLightDirection();
+        float[] lightPos = new float[] { lightDir[0], lightDir[1], lightDir[2], 0f };
+        FloatBuffer lightBuf = BufferUtils.createFloatBuffer(4).put(lightPos).flip();
         glLightfv(GL_LIGHT0, GL_POSITION, lightBuf);
 
         if (brightness > 0f) {
-            // Daylight: yellowish-white sunlight
+            float[] sunColor = getSunLightColor();
+            float sunrise = smoothstep(0.2f, 0.3f, timeOfDay);
+            float sunset = 1f - smoothstep(0.7f, 0.8f, timeOfDay);
+            float twilightBoost = Math.max(sunrise, sunset) * 0.35f;
+            float intensity = brightness * (1.0f + twilightBoost);
             FloatBuffer diffuse = BufferUtils.createFloatBuffer(4).put(new float[] {
-                    brightness * 2.0f, brightness * 1.8f, brightness * 1.6f, 1f
+                    sunColor[0] * intensity,
+                    sunColor[1] * intensity,
+                    sunColor[2] * intensity,
+                    1f
             }).flip();
             glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
 
-            float ambient = 0.05f + 0.15f * brightness;
+            float ambient = 0.05f + 0.18f * brightness;
             FloatBuffer ambientBuf = BufferUtils.createFloatBuffer(4).put(new float[] {
                     ambient, ambient, ambient, 1f
             }).flip();
@@ -109,13 +125,15 @@ public class SkyRenderer {
 
         // --- SUN ---
         if (sunDir[1] > -0.1f) {
-            glColor3f(1.2f, 1.1f, 0.7f); // <<< Fixed yellow sun color
+            float[] sunColor = getSunLightColor();
+            glColor3f(sunColor[0], sunColor[1], sunColor[2]);
             drawSphere(camX + sunDir[0] * dist, camY + sunDir[1] * dist, camZ + sunDir[2] * dist, 60f);
         }
 
         // --- MOON ---
         if (-sunDir[1] > -0.1f) {
-            glColor3f(0.8f, 0.9f, 1.0f); // Pale blue moon
+            float[] moonColor = new float[] { 0.7f, 0.8f, 1.0f };
+            glColor3f(moonColor[0], moonColor[1], moonColor[2]);
             drawSphere(camX - sunDir[0] * dist, camY - sunDir[1] * dist, camZ - sunDir[2] * dist, 40f);
         }
 
@@ -179,6 +197,15 @@ public class SkyRenderer {
         return new float[] { sunDir[0], sunDir[1], sunDir[2] };
     }
 
+    public float[] getLightDirection() {
+        float[] sunDir = getSunDirection();
+        float brightness = getSkyBrightness();
+        if (brightness > 0f) {
+            return new float[] { sunDir[0], sunDir[1], sunDir[2] };
+        }
+        return new float[] { -sunDir[0], -sunDir[1], -sunDir[2] };
+    }
+
     public float getShadowStrength() {
         return Math.min(0.65f, getSkyBrightness());
     }
@@ -232,6 +259,33 @@ public class SkyRenderer {
         }
 
         return brightness;
+    }
+
+    private float[] getSunLightColor() {
+        float sunrise = smoothstep(0.2f, 0.3f, timeOfDay);
+        float sunset = 1f - smoothstep(0.7f, 0.8f, timeOfDay);
+        float total = sunrise + sunset;
+        float dawnWeight = total > 0f ? sunrise / total : 0f;
+        float duskWeight = total > 0f ? sunset / total : 0f;
+        float[] day = new float[] { 1.0f, 0.95f, 0.85f };
+        float[] dawn = new float[] { 1.3f, 0.75f, 0.4f };
+        float[] dusk = new float[] { 1.2f, 0.55f, 0.7f };
+        float[] twilight = new float[] {
+                dawn[0] * dawnWeight + dusk[0] * duskWeight,
+                dawn[1] * dawnWeight + dusk[1] * duskWeight,
+                dawn[2] * dawnWeight + dusk[2] * duskWeight
+        };
+        float twilightBlend = Math.max(sunrise, sunset);
+        return lerpColor(day, twilight, twilightBlend);
+    }
+
+    private float[] lerpColor(float[] a, float[] b, float t) {
+        float clamped = Math.max(0f, Math.min(1f, t));
+        return new float[] {
+                a[0] + (b[0] - a[0]) * clamped,
+                a[1] + (b[1] - a[1]) * clamped,
+                a[2] + (b[2] - a[2]) * clamped
+        };
     }
 
     private float smoothstep(float edge0, float edge1, float x) {
