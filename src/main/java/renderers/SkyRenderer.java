@@ -56,18 +56,10 @@ public class SkyRenderer {
         glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
 
         float[] sunDir = getSunDirection();
-        float[] lightDir;
-
         float brightness = getSkyBrightness();
-
-        if (brightness > 0f) {
-            // Daytime: sun shines from sun's direction
-            lightDir = new float[] { -sunDir[0], -sunDir[1], -sunDir[2], 0f };
-        } else {
-            // Nighttime: moon shines from opposite direction
-            lightDir = new float[] { sunDir[0], sunDir[1], sunDir[2], 0f };
-        }
-        FloatBuffer lightBuf = BufferUtils.createFloatBuffer(4).put(lightDir).flip();
+        float[] lightDir = getLightDirection();
+        float[] lightPos = new float[] { lightDir[0], lightDir[1], lightDir[2], 0f };
+        FloatBuffer lightBuf = BufferUtils.createFloatBuffer(4).put(lightPos).flip();
         glLightfv(GL_LIGHT0, GL_POSITION, lightBuf);
 
         if (brightness > 0f) {
@@ -177,6 +169,15 @@ public class SkyRenderer {
             return new float[] { -sunDir[0], -sunDir[1], -sunDir[2] };
         }
         return new float[] { sunDir[0], sunDir[1], sunDir[2] };
+    }
+
+    public float[] getLightDirection() {
+        float[] sunDir = getSunDirection();
+        float brightness = getSkyBrightness();
+        if (brightness > 0f) {
+            return new float[] { sunDir[0], sunDir[1], sunDir[2] };
+        }
+        return new float[] { -sunDir[0], -sunDir[1], -sunDir[2] };
     }
 
     public float getShadowStrength() {
