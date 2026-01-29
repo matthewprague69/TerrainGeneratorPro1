@@ -34,6 +34,7 @@ public class Chunk {
 
     private final float[][] heights = new float[SIZE + 1][SIZE + 1];
     private final float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
+    private final int[][] surfaceTex = new int[SIZE + 1][SIZE + 1];
     private final List<Feature> features = new ArrayList<>();
     private final boolean[][] featureMask = new boolean[SIZE][SIZE];
     private final boolean[][] lakeMask = new boolean[SIZE][SIZE];
@@ -66,12 +67,13 @@ public class Chunk {
         public final Biome biome;
         public final float[][] heights;
         public final float[][] riverSurface;
+        public final int[][] surfaceTex;
         public final boolean[][] featureMask;
         public final boolean[][] lakeMask;
         public final List<Feature> lakes;
 
         public ChunkBuildData(int cx, int cz, int lod, Biome biome, float[][] heights, boolean[][] featureMask,
-                              boolean[][] lakeMask, List<Feature> lakes, float[][] riverSurface) {
+                              boolean[][] lakeMask, List<Feature> lakes, float[][] riverSurface, int[][] surfaceTex) {
             this.cx = cx;
             this.cz = cz;
             this.lod = lod;
@@ -81,6 +83,7 @@ public class Chunk {
             this.lakeMask = lakeMask;
             this.lakes = lakes;
             this.riverSurface = riverSurface;
+            this.surfaceTex = surfaceTex;
         }
     }
 
@@ -185,6 +188,7 @@ public class Chunk {
 
         float[][] heights = new float[SIZE + 1][SIZE + 1];
         float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
+        int[][] surfaceTex = new int[SIZE + 1][SIZE + 1];
         boolean[][] featureMask = new boolean[SIZE][SIZE];
         boolean[][] lakeMask = new boolean[SIZE][SIZE];
         List<Feature> lakes = new ArrayList<>();
@@ -225,9 +229,10 @@ public class Chunk {
 
         resetRiverSurface(riverSurface);
         applyCavesAndRavines(heights, riverSurface, cx, cz, scale, terrainNoise, manager.getSeed());
+        computeSurfaceTextures(heights, surfaceTex, cx, cz, scale, manager);
 
         LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, lakes, manager);
-        return new ChunkBuildData(cx, cz, lod, biome, heights, featureMask, lakeMask, lakes, riverSurface);
+        return new ChunkBuildData(cx, cz, lod, biome, heights, featureMask, lakeMask, lakes, riverSurface, surfaceTex);
     }
 
     private void generate(boolean generateFeatures) {
@@ -277,6 +282,7 @@ public class Chunk {
 
 
         LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, features, manager);
+        computeSurfaceTextures(heights, surfaceTex, cx, cz, scale, manager);
         if (generateFeatures)
             generateFeatures();
         stitchEdges();
@@ -722,7 +728,7 @@ public class Chunk {
         float height = Math.max(y1, Math.max(y2, y3));
         int tex = isRiverBed(x1, z1, y1) || isRiverBed(x2, z2, y2) || isRiverBed(x3, z3, y3)
                 ? manager.getTexture(biome.rockTex)
-                : pickBlendedTexture(x1, z1, x2, z2, x3, z3, height, slope);
+                : pickSurfaceTexture(x1, z1, x2, z2, x3, z3);
 
         FloatBuilder builder = builders.computeIfAbsent(tex, key -> new FloatBuilder());
         float[] normal = computeNormal(x1, z1, x2, z2, x3, z3);
@@ -745,7 +751,7 @@ public class Chunk {
         float height = Math.max(y1, Math.max(y2, y3));
         int tex = isRiverBed(x1, z1, y1) || isRiverBed(x2, z2, y2) || isRiverBed(x3, z3, y3)
                 ? manager.getTexture(biome.rockTex)
-                : pickBlendedTexture(x1, z1, x2, z2, x3, z3, height, slope);
+                : pickSurfaceTexture(x1, z1, x2, z2, x3, z3);
 
         float wx1 = (cx * SIZE + x1) * scale;
         float wz1 = (cz * SIZE + z1) * scale;
@@ -913,10 +919,10 @@ public class Chunk {
     }
 
     private int pickTexture(float height, float slope) {
-        return pickTextureForBiome(biome, height, slope);
+        return pickTextureForBiome(biome, height, slope, manager);
     }
 
-    private int pickTextureForBiome(Biome targetBiome, float height, float slope) {
+    private static int pickTextureForBiome(Biome targetBiome, float height, float slope, TerrainManager manager) {
         Random rand = new Random((int)(height * 1000 + slope * 1000));
 
 
@@ -950,12 +956,40 @@ public class Chunk {
         return manager.getTexture(targetBiome.grassTex);
     }
 
-    private int pickBlendedTexture(int x1, int z1, int x2, int z2, int x3, int z3, float height, float slope) {
+    private int pickSurfaceTexture(int x1, int z1, int x2, int z2, int x3, int z3) {
+        int t1 = surfaceTex[x1][z1];
+        int t2 = surfaceTex[x2][z2];
+        int t3 = surfaceTex[x3][z3];
+        if (t1 == t2 || t1 == t3) {
+            return t1;
+        }
+        if (t2 == t3) {
+            return t2;
+        }
         float wx = (cx * SIZE + (x1 + x2 + x3) / 3f) * scale;
         float wz = (cz * SIZE + (z1 + z2 + z3) / 3f) * scale;
+        float noise = biomeBlendNoise(wx, wz, manager.getSeed());
+        return noise < 0.5f ? t1 : t2;
+    }
+
+    private static void computeSurfaceTextures(float[][] heights, int[][] surfaceTex, int cx, int cz, float scale,
+                                               TerrainManager manager) {
+        for (int x = 0; x <= SIZE; x++) {
+            for (int z = 0; z <= SIZE; z++) {
+                float height = heights[x][z];
+                float slope = computeSlope(heights, x, z);
+                float wx = (cx * SIZE + x) * scale;
+                float wz = (cz * SIZE + z) * scale;
+                surfaceTex[x][z] = pickBlendedTextureAt(wx, wz, height, slope, manager);
+            }
+        }
+    }
+
+    private static int pickBlendedTextureAt(float wx, float wz, float height, float slope,
+                                            TerrainManager manager) {
         Map<Biome, Float> weights = manager.getBiomeWeights(wx, wz);
-        Biome primary = biome;
-        Biome secondary = biome;
+        Biome primary = Biome.PLAINS;
+        Biome secondary = Biome.PLAINS;
         float primaryWeight = -1f;
         float secondaryWeight = -1f;
         for (Map.Entry<Biome, Float> entry : weights.entrySet()) {
@@ -971,21 +1005,21 @@ public class Chunk {
             }
         }
 
-        if (secondary == null || secondaryWeight <= 0.0f) {
-            return pickTextureForBiome(primary, height, slope);
+        if (secondaryWeight <= 0.0f) {
+            return pickTextureForBiome(primary, height, slope, manager);
         }
 
         float blend = secondaryWeight / Math.max(0.0001f, primaryWeight + secondaryWeight);
-        float noise = biomeBlendNoise(wx, wz);
+        float noise = biomeBlendNoise(wx, wz, manager.getSeed());
         Biome chosen = noise < blend ? secondary : primary;
-        return pickTextureForBiome(chosen, height, slope);
+        return pickTextureForBiome(chosen, height, slope, manager);
     }
 
-    private float biomeBlendNoise(float wx, float wz) {
+    private static float biomeBlendNoise(float wx, float wz, long seed) {
         int ix = (int) Math.floor(wx * 0.25f);
         int iz = (int) Math.floor(wz * 0.25f);
-        long seed = FeatureUtil.hashSeed(ix, 0, iz, manager.getSeed());
-        return ((seed >>> 8) & 0xffff) / (float) 0xffff;
+        long hash = FeatureUtil.hashSeed(ix, 0, iz, seed);
+        return ((hash >>> 8) & 0xffff) / (float) 0xffff;
     }
 
     private boolean isRiverCell(int x, int z) {
@@ -1070,6 +1104,11 @@ public class Chunk {
         } else {
             resetRiverSurface(riverSurface);
         }
+        if (data.surfaceTex != null) {
+            copyTexturesInto(data.surfaceTex, surfaceTex);
+        } else {
+            computeSurfaceTextures(heights, surfaceTex, cx, cz, scale, manager);
+        }
         if (data.lakes != null) {
             features.addAll(data.lakes);
         }
@@ -1099,6 +1138,12 @@ public class Chunk {
     }
 
     private static void copyMaskInto(boolean[][] source, boolean[][] target) {
+        for (int i = 0; i < source.length && i < target.length; i++) {
+            System.arraycopy(source[i], 0, target[i], 0, Math.min(source[i].length, target[i].length));
+        }
+    }
+
+    private static void copyTexturesInto(int[][] source, int[][] target) {
         for (int i = 0; i < source.length && i < target.length; i++) {
             System.arraycopy(source[i], 0, target[i], 0, Math.min(source[i].length, target[i].length));
         }
