@@ -9,19 +9,56 @@ import java.nio.FloatBuffer;
 
 
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class TerrainManager {
+    private static final int MAX_CHUNKS_PER_FRAME = 12;
+    private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 8;
+    private static final long CHUNK_BUDGET_NS = 4_000_000L;
+    private static final long FEATURE_BUDGET_NS = 6_000_000L;
+    private static final int MAX_APPLIED_CHUNKS_PER_FRAME = 4;
+    private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
+
     private final Map<Long, Chunk> chunks = new HashMap<>();
+    private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
+    private final Map<Long, Integer> pendingChunkLods = new HashMap<>();
+    private final ArrayDeque<Chunk> pendingFeatureChunks = new ArrayDeque<>();
+    private final Set<Long> pendingFeatureKeys = new HashSet<>();
+    private final Set<Long> neededKeys = new HashSet<>();
+    private final Set<Long> inflightChunkKeys = new HashSet<>();
+    private final Set<Long> inflightFeatureKeys = new HashSet<>();
+    private final ConcurrentLinkedQueue<Chunk.ChunkBuildData> completedChunkBuilds = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Chunk.FeatureGenerationResult> completedFeatureGenerations =
+            new ConcurrentLinkedQueue<>();
+    private final ExecutorService chunkGenerator = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "chunk-generator");
+        t.setDaemon(true);
+        return t;
+    });
+    private final ExecutorService featureGenerator = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "feature-generator");
+        t.setDaemon(true);
+        return t;
+    });
     private final OpenSimplexNoise terrainNoise;
-    private final OpenSimplexNoise biomeNoise;
     private final BiomeRegionGenerator regionGenerator;
     private final SkyRenderer skyRenderer;
+    private final FloatBuffer fogColorBuffer = BufferUtils.createFloatBuffer(4);
 
 
     private final float scale;
     private int renderDist;
     private int featureRenderDist;
     private int shadowRenderDist;
+    private int cacheRenderDist;
+    private int cacheFeatureRenderDist;
+    private int featureSimplifiedDistance;
+    private int grassDetailDistance;
+    private boolean renderDistanceDirty = true;
+    private int lastUpdateChunkX = Integer.MIN_VALUE;
+    private int lastUpdateChunkZ = Integer.MIN_VALUE;
     private final long seed;
 
     private final Map<String, Integer> textureMap = new HashMap<>();
@@ -36,11 +73,14 @@ public class TerrainManager {
     public TerrainManager(long seed, float scale, int renderDist, int featureRenderDist,SkyRenderer skyRenderer) {
         this.seed = seed;
         this.terrainNoise = new OpenSimplexNoise(seed);
-        this.biomeNoise = new OpenSimplexNoise(seed + 12345);
         this.scale = scale;
         this.renderDist = renderDist;
         this.featureRenderDist = featureRenderDist;
-        this.shadowRenderDist = Math.max(renderDist + 2, featureRenderDist + 2);
+        this.shadowRenderDist = renderDist + 12;
+        this.cacheRenderDist = renderDist + 4;
+        this.cacheFeatureRenderDist = featureRenderDist + 4;
+        this.featureSimplifiedDistance = Math.max(1, featureRenderDist - 1);
+        this.grassDetailDistance = Math.max(1, featureRenderDist - 2);
         this.regionGenerator = new BiomeRegionGenerator(seed);
 
 
@@ -65,23 +105,9 @@ public class TerrainManager {
         return regionGenerator.getBiomeAtChunk(cx, cz);
     }*/
     private Biome pickBiome(int cx, int cz) {
-        double nx = (cx * Chunk.SIZE + Chunk.SIZE / 2.0) * 0.002;
-        double nz = (cz * Chunk.SIZE + Chunk.SIZE / 2.0) * 0.002;
-        double value = (biomeNoise.eval(nx, nz) + 1) * 0.5;
-
-        // Normalize all spawn chances
-        double totalChance = Arrays.stream(Biome.values()).mapToDouble(b -> b.spawnChance).sum();
-        double threshold = value * totalChance;
-
-        double sum = 0;
-        for (Biome b : Biome.values()) {
-            sum += b.spawnChance;
-            if (threshold <= sum)
-                return b;
-        }
-
-        // Force last biome (should never happen if normalized properly)
-        return Biome.values()[Biome.values().length - 1];
+        double wx = (cx * Chunk.SIZE + Chunk.SIZE / 2.0) * scale;
+        double wz = (cz * Chunk.SIZE + Chunk.SIZE / 2.0) * scale;
+        return regionGenerator.getDominantBiome(wx, wz);
     }
 
     public List<Feature> getNearbyFeatures(float wx, float wz, int chunkRadius) {
@@ -105,83 +131,346 @@ public class TerrainManager {
 
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
-        Set<Long> needed = new HashSet<>();
-
-        for (int dx = -renderDist; dx <= renderDist; dx++) {
-            for (int dz = -renderDist; dz <= renderDist; dz++) {
-                int cx = pcx + dx, cz = pcz + dz;
-                long k = key(cx, cz);
-
-                Chunk existing = chunks.get(k);
-
-                float chunkMinX = cx * Chunk.SIZE * scale;
-                float chunkMinZ = cz * Chunk.SIZE * scale;
-                float chunkMaxX = (cx + 1) * Chunk.SIZE * scale;
-                float chunkMaxZ = (cz + 1) * Chunk.SIZE * scale;
-
-// Use real Y bounds if chunk exists
-                float chunkMinY = -20f;
-                float chunkMaxY = 100f; // fallback default
-
-                /*if (existing != null) {
-                    BoundingBox box = existing.getBoundingBox();
-                    chunkMinY = box.minY;
-                    chunkMaxY = box.maxY;
-                }*/
-
-// Now frustum cull properly
-                if (!frustum.isBoxVisible(chunkMinX, chunkMinY, chunkMinZ, chunkMaxX, chunkMaxY, chunkMaxZ))
-                    continue;
-
-
-                needed.add(k);
-
-
-                int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
-                int targetLOD = 0;
-                /*
-                 * if (dist >= 15)
-                 * targetLOD = 3;
-                 * else if (dist >= 10)
-                 * targetLOD = 2;
-                 * else if (dist >= 5)
-                 * targetLOD = 1;
-                 */
-
-                if (existing == null || targetLOD < existing.getLOD()) {
-                    Biome b = pickBiome(cx, cz);
-                    Chunk upgraded = new Chunk(cx, cz, terrainNoise, scale, b, this, false, targetLOD);
-                    if (existing != null)
-                        existing.dispose();
-                    chunks.put(k, upgraded);
-                }
-
-            }
+        drainCompletedChunkBuilds(pcx, pcz);
+        drainCompletedFeatureGenerations(pcx, pcz);
+        if (renderDistanceDirty) {
+            rebuildNeededChunks(pcx, pcz);
+            reprioritizePendingQueues(pcx, pcz);
+            lastUpdateChunkX = pcx;
+            lastUpdateChunkZ = pcz;
+            renderDistanceDirty = false;
         }
+        boolean movedChunk = pcx != lastUpdateChunkX || pcz != lastUpdateChunkZ;
+        if (!movedChunk) {
+            processPendingChunkGenerations();
+            processPendingFeatureGenerations(pcx, pcz);
+            return;
+        }
+        int prevChunkX = lastUpdateChunkX;
+        int prevChunkZ = lastUpdateChunkZ;
+        lastUpdateChunkX = pcx;
+        lastUpdateChunkZ = pcz;
+        updateNeededChunks(pcx, pcz, prevChunkX, prevChunkZ);
+
+        reprioritizePendingQueues(pcx, pcz);
 
         // Generate/unload features based on featureRenderDist
         for (Chunk c : chunks.values()) {
-            c.unloadFeaturesIfOutOfRange(pcx, pcz, featureRenderDist);
-
-            BoundingBox box = c.getBoundingBox();
-            if (frustum.isBoxVisible(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ)) {
-                c.generateFeaturesIfNeeded(pcx, pcz, featureRenderDist);
+            c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
+            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+            if (dist <= cacheFeatureRenderDist) {
+                queueFeatureGeneration(c, pcx, pcz);
             }
-
         }
 
         // Dispose chunks no longer needed
         for (Iterator<Map.Entry<Long, Chunk>> it = chunks.entrySet().iterator(); it.hasNext();) {
             Map.Entry<Long, Chunk> entry = it.next();
-            if (!needed.contains(entry.getKey())) {
+            if (!neededKeys.contains(entry.getKey())) {
+                int cx = (int) (entry.getKey() >> 32);
+                int cz = (int) entry.getKey().intValue();
+                int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+                if (dist <= cacheRenderDist) {
+                    continue;
+                }
                 entry.getValue().dispose();
                 it.remove();
             }
         }
+
+        processPendingChunkGenerations();
+        processPendingFeatureGenerations(pcx, pcz);
+    }
+
+    private void updateNeededChunks(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
+        if (neededKeys.isEmpty() || Math.abs(pcx - prevChunkX) > 1 || Math.abs(pcz - prevChunkZ) > 1) {
+            rebuildNeededChunks(pcx, pcz);
+            return;
+        }
+
+        int dx = pcx - prevChunkX;
+        int dz = pcz - prevChunkZ;
+        if (dx != 0) {
+            int newCol = pcx + renderDist * Integer.signum(dx);
+            int oldCol = pcx - renderDist - Integer.signum(dx);
+            for (int offset = -renderDist; offset <= renderDist; offset++) {
+                addNeededChunk(newCol, pcz + offset, pcx, pcz);
+                removeNeededChunk(oldCol, pcz + offset);
+            }
+        }
+
+        if (dz != 0) {
+            int newRow = pcz + renderDist * Integer.signum(dz);
+            int oldRow = pcz - renderDist - Integer.signum(dz);
+            for (int offset = -renderDist; offset <= renderDist; offset++) {
+                addNeededChunk(pcx + offset, newRow, pcx, pcz);
+                removeNeededChunk(pcx + offset, oldRow);
+            }
+        }
+    }
+
+    private void rebuildNeededChunks(int pcx, int pcz) {
+        neededKeys.clear();
+
+        for (int dx = -renderDist; dx <= renderDist; dx++) {
+            for (int dz = -renderDist; dz <= renderDist; dz++) {
+                addNeededChunk(pcx + dx, pcz + dz, pcx, pcz);
+            }
+        }
+    }
+
+    private void addNeededChunk(int cx, int cz, int pcx, int pcz) {
+        long k = key(cx, cz);
+        neededKeys.add(k);
+
+        Chunk existing = chunks.get(k);
+        int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+        int targetLOD = 0;
+
+        if (existing == null) {
+            queueChunkGeneration(k, cx, cz, targetLOD, dist);
+        } else if (existing.getLOD() != targetLOD) {
+            queueChunkGeneration(k, cx, cz, targetLOD, dist);
+        }
+    }
+
+    private void removeNeededChunk(int cx, int cz) {
+        neededKeys.remove(key(cx, cz));
     }
 
     public Chunk getChunk(int cx, int cz) {
         return chunks.get(key(cx, cz));
+    }
+
+    private void queueChunkGeneration(long key, int cx, int cz, int targetLOD, int dist) {
+        Integer existing = pendingChunkLods.get(key);
+        if (existing != null) {
+            pendingChunkLods.put(key, Math.min(existing, targetLOD));
+            if (!pendingChunks.contains(key)) {
+                if (dist <= 2) {
+                    pendingChunks.addFirst(key);
+                } else {
+                    pendingChunks.addLast(key);
+                }
+            }
+            return;
+        }
+        pendingChunkLods.put(key, targetLOD);
+        if (dist <= 2) {
+            pendingChunks.addFirst(key);
+        } else {
+            pendingChunks.addLast(key);
+        }
+    }
+
+    private void reprioritizePendingQueues(int pcx, int pcz) {
+        if (!pendingChunks.isEmpty()) {
+            ArrayDeque<Long> near = new ArrayDeque<>();
+            ArrayDeque<Long> far = new ArrayDeque<>();
+            Iterator<Long> iterator = pendingChunks.iterator();
+            while (iterator.hasNext()) {
+                long key = iterator.next();
+                int cx = (int) (key >> 32);
+                int cz = (int) key;
+                int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+                if (dist > cacheRenderDist) {
+                    pendingChunkLods.remove(key);
+                    iterator.remove();
+                    continue;
+                }
+                if (dist <= 2) {
+                    near.addLast(key);
+                } else {
+                    far.addLast(key);
+                }
+                iterator.remove();
+            }
+            pendingChunks.addAll(near);
+            pendingChunks.addAll(far);
+        }
+
+        if (!pendingFeatureChunks.isEmpty()) {
+            ArrayDeque<Chunk> near = new ArrayDeque<>();
+            ArrayDeque<Chunk> far = new ArrayDeque<>();
+            Iterator<Chunk> iterator = pendingFeatureChunks.iterator();
+            while (iterator.hasNext()) {
+                Chunk chunk = iterator.next();
+                long key = key(chunk.cx, chunk.cz);
+                if (chunks.get(key) != chunk) {
+                    pendingFeatureKeys.remove(key);
+                    iterator.remove();
+                    continue;
+                }
+                int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
+                if (dist > cacheFeatureRenderDist || !chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                    pendingFeatureKeys.remove(key);
+                    iterator.remove();
+                    continue;
+                }
+                if (dist <= 2) {
+                    near.addLast(chunk);
+                } else {
+                    far.addLast(chunk);
+                }
+                iterator.remove();
+            }
+            pendingFeatureChunks.addAll(near);
+            pendingFeatureChunks.addAll(far);
+        }
+    }
+
+    private void processPendingChunkGenerations() {
+        int backlog = pendingChunks.size();
+        int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
+        int count = 0;
+        long start = System.nanoTime();
+        while (count < budget && !pendingChunks.isEmpty()) {
+            if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                break;
+            }
+            long key = pendingChunks.pollFirst();
+            Integer pendingLod = pendingChunkLods.remove(key);
+            if (pendingLod == null) {
+                continue;
+            }
+            if (inflightChunkKeys.contains(key)) {
+                pendingChunkLods.put(key, pendingLod);
+                if (!pendingChunks.contains(key)) {
+                    pendingChunks.addFirst(key);
+                }
+                continue;
+            }
+            int cx = (int) (key >> 32);
+            int cz = (int) key;
+            int targetLOD = pendingLod;
+            Biome b = pickBiome(cx, cz);
+            Chunk existing = chunks.get(key);
+            if (existing != null && targetLOD >= existing.getLOD()) {
+                continue;
+            }
+            inflightChunkKeys.add(key);
+            chunkGenerator.submit(() -> {
+                Chunk.ChunkBuildData data =
+                        Chunk.generateChunkData(cx, cz, terrainNoise, scale, b, this, targetLOD);
+                completedChunkBuilds.add(data);
+            });
+            count++;
+        }
+    }
+
+    private void queueFeatureGeneration(Chunk chunk, int pcx, int pcz) {
+        long key = key(chunk.cx, chunk.cz);
+        if (pendingFeatureKeys.contains(key) || inflightFeatureKeys.contains(key)) {
+            return;
+        }
+        if (!chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+            return;
+        }
+        pendingFeatureKeys.add(key);
+        int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
+        if (dist <= 2) {
+            pendingFeatureChunks.addFirst(chunk);
+        } else {
+            pendingFeatureChunks.addLast(chunk);
+        }
+    }
+
+    private void processPendingFeatureGenerations(int pcx, int pcz) {
+        int backlog = pendingFeatureChunks.size();
+        int budget = MAX_FEATURE_CHUNKS_PER_FRAME + Math.min(6, backlog / 12);
+        int count = 0;
+        long start = System.nanoTime();
+        while (count < budget && !pendingFeatureChunks.isEmpty()) {
+            if (System.nanoTime() - start > FEATURE_BUDGET_NS) {
+                break;
+            }
+            Chunk chunk = pendingFeatureChunks.poll();
+            long key = key(chunk.cx, chunk.cz);
+            pendingFeatureKeys.remove(key);
+            if (chunks.get(key) != chunk) {
+                continue;
+            }
+            if (inflightFeatureKeys.contains(key)) {
+                continue;
+            }
+            if (!chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                continue;
+            }
+            Chunk.FeatureGenerationInput input = chunk.createFeatureGenerationInput();
+            inflightFeatureKeys.add(key);
+            featureGenerator.submit(() -> {
+                Chunk.FeatureGenerationResult result = Chunk.generateFeatureSpawns(input);
+                completedFeatureGenerations.add(result);
+            });
+            count++;
+        }
+    }
+
+    private void drainCompletedChunkBuilds(int pcx, int pcz) {
+        Chunk.ChunkBuildData data;
+        int applied = 0;
+        while (applied < MAX_APPLIED_CHUNKS_PER_FRAME && (data = completedChunkBuilds.poll()) != null) {
+            long key = key(data.cx, data.cz);
+            inflightChunkKeys.remove(key);
+            Integer pendingLod = pendingChunkLods.get(key);
+            if (pendingLod != null && pendingLod < data.lod) {
+                if (!pendingChunks.contains(key)) {
+                    pendingChunks.addFirst(key);
+                }
+            }
+            int dist = Math.max(Math.abs(data.cx - pcx), Math.abs(data.cz - pcz));
+            if (dist > cacheRenderDist) {
+                continue;
+            }
+            Chunk existing = chunks.get(key);
+            if (existing != null && data.lod >= existing.getLOD()) {
+                continue;
+            }
+            Chunk built = new Chunk(data.cx, data.cz, terrainNoise, scale, data.biome, this, data.lod, data);
+            if (existing != null) {
+                existing.dispose();
+            }
+            chunks.put(key, built);
+            if (built.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                queueFeatureGeneration(built, pcx, pcz);
+            }
+            refreshNeighborEdges(built);
+            applied++;
+        }
+    }
+
+    private void refreshNeighborEdges(Chunk chunk) {
+        Chunk right = getChunk(chunk.cx + 1, chunk.cz);
+        if (right != null) {
+            right.refreshAfterNeighborUpdate();
+        }
+        Chunk bottom = getChunk(chunk.cx, chunk.cz + 1);
+        if (bottom != null) {
+            bottom.refreshAfterNeighborUpdate();
+        }
+        Chunk bottomRight = getChunk(chunk.cx + 1, chunk.cz + 1);
+        if (bottomRight != null) {
+            bottomRight.refreshAfterNeighborUpdate();
+        }
+    }
+
+    private void drainCompletedFeatureGenerations(int pcx, int pcz) {
+        Chunk.FeatureGenerationResult result;
+        int applied = 0;
+        while (applied < MAX_APPLIED_FEATURES_PER_FRAME
+                && (result = completedFeatureGenerations.poll()) != null) {
+            long key = key(result.cx, result.cz);
+            inflightFeatureKeys.remove(key);
+            Chunk chunk = chunks.get(key);
+            if (chunk == null) {
+                continue;
+            }
+            if (!chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                continue;
+            }
+            chunk.applyFeatureGenerationResult(result);
+            applied++;
+        }
     }
 
     public float getHeight(float wx, float wz) {
@@ -196,19 +485,28 @@ public class TerrainManager {
 
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
-        int featureDetailDistance = Math.max(1, featureRenderDist - 1);
-        int grassDetailDistance = Math.max(1, featureRenderDist - 2);
+        int featureDetailDistance = Math.min(featureSimplifiedDistance, featureRenderDist);
+        int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+            if (dist > renderDist) {
+                continue;
+            }
             c.drawTerrainAndFeatures(dist, featureDetailDistance, grassDetailDistance);
         }
 
         disableFog();
     }
 
-    public void drawWater() {
+    public void drawWater(float wx, float wz) {
+        int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
+        int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         for (Chunk c : chunks.values()) {
+            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+            if (dist > renderDist) {
+                continue;
+            }
             c.drawWater();
         }
     }
@@ -216,8 +514,8 @@ public class TerrainManager {
     public void drawDepth(float wx, float wz) {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
-        int featureDetailDistance = Math.max(1, featureRenderDist - 1);
-        int grassDetailDistance = Math.max(1, featureRenderDist - 2);
+        int featureDetailDistance = Math.min(featureSimplifiedDistance, featureRenderDist);
+        int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
@@ -235,18 +533,32 @@ public class TerrainManager {
         float time = skyRenderer.getTimeOfDay();
         float brightness = getFogBrightness(time);
 
-        glFogf(GL_FOG_START, renderDist * Chunk.SIZE * scale * 0.8f);
-        glFogf(GL_FOG_END, renderDist * Chunk.SIZE * scale * 1.0f);
+        float fogEnd = Math.max(0f, renderDist * Chunk.SIZE * scale);
+        float fogStart = Math.max(0f, (renderDist - 1f) * Chunk.SIZE * scale);
+        glFogf(GL_FOG_START, fogStart);
+        glFogf(GL_FOG_END, fogEnd);
 
         // --- New: match fog color to sky color ---
         float r = 0.6f * brightness;
         float g = 0.75f * brightness;
         float b = 1.0f * brightness;
 
-        FloatBuffer fogColor = BufferUtils.createFloatBuffer(4).put(new float[]{ r, g, b, 1f }).flip();
-        glFogfv(GL_FOG_COLOR, fogColor);
+        fogColorBuffer.clear();
+        fogColorBuffer.put(r).put(g).put(b).put(1f).flip();
+        glFogfv(GL_FOG_COLOR, fogColorBuffer);
 
         glHint(GL_FOG_HINT, GL_NICEST);
+    }
+
+    public float[] getFogSettings() {
+        float time = skyRenderer.getTimeOfDay();
+        float brightness = getFogBrightness(time);
+        float fogEnd = Math.max(0f, renderDist * Chunk.SIZE * scale);
+        float fogStart = Math.max(0f, (renderDist - 1f) * Chunk.SIZE * scale);
+        float r = 0.6f * brightness;
+        float g = 0.75f * brightness;
+        float b = 1.0f * brightness;
+        return new float[] { fogStart, fogEnd, r, g, b };
     }
 
 
@@ -278,26 +590,7 @@ public class TerrainManager {
     }
 
     public Map<Biome, Float> getBiomeWeights(double wx, double wz) {
-        double nx = wx * 0.001;
-        double nz = wz * 0.001;
-        double v = (biomeNoise.eval(nx, nz) + 1.0) / 2.0;
-
-        Map<Biome, Float> weights = new EnumMap<>(Biome.class);
-        float total = 0f;
-
-        for (Biome biome : Biome.values()) {
-            float distance = (float) Math.abs(v - biome.center);
-            float influence = 1f - (distance / biome.blendRadius);
-            influence = Math.max(0f, influence);
-            weights.put(biome, influence);
-            total += influence;
-        }
-
-        for (Biome biome : weights.keySet()) {
-            weights.put(biome, weights.get(biome) / total);
-        }
-
-        return weights;
+        return regionGenerator.getBiomeWeights(wx, wz);
     }
 
     public Biome getDominantBiome(double wx, double wz) {
@@ -319,6 +612,9 @@ public class TerrainManager {
     public void setRenderDistance(int r) {
         System.out.println("Render distance set to " + r);
         renderDist = Math.max(1, r);
+        cacheRenderDist = renderDist + 2;
+        shadowRenderDist = Math.max(shadowRenderDist, renderDist + 12);
+        renderDistanceDirty = true;
     }
 
     public int getRenderDistance() {
@@ -336,10 +632,31 @@ public class TerrainManager {
     public void setFeatureRenderDistance(int r) {
         System.out.println("Feature render distance set to " + r);
         featureRenderDist = Math.max(0, r);
+        cacheFeatureRenderDist = featureRenderDist + 2;
+        shadowRenderDist = Math.max(shadowRenderDist, renderDist + 12);
+        featureSimplifiedDistance = Math.min(featureSimplifiedDistance, featureRenderDist);
+        grassDetailDistance = Math.min(grassDetailDistance, featureRenderDist);
+        renderDistanceDirty = true;
     }
 
     public int getFeatureRenderDistance() {
         return featureRenderDist;
+    }
+
+    public void setFeatureSimplifiedDistance(int r) {
+        featureSimplifiedDistance = Math.max(0, Math.min(r, featureRenderDist));
+    }
+
+    public int getFeatureSimplifiedDistance() {
+        return featureSimplifiedDistance;
+    }
+
+    public void setGrassDetailDistance(int r) {
+        grassDetailDistance = Math.max(0, Math.min(r, featureRenderDist));
+    }
+
+    public int getGrassDetailDistance() {
+        return grassDetailDistance;
     }
 
     public int getSnowTexture() {
