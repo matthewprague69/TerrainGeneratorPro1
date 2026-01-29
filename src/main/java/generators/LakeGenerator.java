@@ -1,8 +1,8 @@
 package generators;
 
 import game.Biome;
-import game.TerrainManager;
 import game.Chunk;
+import game.TerrainManager;
 import objects.Feature;
 import objects.Lake;
 import spawners.FeatureSpawner;
@@ -15,10 +15,13 @@ import java.util.Random;
 
 public class LakeGenerator {
     public static void generateLakes(
-            Chunk chunk,
+            int cx,
+            int cz,
+            float scale,
             Biome biome,
             float[][] heights,
             boolean[][] featureMask,
+            boolean[][] lakeMask,
             List<Feature> features,
             TerrainManager manager) {
 
@@ -26,9 +29,6 @@ public class LakeGenerator {
             return;
 
         int SIZE = Chunk.SIZE;
-        int cx = chunk.cx;
-        int cz = chunk.cz;
-        float scale = chunk.getScale();
 
         long chunkSeed = FeatureUtil.hashSeed(cx, 0, cz, manager.getSeed());
         Random rand = new Random(chunkSeed);
@@ -65,8 +65,8 @@ public class LakeGenerator {
                             continue;
 
                         features.add(lake);
-                        carveLakeHole(lake, chunk, cx, cz, scale, heights, featureMask);
-                        markLakeArea(lake, cx, cz, scale, SIZE, featureMask);
+                        carveLakeHole(lake, cx, cz, scale, heights, featureMask);
+                        markLakeArea(lake, cx, cz, scale, SIZE, featureMask, lakeMask);
                     }
                 }
             }
@@ -150,7 +150,8 @@ public class LakeGenerator {
         return true;
     }
 
-    private static void markLakeArea(Lake lake, int cx, int cz, float scale, int SIZE, boolean[][] featureMask) {
+    private static void markLakeArea(Lake lake, int cx, int cz, float scale, int SIZE, boolean[][] featureMask,
+                                     boolean[][] lakeMask) {
         float buffer = 4.0f;
         float totalRadiusX = lake.getRadiusX() + buffer;
         float totalRadiusZ = lake.getRadiusZ() + buffer;
@@ -168,12 +169,15 @@ public class LakeGenerator {
                 float dz = ((cz * SIZE + lz + 0.5f) * scale) - centerWZ;
                 if ((dx * dx) / (totalRadiusX * totalRadiusX) + (dz * dz) / (totalRadiusZ * totalRadiusZ) <= 1f) {
                     featureMask[lx][lz] = true;
+                    if (lakeMask != null) {
+                        lakeMask[lx][lz] = true;
+                    }
                 }
             }
         }
     }
 
-    private static void carveLakeHole(Lake lake, Chunk chunk, int cx, int cz, float scale, float[][] heights,
+    private static void carveLakeHole(Lake lake, int cx, int cz, float scale, float[][] heights,
                                       boolean[][] featureMask) {
         int SIZE = Chunk.SIZE;
         float wx = lake.x;
