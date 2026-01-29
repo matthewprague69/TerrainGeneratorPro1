@@ -45,12 +45,9 @@ public class SkyRenderer {
         float brightness = getSkyBrightness();
         float sunrise = getSunriseFactor();
         float sunset = getSunsetFactor();
-        float twilight = Math.max(sunrise, sunset) * (1f - brightness);
-        if (brightness >= 0.95f) {
-            twilight = 0f;
-        }
+        float twilight = Math.max(sunrise, sunset);
 
-        float[] base = new float[] { 0.6f, 0.75f, 1.0f };
+        float[] day = new float[] { 0.6f, 0.75f, 1.0f };
         float[] dawn = new float[] { 1.0f, 0.55f, 0.35f };
         float[] dusk = new float[] { 0.95f, 0.45f, 0.65f };
         float[] night = new float[] { 0.02f, 0.03f, 0.08f };
@@ -62,8 +59,8 @@ public class SkyRenderer {
                 dawn[1] * dawnWeight + dusk[1] * duskWeight,
                 dawn[2] * dawnWeight + dusk[2] * duskWeight
         };
-        float[] daySky = lerpColor(base, twilightColor, twilight);
-        float[] sky = lerpColor(night, daySky, brightness);
+        float[] sky = lerpColor(night, day, brightness);
+        sky = lerpColor(sky, twilightColor, twilight);
         float r = sky[0];
         float g = sky[1];
         float b = sky[2];
@@ -292,15 +289,15 @@ public class SkyRenderer {
     }
 
     private float getSunriseFactor() {
-        if (timeOfDay >= 0.2f && timeOfDay <= 0.3f) {
-            return smoothstep(0.2f, 0.3f, timeOfDay);
+        if (timeOfDay >= 0.18f && timeOfDay <= 0.32f) {
+            return smoothstep(0.18f, 0.32f, timeOfDay);
         }
         return 0f;
     }
 
     private float getSunsetFactor() {
-        if (timeOfDay >= 0.7f && timeOfDay <= 0.8f) {
-            return 1f - smoothstep(0.7f, 0.8f, timeOfDay);
+        if (timeOfDay >= 0.68f && timeOfDay <= 0.82f) {
+            return 1f - smoothstep(0.68f, 0.82f, timeOfDay);
         }
         return 0f;
     }
