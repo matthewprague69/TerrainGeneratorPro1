@@ -9,6 +9,7 @@ uniform sampler2D uShadowMap;
 uniform int uUseTexture;
 uniform vec3 uLightDir;
 uniform float uLightStrength;
+uniform vec3 uLightColor;
 uniform mat4 uViewMatrix;
 uniform float uFogStart;
 uniform float uFogEnd;
@@ -51,7 +52,7 @@ void main() {
     float shadowed = mix(1.0, shadow, shadowStrength);
     float minShadow = mix(0.75, 0.55, uLightStrength);
     shadowed = max(shadowed, minShadow);
-    vec3 litColor = baseColor.rgb * lighting * shadowed;
+    vec3 litColor = baseColor.rgb * lighting * shadowed * uLightColor;
     float fogFactor = clamp((uFogEnd - vViewDepth) / max(0.001, uFogEnd - uFogStart), 0.0, 1.0);
     vec3 fogged = mix(uFogColor, litColor, fogFactor);
     gl_FragColor = vec4(fogged, baseColor.a);

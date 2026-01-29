@@ -50,6 +50,7 @@ public class SkyRenderer {
         float[] base = new float[] { 0.6f, 0.75f, 1.0f };
         float[] dawn = new float[] { 1.0f, 0.55f, 0.35f };
         float[] dusk = new float[] { 0.95f, 0.45f, 0.65f };
+        float[] night = new float[] { 0.02f, 0.03f, 0.08f };
         float total = sunrise + sunset;
         float dawnWeight = total > 0f ? sunrise / total : 0f;
         float duskWeight = total > 0f ? sunset / total : 0f;
@@ -58,11 +59,11 @@ public class SkyRenderer {
                 dawn[1] * dawnWeight + dusk[1] * duskWeight,
                 dawn[2] * dawnWeight + dusk[2] * duskWeight
         };
-        float[] sky = lerpColor(base, twilightColor, twilight);
-        float intensity = 0.25f + 0.75f * brightness;
-        float r = sky[0] * intensity;
-        float g = sky[1] * intensity;
-        float b = sky[2] * intensity;
+        float[] daySky = lerpColor(base, twilightColor, twilight);
+        float[] sky = lerpColor(night, daySky, brightness);
+        float r = sky[0];
+        float g = sky[1];
+        float b = sky[2];
         glClearColor(r, g, b, 1f);
     }
 
@@ -101,14 +102,15 @@ public class SkyRenderer {
         } else {
             // Moonlight fades in smoothly based on negative sun height
             float moonPower = Math.abs(sunDir[1]);
+            float[] moonColor = getMoonLightColor();
             FloatBuffer diffuse = BufferUtils.createFloatBuffer(4).put(new float[] {
-                    moonPower * 0.3f, moonPower * 0.35f, moonPower * 0.5f, 1f
+                    moonColor[0] * moonPower, moonColor[1] * moonPower, moonColor[2] * moonPower, 1f
             }).flip();
             glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
 
             float ambient = 0.01f + 0.04f * moonPower;
             FloatBuffer ambientBuf = BufferUtils.createFloatBuffer(4).put(new float[] {
-                    ambient * 0.6f, ambient * 0.7f, ambient, 1f
+                    ambient * 0.6f, ambient * 0.7f, ambient * 0.9f, 1f
             }).flip();
             glLightfv(GL_LIGHT0, GL_AMBIENT, ambientBuf);
         }
@@ -132,7 +134,7 @@ public class SkyRenderer {
 
         // --- MOON ---
         if (-sunDir[1] > -0.1f) {
-            float[] moonColor = new float[] { 0.7f, 0.8f, 1.0f };
+            float[] moonColor = getMoonLightColor();
             glColor3f(moonColor[0], moonColor[1], moonColor[2]);
             drawSphere(camX - sunDir[0] * dist, camY - sunDir[1] * dist, camZ - sunDir[2] * dist, 40f);
         }
@@ -210,6 +212,13 @@ public class SkyRenderer {
         return Math.min(0.65f, getSkyBrightness());
     }
 
+    public float[] getLightColor() {
+        if (getSkyBrightness() > 0f) {
+            return getSunLightColor();
+        }
+        return getMoonLightColor();
+    }
+
     private void drawSphere(float cx, float cy, float cz, float r) {
         int lats = 16;
         int longs = 16;
@@ -277,6 +286,10 @@ public class SkyRenderer {
         };
         float twilightBlend = Math.max(sunrise, sunset);
         return lerpColor(day, twilight, twilightBlend);
+    }
+
+    private float[] getMoonLightColor() {
+        return new float[] { 0.5f, 0.6f, 0.9f };
     }
 
     private float[] lerpColor(float[] a, float[] b, float t) {

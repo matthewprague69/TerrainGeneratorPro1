@@ -26,6 +26,7 @@ public class ShadowRenderer {
     private final int sceneUseTextureLoc;
     private final int sceneLightDirLoc;
     private final int sceneLightStrengthLoc;
+    private final int sceneLightColorLoc;
     private final int sceneViewMatrixLoc;
     private final int sceneViewInverseLoc;
     private final int sceneFogStartLoc;
@@ -65,6 +66,7 @@ public class ShadowRenderer {
         sceneUseTextureLoc = sceneShader.getUniformLocation("uUseTexture");
         sceneLightDirLoc = sceneShader.getUniformLocation("uLightDir");
         sceneLightStrengthLoc = sceneShader.getUniformLocation("uLightStrength");
+        sceneLightColorLoc = sceneShader.getUniformLocation("uLightColor");
         sceneViewMatrixLoc = sceneShader.getUniformLocation("uViewMatrix");
         sceneViewInverseLoc = sceneShader.getUniformLocation("uViewInverse");
         sceneFogStartLoc = sceneShader.getUniformLocation("uFogStart");
@@ -106,7 +108,7 @@ public class ShadowRenderer {
         return lastLightMatrix;
     }
 
-    public void beginScenePass(float[] lightMatrix, float[] lightDir, float lightStrength,
+    public void beginScenePass(float[] lightMatrix, float[] lightDir, float lightStrength, float[] lightColor,
                                float[] viewMatrix, float[] viewInverse,
                                float fogStart, float fogEnd, float[] fogColor) {
         active = this;
@@ -116,6 +118,7 @@ public class ShadowRenderer {
         sceneShader.setUniformMatrix4(sceneViewInverseLoc, toBuffer(viewInverse));
         sceneShader.setUniform3f(sceneLightDirLoc, lightDir[0], lightDir[1], lightDir[2]);
         sceneShader.setUniform1f(sceneLightStrengthLoc, lightStrength);
+        sceneShader.setUniform3f(sceneLightColorLoc, lightColor[0], lightColor[1], lightColor[2]);
         sceneShader.setUniform1f(sceneFogStartLoc, fogStart);
         sceneShader.setUniform1f(sceneFogEndLoc, fogEnd);
         sceneShader.setUniform3f(sceneFogColorLoc, fogColor[0], fogColor[1], fogColor[2]);

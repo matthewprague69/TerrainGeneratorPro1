@@ -395,6 +395,7 @@ public class Main {
             float[] shadowDir = sky.getShadowDirection();
             float[] lightDir = sky.getLightDirection();
             float lightStrength = sky.getSkyBrightness();
+            float[] lightColor = sky.getLightColor();
             float[] lightMatrix = shadowRenderer.renderShadowMap(
                     terrain,
                     shadowDir,
@@ -425,7 +426,7 @@ public class Main {
             float fogStart = fogSettings[0];
             float fogEnd = fogSettings[1];
             float[] fogColor = new float[] { fogSettings[2], fogSettings[3], fogSettings[4] };
-            shadowRenderer.beginScenePass(lightMatrix, lightDir, lightStrength, viewMatrix, viewInverse,
+            shadowRenderer.beginScenePass(lightMatrix, lightDir, lightStrength, lightColor, viewMatrix, viewInverse,
                     fogStart, fogEnd, fogColor);
             terrain.drawTerrainAndFeatures(player.getX(), player.getZ());
             shadowRenderer.endScenePass();
