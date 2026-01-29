@@ -1,11 +1,6 @@
 package game;
 import generators.LakeGenerator;
-import objects.BatchableFeature;
-import objects.Cactus;
-import objects.Feature;
-import objects.Flower;
-import objects.Grass;
-import objects.Lake;
+import objects.*;
 import spawners.FeatureSpawner;
 import spawners.LakeSpawner;
 import util.BoundingBox;
@@ -50,7 +45,7 @@ public class Chunk {
 
     private static final float DIRT_SLOPE_START = 0.65f;
     private static final float ROCK_SLOPE_START = 1.0f;
-    private static final int BLEND_STEPS = 4;
+    private static final int BLEND_STEPS = 8;
     private static final float BLEND_EDGE_START = 0.4f;
     private static final float BLEND_EDGE_END = 0.6f;
 

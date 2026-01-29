@@ -45,7 +45,7 @@ public enum Biome {
         public Map<FeatureSpawner, Float> features;
 
         // Global multiplier for all feature spawn rates
-        public static float featureSpawnMultiplier = 0.25f;
+        public static float featureSpawnMultiplier = 0.05f;
 
         Biome(float center, float frequency, float amplitude, float baseHeight, float patchScale,
                         String grassTex, String dirtTex, String rockTex,
