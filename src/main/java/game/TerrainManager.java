@@ -20,6 +20,8 @@ public class TerrainManager {
     private static final long FEATURE_BUDGET_NS = 6_000_000L;
     private static final int MAX_APPLIED_CHUNKS_PER_FRAME = 4;
     private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
+    private static final int MAX_RENDER_BUILDS_PER_FRAME = 2;
+    private static final long RENDER_BUILD_BUDGET_NS = 3_000_000L;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -32,6 +34,8 @@ public class TerrainManager {
     private final ConcurrentLinkedQueue<Chunk.ChunkBuildData> completedChunkBuilds = new ConcurrentLinkedQueue<>();
     private final ConcurrentLinkedQueue<Chunk.FeatureGenerationResult> completedFeatureGenerations =
             new ConcurrentLinkedQueue<>();
+    private final ArrayDeque<Chunk> pendingRenderBuilds = new ArrayDeque<>();
+    private final Set<Long> pendingRenderBuildKeys = new HashSet<>();
     private final ExecutorService chunkGenerator = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "chunk-generator");
         t.setDaemon(true);
@@ -133,6 +137,7 @@ public class TerrainManager {
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         drainCompletedChunkBuilds(pcx, pcz);
         drainCompletedFeatureGenerations(pcx, pcz);
+        processPendingRenderBuilds(pcx, pcz);
         if (renderDistanceDirty) {
             rebuildNeededChunks(pcx, pcz);
             reprioritizePendingQueues(pcx, pcz);
@@ -144,6 +149,7 @@ public class TerrainManager {
         if (!movedChunk) {
             processPendingChunkGenerations();
             processPendingFeatureGenerations(pcx, pcz);
+            processPendingRenderBuilds(pcx, pcz);
             return;
         }
         int prevChunkX = lastUpdateChunkX;
@@ -180,6 +186,7 @@ public class TerrainManager {
 
         processPendingChunkGenerations();
         processPendingFeatureGenerations(pcx, pcz);
+        processPendingRenderBuilds(pcx, pcz);
     }
 
     private void updateNeededChunks(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
@@ -431,26 +438,70 @@ public class TerrainManager {
                 existing.dispose();
             }
             chunks.put(key, built);
+            if (built.needsRenderResources()) {
+                queueRenderBuild(built, dist);
+            }
             if (built.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
                 queueFeatureGeneration(built, pcx, pcz);
             }
-            refreshNeighborEdges(built);
+            refreshNeighborEdges(built, pcx, pcz);
             applied++;
         }
     }
 
-    private void refreshNeighborEdges(Chunk chunk) {
+    private void refreshNeighborEdges(Chunk chunk, int pcx, int pcz) {
         Chunk right = getChunk(chunk.cx + 1, chunk.cz);
         if (right != null) {
-            right.refreshAfterNeighborUpdate();
+            right.markRenderDirty();
+            int dist = Math.max(Math.abs(right.cx - pcx), Math.abs(right.cz - pcz));
+            queueRenderBuild(right, dist);
         }
         Chunk bottom = getChunk(chunk.cx, chunk.cz + 1);
         if (bottom != null) {
-            bottom.refreshAfterNeighborUpdate();
+            bottom.markRenderDirty();
+            int dist = Math.max(Math.abs(bottom.cx - pcx), Math.abs(bottom.cz - pcz));
+            queueRenderBuild(bottom, dist);
         }
         Chunk bottomRight = getChunk(chunk.cx + 1, chunk.cz + 1);
         if (bottomRight != null) {
-            bottomRight.refreshAfterNeighborUpdate();
+            bottomRight.markRenderDirty();
+            int dist = Math.max(Math.abs(bottomRight.cx - pcx), Math.abs(bottomRight.cz - pcz));
+            queueRenderBuild(bottomRight, dist);
+        }
+    }
+
+    private void queueRenderBuild(Chunk chunk, int dist) {
+        long key = key(chunk.cx, chunk.cz);
+        if (pendingRenderBuildKeys.contains(key)) {
+            return;
+        }
+        pendingRenderBuildKeys.add(key);
+        if (dist <= 2) {
+            pendingRenderBuilds.addFirst(chunk);
+        } else {
+            pendingRenderBuilds.addLast(chunk);
+        }
+    }
+
+    private void processPendingRenderBuilds(int pcx, int pcz) {
+        int built = 0;
+        long start = System.nanoTime();
+        while (built < MAX_RENDER_BUILDS_PER_FRAME && !pendingRenderBuilds.isEmpty()) {
+            if (System.nanoTime() - start > RENDER_BUILD_BUDGET_NS) {
+                break;
+            }
+            Chunk chunk = pendingRenderBuilds.poll();
+            long key = key(chunk.cx, chunk.cz);
+            pendingRenderBuildKeys.remove(key);
+            if (chunks.get(key) != chunk) {
+                continue;
+            }
+            int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
+            if (dist > cacheRenderDist) {
+                continue;
+            }
+            chunk.buildRenderResources();
+            built++;
         }
     }
 

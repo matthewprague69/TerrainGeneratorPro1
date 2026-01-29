@@ -43,6 +43,7 @@ public class Chunk {
     private int grassBatchVbo = -1;
     private int grassBatchVertexCount = 0;
     private int grassBatchTexture = 0;
+    private boolean renderResourcesBuilt = false;
     public static final float WATER_LEVEL = 4.0f;
     public static final float WATER_SURROUNDING_LEVEL = 5.5f;
     public static final float ABSOLUTE_WATER_BOTTOM_HEIGHT = 1.0f;
@@ -157,6 +158,7 @@ public class Chunk {
         this.biome = biome;
         this.lod = lod;
         generate(generateFeatures);
+        renderResourcesBuilt = true;
     }
 
     public Chunk(int cx, int cz, OpenSimplexNoise terrainNoise, float scale, Biome biome, TerrainManager manager,
@@ -170,12 +172,10 @@ public class Chunk {
         this.lod = lod;
         if (data != null) {
             applyPrecomputedData(data);
-            stitchEdges();
-            buildTerrainBuffers();
-            buildWaterDisplayList();
-            buildGrassBatch();
+            renderResourcesBuilt = false;
         } else {
             generate(false);
+            renderResourcesBuilt = true;
         }
     }
 
@@ -1133,6 +1133,26 @@ public class Chunk {
         stitchEdges();
         buildTerrainBuffers();
         buildWaterDisplayList();
+        renderResourcesBuilt = true;
+    }
+
+    public void markRenderDirty() {
+        renderResourcesBuilt = false;
+    }
+
+    public boolean needsRenderResources() {
+        return !renderResourcesBuilt;
+    }
+
+    public void buildRenderResources() {
+        if (renderResourcesBuilt) {
+            return;
+        }
+        stitchEdges();
+        buildTerrainBuffers();
+        buildWaterDisplayList();
+        buildGrassBatch();
+        renderResourcesBuilt = true;
     }
 
     public OpenSimplexNoise getTerrainNoise() {
