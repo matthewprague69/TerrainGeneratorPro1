@@ -130,7 +130,9 @@ public class SkyRenderer {
         // --- SUN ---
         if (sunDir[1] > -0.1f) {
             float[] sunColor = getSunLightColor();
-            glColor3f(sunColor[0], sunColor[1], sunColor[2]);
+            float brightness = getSkyBrightness();
+            float intensity = Math.max(0f, Math.min(1f, brightness));
+            glColor3f(sunColor[0] * intensity, sunColor[1] * intensity, sunColor[2] * intensity);
             drawSphere(camX + sunDir[0] * dist, camY + sunDir[1] * dist, camZ + sunDir[2] * dist, 60f);
         }
 
@@ -215,8 +217,11 @@ public class SkyRenderer {
     }
 
     public float[] getLightColor() {
-        if (getSkyBrightness() > 0f) {
-            return getSunLightColor();
+        float brightness = getSkyBrightness();
+        if (brightness > 0f) {
+            float[] sunColor = getSunLightColor();
+            float intensity = Math.max(0.2f, brightness);
+            return new float[] { sunColor[0] * intensity, sunColor[1] * intensity, sunColor[2] * intensity };
         }
         return getMoonLightColor();
     }
