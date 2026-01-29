@@ -46,7 +46,8 @@ public class SkyRenderer {
         float sunrise = getSunriseFactor();
         float sunset = getSunsetFactor();
         float twilight = Math.max(sunrise, sunset);
-        float twilightStrength = smoothstep(0f, 1f, twilight) * 0.6f;
+        float dayFade = smoothstep(0.55f, 0.95f, brightness);
+        float twilightStrength = smoothstep(0f, 1f, twilight) * (1f - dayFade) * 0.7f;
 
         float[] day = new float[] { 0.6f, 0.75f, 1.0f };
         float[] dawn = new float[] { 1.0f, 0.55f, 0.35f };
