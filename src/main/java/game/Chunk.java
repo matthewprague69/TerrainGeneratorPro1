@@ -19,6 +19,12 @@ import java.util.*;
 public class Chunk {
     public static final int SIZE = 30;
     private static final float SKIRT_DEPTH = 6f;
+    private enum FeatureLod {
+        FULL,
+        SIMPLIFIED,
+        FAR,
+        CULLED
+    }
     public final int cx, cz;
     private final OpenSimplexNoise terrainNoise;
     private final float scale;
@@ -322,11 +328,6 @@ public class Chunk {
         if (Math.abs(cx - pcx) > featureRenderDist || Math.abs(cz - pcz) > featureRenderDist)
             return;
 
-        if (biome.features == null || biome.features.isEmpty()) {
-            featuresGenerated = true;
-            return;
-        }
-
         generateFeatures();
         featuresGenerated = true;
     }
@@ -335,15 +336,12 @@ public class Chunk {
         if (featuresGenerated) {
             return false;
         }
-        if (biome.features == null || biome.features.isEmpty()) {
-            return false;
-        }
         return Math.abs(cx - pcx) <= featureRenderDist && Math.abs(cz - pcz) <= featureRenderDist;
     }
 
     public FeatureGenerationInput createFeatureGenerationInput() {
-        return new FeatureGenerationInput(cx, cz, scale, biome, copyHeights(heights), copyHeights(riverSurface),
-                copyMask(featureMask), copyMask(lakeMask), manager.getSeed());
+        return new FeatureGenerationInput(cx, cz, scale, biome, heights, riverSurface,
+                copyMask(featureMask), lakeMask, manager.getSeed());
     }
 
     public void applyFeatureGenerationResult(FeatureGenerationResult result) {
@@ -384,22 +382,29 @@ public class Chunk {
         }
     }
 
-    public void drawTerrainAndFeatures() {
+    public void drawTerrainAndFeatures(int chunkDistance, int featureDetailDistance, int grassDetailDistance) {
         glEnable(GL_TEXTURE_2D);
         glColor3f(1f, 1f, 1f);
 
         renderTerrainBuffers();
-        renderGrassBatch();
+        if (chunkDistance <= grassDetailDistance) {
+            renderGrassBatch();
+        }
 
         glDisable(GL_TEXTURE_2D);
 
+        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
+                featureDetailDistance + 3);
         // Draw features if they are above water
         for (Feature f : features) {
             if (f instanceof Grass) {
                 continue;
             }
+            if (!shouldDrawFeatureForLod(f, lod)) {
+                continue;
+            }
             if (f.y >= WATER_LEVEL) {
-                f.draw();
+                drawFeatureForLod(f, lod);
             }
         }
     }
@@ -618,7 +623,7 @@ public class Chunk {
         glDisableClientState(GL_VERTEX_ARRAY);
     }
 
-    public void renderDepth() {
+    public void renderDepth(int chunkDistance, int featureDetailDistance, int grassDetailDistance) {
         if (terrainBatches.isEmpty()) {
             return;
         }
@@ -635,14 +640,64 @@ public class Chunk {
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glDisableClientState(GL_VERTEX_ARRAY);
 
-        renderGrassBatchDepth();
+        if (chunkDistance <= grassDetailDistance) {
+            renderGrassBatchDepth();
+        }
+
+        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
+                featureDetailDistance + 2);
         for (Feature f : features) {
             if (f instanceof Grass) {
                 continue;
             }
-            if (f.y >= WATER_LEVEL) {
-                f.drawDepth();
+            if (!shouldDrawFeatureForLod(f, lod)) {
+                continue;
             }
+            if (f.y >= WATER_LEVEL) {
+                drawFeatureDepthForLod(f, lod);
+            }
+        }
+    }
+
+    private FeatureLod getFeatureLod(int chunkDistance, int simplifiedDistance, int farDistance, int cullDistance) {
+        if (chunkDistance > cullDistance) {
+            return FeatureLod.CULLED;
+        }
+        if (chunkDistance > farDistance) {
+            return FeatureLod.FAR;
+        }
+        if (chunkDistance > simplifiedDistance) {
+            return FeatureLod.SIMPLIFIED;
+        }
+        return FeatureLod.FULL;
+    }
+
+    private boolean shouldDrawFeatureForLod(Feature feature, FeatureLod lod) {
+        if (lod == FeatureLod.CULLED) {
+            return false;
+        }
+        if (lod == FeatureLod.FAR) {
+            return feature instanceof Tree || feature instanceof Lake;
+        }
+        if (lod == FeatureLod.SIMPLIFIED) {
+            return !(feature instanceof Flower) && !(feature instanceof Cactus);
+        }
+        return true;
+    }
+
+    private void drawFeatureForLod(Feature feature, FeatureLod lod) {
+        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.FAR) {
+            feature.drawSimplified();
+        } else {
+            feature.draw();
+        }
+    }
+
+    private void drawFeatureDepthForLod(Feature feature, FeatureLod lod) {
+        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.FAR) {
+            feature.drawSimplified();
+        } else {
+            feature.drawDepth();
         }
     }
 
@@ -843,7 +898,7 @@ public class Chunk {
         if (Math.abs(cx - pcx) > featureRenderDist || Math.abs(cz - pcz) > featureRenderDist) {
             // Remove only non-lake features
             features.removeIf(f -> !(f instanceof Lake));
-            featuresGenerated = biome.features == null || biome.features.isEmpty();
+            featuresGenerated = false;
             disposeGrassBatch();
 
             for (int x = 0; x < SIZE; x++) {
@@ -1100,7 +1155,7 @@ public class Chunk {
         if (data.lakes != null) {
             features.addAll(data.lakes);
         }
-        featuresGenerated = biome.features == null || biome.features.isEmpty();
+        featuresGenerated = false;
     }
 
     private static float[][] copyHeights(float[][] source) {

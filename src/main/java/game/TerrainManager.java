@@ -54,6 +54,8 @@ public class TerrainManager {
     private int shadowRenderDist;
     private int cacheRenderDist;
     private int cacheFeatureRenderDist;
+    private int featureSimplifiedDistance;
+    private int grassDetailDistance;
     private boolean renderDistanceDirty = true;
     private int lastUpdateChunkX = Integer.MIN_VALUE;
     private int lastUpdateChunkZ = Integer.MIN_VALUE;
@@ -77,6 +79,8 @@ public class TerrainManager {
         this.shadowRenderDist = renderDist + 12;
         this.cacheRenderDist = renderDist + 4;
         this.cacheFeatureRenderDist = featureRenderDist + 4;
+        this.featureSimplifiedDistance = Math.max(1, featureRenderDist - 1);
+        this.grassDetailDistance = Math.max(1, featureRenderDist - 2);
         this.regionGenerator = new BiomeRegionGenerator(seed);
 
 
@@ -481,12 +485,15 @@ public class TerrainManager {
 
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        int featureDetailDistance = Math.min(featureSimplifiedDistance, featureRenderDist);
+        int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
+
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
             if (dist > renderDist) {
                 continue;
             }
-            c.drawTerrainAndFeatures();
+            c.drawTerrainAndFeatures(dist, featureDetailDistance, grassDetailDistance);
         }
 
         disableFog();
@@ -507,12 +514,15 @@ public class TerrainManager {
     public void drawDepth(float wx, float wz) {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        int featureDetailDistance = Math.min(featureSimplifiedDistance, featureRenderDist);
+        int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
+
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
             if (dist > shadowRenderDist) {
                 continue;
             }
-            c.renderDepth();
+            c.renderDepth(dist, featureDetailDistance, grassDetailDistance);
         }
     }
 
@@ -624,11 +634,29 @@ public class TerrainManager {
         featureRenderDist = Math.max(0, r);
         cacheFeatureRenderDist = featureRenderDist + 2;
         shadowRenderDist = Math.max(shadowRenderDist, renderDist + 12);
+        featureSimplifiedDistance = Math.min(featureSimplifiedDistance, featureRenderDist);
+        grassDetailDistance = Math.min(grassDetailDistance, featureRenderDist);
         renderDistanceDirty = true;
     }
 
     public int getFeatureRenderDistance() {
         return featureRenderDist;
+    }
+
+    public void setFeatureSimplifiedDistance(int r) {
+        featureSimplifiedDistance = Math.max(0, Math.min(r, featureRenderDist));
+    }
+
+    public int getFeatureSimplifiedDistance() {
+        return featureSimplifiedDistance;
+    }
+
+    public void setGrassDetailDistance(int r) {
+        grassDetailDistance = Math.max(0, Math.min(r, featureRenderDist));
+    }
+
+    public int getGrassDetailDistance() {
+        return grassDetailDistance;
     }
 
     public int getSnowTexture() {
