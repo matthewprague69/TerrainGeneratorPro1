@@ -1,6 +1,7 @@
 package game;
 import generators.LakeGenerator;
 import objects.BatchableFeature;
+import objects.Cactus;
 import objects.Feature;
 import objects.Flower;
 import objects.Grass;
@@ -17,6 +18,7 @@ import java.util.*;
 
 public class Chunk {
     public static final int SIZE = 30;
+    private static final float SKIRT_DEPTH = 6f;
     public final int cx, cz;
     private final OpenSimplexNoise terrainNoise;
     private final float scale;
@@ -25,6 +27,7 @@ public class Chunk {
     private final int lod;
 
     private final float[][] heights = new float[SIZE + 1][SIZE + 1];
+    private final float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
     private final List<Feature> features = new ArrayList<>();
     private final boolean[][] featureMask = new boolean[SIZE][SIZE];
     private final boolean[][] lakeMask = new boolean[SIZE][SIZE];
@@ -40,6 +43,9 @@ public class Chunk {
 
     private static final float DIRT_SLOPE_START = 0.65f;
     private static final float ROCK_SLOPE_START = 1.0f;
+    private static final int BLEND_STEPS = 4;
+    private static final float BLEND_EDGE_START = 0.4f;
+    private static final float BLEND_EDGE_END = 0.6f;
 
 
     private static final float SNOW_HEIGHT_START = 55f;
@@ -49,6 +55,86 @@ public class Chunk {
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
     public static final float FEATURE_SLOPE_SPAWN_THRESHOLD = DIRT_SLOPE_START;
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
+
+    public static class ChunkBuildData {
+        public final int cx;
+        public final int cz;
+        public final int lod;
+        public final Biome biome;
+        public final float[][] heights;
+        public final float[][] riverSurface;
+        public final boolean[][] featureMask;
+        public final boolean[][] lakeMask;
+        public final List<Feature> lakes;
+
+        public ChunkBuildData(int cx, int cz, int lod, Biome biome, float[][] heights, boolean[][] featureMask,
+                              boolean[][] lakeMask, List<Feature> lakes, float[][] riverSurface) {
+            this.cx = cx;
+            this.cz = cz;
+            this.lod = lod;
+            this.biome = biome;
+            this.heights = heights;
+            this.featureMask = featureMask;
+            this.lakeMask = lakeMask;
+            this.lakes = lakes;
+            this.riverSurface = riverSurface;
+        }
+    }
+
+    public static class FeatureSpawn {
+        public final FeatureSpawner spawner;
+        public final float x;
+        public final float y;
+        public final float z;
+        public final long seed;
+
+        public FeatureSpawn(FeatureSpawner spawner, float x, float y, float z, long seed) {
+            this.spawner = spawner;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.seed = seed;
+        }
+    }
+
+    public static class FeatureGenerationInput {
+        public final int cx;
+        public final int cz;
+        public final float scale;
+        public final Biome biome;
+        public final float[][] heights;
+        public final float[][] riverSurface;
+        public final boolean[][] featureMask;
+        public final boolean[][] lakeMask;
+        public final long seed;
+
+        public FeatureGenerationInput(int cx, int cz, float scale, Biome biome, float[][] heights,
+                                      float[][] riverSurface, boolean[][] featureMask, boolean[][] lakeMask, long seed) {
+            this.cx = cx;
+            this.cz = cz;
+            this.scale = scale;
+            this.biome = biome;
+            this.heights = heights;
+            this.riverSurface = riverSurface;
+            this.featureMask = featureMask;
+            this.lakeMask = lakeMask;
+            this.seed = seed;
+        }
+    }
+
+    public static class FeatureGenerationResult {
+        public final int cx;
+        public final int cz;
+        public final List<FeatureSpawn> spawns;
+        public final boolean[][] featureMask;
+
+        public FeatureGenerationResult(int cx, int cz, List<FeatureSpawn> spawns, boolean[][] featureMask) {
+            this.cx = cx;
+            this.cz = cz;
+            this.spawns = spawns;
+            this.featureMask = featureMask;
+        }
+    }
 
 
 
@@ -65,6 +151,80 @@ public class Chunk {
         this.biome = biome;
         this.lod = lod;
         generate(generateFeatures);
+    }
+
+    public Chunk(int cx, int cz, OpenSimplexNoise terrainNoise, float scale, Biome biome, TerrainManager manager,
+                 int lod, ChunkBuildData data) {
+        this.cx = cx;
+        this.cz = cz;
+        this.terrainNoise = terrainNoise;
+        this.scale = scale;
+        this.manager = manager;
+        this.biome = biome;
+        this.lod = lod;
+        if (data != null) {
+            applyPrecomputedData(data);
+            stitchEdges();
+            buildTerrainBuffers();
+            buildWaterDisplayList();
+            buildGrassBatch();
+        } else {
+            generate(false);
+        }
+    }
+
+    public static ChunkBuildData generateChunkData(int cx, int cz, OpenSimplexNoise terrainNoise, float scale,
+                                                   Biome biome, TerrainManager manager, int lod) {
+        final int OCTAVES = 4;
+        final double PERSISTENCE = 0.35;
+        final double macroFreq = 0.002;
+        final double macroAmp = 2.0;
+
+        float[][] heights = new float[SIZE + 1][SIZE + 1];
+        float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
+        boolean[][] featureMask = new boolean[SIZE][SIZE];
+        boolean[][] lakeMask = new boolean[SIZE][SIZE];
+        List<Feature> lakes = new ArrayList<>();
+
+        for (int x = 0; x <= SIZE; x++) {
+            for (int z = 0; z <= SIZE; z++) {
+                double wx = (cx * SIZE + x) * scale;
+                double wz = (cz * SIZE + z) * scale;
+
+                Map<Biome, Float> weights = manager.getBiomeWeights(wx, wz);
+                double blendedHeight = 0;
+
+                for (Map.Entry<Biome, Float> entry : weights.entrySet()) {
+                    Biome entryBiome = entry.getKey();
+                    float weight = entry.getValue();
+
+                    double freq = entryBiome.frequency;
+                    double amp = entryBiome.amplitude * 0.5;
+                    double sum = 0;
+
+                    for (int o = 0; o < OCTAVES; o++) {
+                        double offset = o * 100.0;
+                        double val = terrainNoise.eval((wx + offset) * freq, (wz - offset) * freq);
+                        val = (val * val * val) * 1.2;
+                        sum += val * amp;
+                        freq *= 1.7;
+                        amp *= PERSISTENCE;
+                    }
+
+                    double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
+                    double biomeHeight = entryBiome.baseHeight + sum + elevationOffset;
+                    blendedHeight += biomeHeight * weight;
+                }
+
+                heights[x][z] = (float) blendedHeight;
+            }
+        }
+
+        resetRiverSurface(riverSurface);
+        applyCavesAndRavines(heights, riverSurface, cx, cz, scale, terrainNoise, manager.getSeed());
+
+        LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, lakes, manager);
+        return new ChunkBuildData(cx, cz, lod, biome, heights, featureMask, lakeMask, lakes, riverSurface);
     }
 
     private void generate(boolean generateFeatures) {
@@ -109,8 +269,11 @@ public class Chunk {
             }
         }
 
+        resetRiverSurface(riverSurface);
+        applyCavesAndRavines(heights, riverSurface, cx, cz, scale, terrainNoise, manager.getSeed());
 
-        LakeGenerator.generateLakes(this, biome, heights, featureMask, features, manager);
+
+        LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, features, manager);
         if (generateFeatures)
             generateFeatures();
         stitchEdges();
@@ -121,15 +284,23 @@ public class Chunk {
     }
 
     public void drawWater() {
+        glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDisable(GL_TEXTURE_2D);
 
         glDepthMask(false); // Disable depth writing for transparency
+        glDepthFunc(GL_LEQUAL);
 
         glEnable(GL_FOG); // <<< ADD THIS
-        glColor4f(0.2f, 0.5f, 0.8f, 0.6f); // Water color (already fine)
+        glColor4f(0.2f, 0.5f, 0.8f, 0.55f); // base water color
 
+        if (waterDisplayList != -1) {
+            glCallList(waterDisplayList);
+        }
+
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+        glColor4f(0.75f, 0.85f, 0.95f, 0.12f); // subtle reflection tint
         if (waterDisplayList != -1) {
             glCallList(waterDisplayList);
         }
@@ -137,8 +308,8 @@ public class Chunk {
         glDepthMask(true); // Re-enable depth writing
 
         glDisable(GL_FOG); // <<< Disable again after drawing water
-        glEnable(GL_TEXTURE_2D);
-        glDisable(GL_BLEND);
+        glDepthFunc(GL_LESS);
+        glPopAttrib();
     }
 
 
@@ -151,8 +322,41 @@ public class Chunk {
         if (Math.abs(cx - pcx) > featureRenderDist || Math.abs(cz - pcz) > featureRenderDist)
             return;
 
+        if (biome.features == null || biome.features.isEmpty()) {
+            featuresGenerated = true;
+            return;
+        }
+
         generateFeatures();
         featuresGenerated = true;
+    }
+
+    public boolean needsFeatureGeneration(int pcx, int pcz, int featureRenderDist) {
+        if (featuresGenerated) {
+            return false;
+        }
+        if (biome.features == null || biome.features.isEmpty()) {
+            return false;
+        }
+        return Math.abs(cx - pcx) <= featureRenderDist && Math.abs(cz - pcz) <= featureRenderDist;
+    }
+
+    public FeatureGenerationInput createFeatureGenerationInput() {
+        return new FeatureGenerationInput(cx, cz, scale, biome, copyHeights(heights), copyHeights(riverSurface),
+                copyMask(featureMask), copyMask(lakeMask), manager.getSeed());
+    }
+
+    public void applyFeatureGenerationResult(FeatureGenerationResult result) {
+        if (featuresGenerated || result == null) {
+            return;
+        }
+        copyMaskInto(result.featureMask, featureMask);
+        for (FeatureSpawn spawn : result.spawns) {
+            Feature f = spawn.spawner.spawn(spawn.x, spawn.y, spawn.z, spawn.seed);
+            features.add(f);
+        }
+        featuresGenerated = true;
+        buildGrassBatch();
     }
 
     public Biome getBiomeType() {
@@ -180,32 +384,22 @@ public class Chunk {
         }
     }
 
-    public void drawTerrainAndFeatures(int chunkDistance, int featureDetailDistance, int grassDetailDistance) {
+    public void drawTerrainAndFeatures() {
         glEnable(GL_TEXTURE_2D);
         glColor3f(1f, 1f, 1f);
 
         renderTerrainBuffers();
-        if (chunkDistance <= grassDetailDistance) {
-            renderGrassBatch();
-        }
+        renderGrassBatch();
 
         glDisable(GL_TEXTURE_2D);
 
-        boolean simplified = chunkDistance > featureDetailDistance;
         // Draw features if they are above water
         for (Feature f : features) {
             if (f instanceof Grass) {
                 continue;
             }
-            if (simplified && f instanceof Flower) {
-                continue;
-            }
             if (f.y >= WATER_LEVEL) {
-                if (simplified) {
-                    f.drawSimplified();
-                } else {
-                    f.draw();
-                }
+                f.draw();
             }
         }
     }
@@ -223,25 +417,27 @@ public class Chunk {
 
     private void buildTerrainBuffers() {
         disposeTerrainBuffers();
-        Map<Integer, FloatBuilder> builders = new HashMap<>();
-        float texScale = 0.2f;
+        Map<BatchKey, FloatBuilder> builders = new HashMap<>();
+        float texScale = 0.2f / (1f + lod * 0.5f);
         int step = (int) Math.pow(2, lod);
         for (int z = 0; z < SIZE; z += step) {
+            int z2 = Math.min(z + step, SIZE);
             for (int x = 0; x < SIZE; x += step) {
-                if (x + step > SIZE || z + step > SIZE)
-                    continue;
+                int x2 = Math.min(x + step, SIZE);
 
                 float y00 = heights[x][z];
-                float y10 = heights[x + step][z];
-                float y01 = heights[x][z + step];
-                float y11 = heights[x + step][z + step];
+                float y10 = heights[x2][z];
+                float y01 = heights[x][z2];
+                float y11 = heights[x2][z2];
 
-                addTriangle(builders, x, z, x + step, z, x, z + step, y00, y10, y01, texScale);
-                addTriangle(builders, x + step, z, x + step, z + step, x, z + step, y10, y11, y01, texScale);
+                addTriangle(builders, x, z, x2, z, x, z2, y00, y10, y01, texScale);
+                addTriangle(builders, x2, z, x2, z2, x, z2, y10, y11, y01, texScale);
             }
         }
 
-        for (Map.Entry<Integer, FloatBuilder> entry : builders.entrySet()) {
+        addSkirts(builders, step, texScale);
+
+        for (Map.Entry<BatchKey, FloatBuilder> entry : builders.entrySet()) {
             FloatBuilder builder = entry.getValue();
             if (builder.size == 0) {
                 continue;
@@ -250,7 +446,9 @@ public class Chunk {
             glBindBuffer(GL_ARRAY_BUFFER, vboId);
             glBufferData(GL_ARRAY_BUFFER, builder.toBuffer(), GL_STATIC_DRAW);
             glBindBuffer(GL_ARRAY_BUFFER, 0);
-            terrainBatches.add(new TerrainBatch(entry.getKey(), vboId, builder.size / STRIDE_FLOATS));
+            BatchKey key = entry.getKey();
+            terrainBatches.add(new TerrainBatch(key.textureId, vboId, builder.size / STRIDE_FLOATS,
+                    alphaFromBucket(key.alphaBucket)));
         }
     }
 
@@ -258,30 +456,45 @@ public class Chunk {
         int step = (int) Math.pow(2, lod);
 
         for (int z = 0; z < SIZE; z += step) {
+            int z2 = Math.min(z + step, SIZE);
             for (int x = 0; x < SIZE; x += step) {
-                if (x + step > SIZE || z + step > SIZE)
-                    continue;
+                int x2 = Math.min(x + step, SIZE);
 
                 float y00 = heights[x][z];
-                float y10 = heights[x + step][z];
-                float y01 = heights[x][z + step];
-                float y11 = heights[x + step][z + step];
+                float y10 = heights[x2][z];
+                float y01 = heights[x][z2];
+                float y11 = heights[x2][z2];
+
+                float r00 = riverSurface[x][z];
+                float r10 = riverSurface[x2][z];
+                float r01 = riverSurface[x][z2];
+                float r11 = riverSurface[x2][z2];
+                boolean hasRiverWater = r00 > Float.NEGATIVE_INFINITY / 2
+                        || r10 > Float.NEGATIVE_INFINITY / 2
+                        || r01 > Float.NEGATIVE_INFINITY / 2
+                        || r11 > Float.NEGATIVE_INFINITY / 2;
 
                 boolean needsWater =
-                        y00 < WATER_LEVEL || y10 < WATER_LEVEL || y01 < WATER_LEVEL || y11 < WATER_LEVEL;
+                        y00 < WATER_LEVEL || y10 < WATER_LEVEL || y01 < WATER_LEVEL || y11 < WATER_LEVEL
+                                || hasRiverWater;
 
                 if (needsWater) {
                     float wx1 = (cx * SIZE + x) * scale;
                     float wz1 = (cz * SIZE + z) * scale;
-                    float wx2 = (cx * SIZE + x + step) * scale;
-                    float wz2 = (cz * SIZE + z + step) * scale;
+                    float wx2 = (cx * SIZE + x2) * scale;
+                    float wz2 = (cz * SIZE + z2) * scale;
+
+                    float wy1 = r00 > Float.NEGATIVE_INFINITY / 2 ? r00 : WATER_LEVEL;
+                    float wy2 = r10 > Float.NEGATIVE_INFINITY / 2 ? r10 : WATER_LEVEL;
+                    float wy3 = r11 > Float.NEGATIVE_INFINITY / 2 ? r11 : WATER_LEVEL;
+                    float wy4 = r01 > Float.NEGATIVE_INFINITY / 2 ? r01 : WATER_LEVEL;
 
                     glBegin(GL_QUADS);
                     glNormal3f(0f, 1f, 0f);
-                    glVertex3f(wx1, WATER_LEVEL, wz1);
-                    glVertex3f(wx2, WATER_LEVEL, wz1);
-                    glVertex3f(wx2, WATER_LEVEL, wz2);
-                    glVertex3f(wx1, WATER_LEVEL, wz2);
+                    glVertex3f(wx1, wy1, wz1);
+                    glVertex3f(wx2, wy2, wz1);
+                    glVertex3f(wx2, wy3, wz2);
+                    glVertex3f(wx1, wy4, wz2);
                     glEnd();
                 }
             }
@@ -357,12 +570,16 @@ public class Chunk {
             return;
         }
 
+        glColor4f(1f, 1f, 1f, 1f);
         glEnableClientState(GL_VERTEX_ARRAY);
         glEnableClientState(GL_NORMAL_ARRAY);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
 
         int strideBytes = STRIDE_FLOATS * Float.BYTES;
         for (TerrainBatch batch : terrainBatches) {
+            if (batch.alpha < 0.999f) {
+                continue;
+            }
             glBindTexture(GL_TEXTURE_2D, batch.textureId);
             glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
             glVertexPointer(3, GL_FLOAT, strideBytes, 0);
@@ -371,13 +588,37 @@ public class Chunk {
             glDrawArrays(GL_TRIANGLES, 0, batch.vertexCount);
         }
 
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(false);
+        glDepthFunc(GL_LEQUAL);
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(-1f, -1f);
+        for (TerrainBatch batch : terrainBatches) {
+            if (batch.alpha >= 0.999f) {
+                continue;
+            }
+            glColor4f(1f, 1f, 1f, batch.alpha);
+            glBindTexture(GL_TEXTURE_2D, batch.textureId);
+            glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
+            glVertexPointer(3, GL_FLOAT, strideBytes, 0);
+            glNormalPointer(GL_FLOAT, strideBytes, 3 * Float.BYTES);
+            glTexCoordPointer(2, GL_FLOAT, strideBytes, 6 * Float.BYTES);
+            glDrawArrays(GL_TRIANGLES, 0, batch.vertexCount);
+        }
+        glDisable(GL_POLYGON_OFFSET_FILL);
+        glDepthFunc(GL_LESS);
+        glDepthMask(true);
+        glDisable(GL_BLEND);
+        glColor4f(1f, 1f, 1f, 1f);
+
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisableClientState(GL_NORMAL_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
     }
 
-    public void renderDepth(int chunkDistance, int featureDetailDistance, int grassDetailDistance) {
+    public void renderDepth() {
         if (terrainBatches.isEmpty()) {
             return;
         }
@@ -394,54 +635,98 @@ public class Chunk {
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glDisableClientState(GL_VERTEX_ARRAY);
 
-        if (chunkDistance <= grassDetailDistance) {
-            renderGrassBatchDepth();
-        }
-
-        boolean simplified = chunkDistance > featureDetailDistance;
+        renderGrassBatchDepth();
         for (Feature f : features) {
             if (f instanceof Grass) {
                 continue;
             }
-            if (simplified && f instanceof Flower) {
-                continue;
-            }
             if (f.y >= WATER_LEVEL) {
-                if (simplified) {
-                    f.drawSimplified();
-                } else {
-                    f.drawDepth();
-                }
+                f.drawDepth();
             }
         }
     }
 
-    private void addTriangle(Map<Integer, FloatBuilder> builders, int x1, int z1, int x2, int z2, int x3, int z3,
-            float y1, float y2, float y3, float texScale) {
-        float slope = (computeSlope(x1, z1) + computeSlope(x2, z2) + computeSlope(x3, z3)) / 3f;
-        float height = Math.max(y1, Math.max(y2, y3));
-        int tex = pickTexture(height, slope);
+    private void addSkirts(Map<BatchKey, FloatBuilder> builders, int step, float texScale) {
+        for (int x = 0; x < SIZE; x += step) {
+            int x2 = Math.min(x + step, SIZE);
+            addSkirtQuad(builders, x, 0, x2, 0, heights[x][0], heights[x2][0], texScale);
+            addSkirtQuad(builders, x, SIZE, x2, SIZE, heights[x][SIZE], heights[x2][SIZE], texScale);
+        }
 
-        FloatBuilder builder = builders.computeIfAbsent(tex, key -> new FloatBuilder());
-        float[] normal = computeNormal(x1, z1, x2, z2, x3, z3);
+        for (int z = 0; z < SIZE; z += step) {
+            int z2 = Math.min(z + step, SIZE);
+            addSkirtQuad(builders, 0, z, 0, z2, heights[0][z], heights[0][z2], texScale);
+            addSkirtQuad(builders, SIZE, z, SIZE, z2, heights[SIZE][z], heights[SIZE][z2], texScale);
+        }
+    }
+
+    private void addSkirtQuad(Map<BatchKey, FloatBuilder> builders, int x1, int z1, int x2, int z2,
+                              float y1, float y2, float texScale) {
+        int tex = manager.getTexture(biome.rockTex);
+        FloatBuilder builder = getBuilder(builders, tex, 1f);
+        float[] normal = computeSkirtNormal(x1, z1, x2, z2);
 
         float wx1 = (cx * SIZE + x1) * scale;
         float wz1 = (cz * SIZE + z1) * scale;
         float wx2 = (cx * SIZE + x2) * scale;
         float wz2 = (cz * SIZE + z2) * scale;
-        float wx3 = (cx * SIZE + x3) * scale;
-        float wz3 = (cz * SIZE + z3) * scale;
+
+        float y1b = y1 - SKIRT_DEPTH;
+        float y2b = y2 - SKIRT_DEPTH;
 
         builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
         builder.putVertex(wx2, y2, wz2, normal, x2 * texScale, z2 * texScale);
-        builder.putVertex(wx3, y3, wz3, normal, x3 * texScale, z3 * texScale);
+        builder.putVertex(wx2, y2b, wz2, normal, x2 * texScale, z2 * texScale);
+
+        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx2, y2b, wz2, normal, x2 * texScale, z2 * texScale);
+        builder.putVertex(wx1, y1b, wz1, normal, x1 * texScale, z1 * texScale);
+    }
+
+    private float[] computeSkirtNormal(int x1, int z1, int x2, int z2) {
+        float dx = (x2 - x1) * scale;
+        float dz = (z2 - z1) * scale;
+        float nx = dz;
+        float ny = 0f;
+        float nz = -dx;
+        float length = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (length < 0.0001f) {
+            return new float[] { 0f, 1f, 0f };
+        }
+        return new float[] { nx / length, ny / length, nz / length };
+    }
+
+    private void addTriangle(Map<BatchKey, FloatBuilder> builders, int x1, int z1, int x2, int z2, int x3, int z3,
+            float y1, float y2, float y3, float texScale) {
+        float slope = (computeSlope(x1, z1) + computeSlope(x2, z2) + computeSlope(x3, z3)) / 3f;
+        float height = Math.max(y1, Math.max(y2, y3));
+        if (isRiverBed(x1, z1, y1) || isRiverBed(x2, z2, y2) || isRiverBed(x3, z3, y3)) {
+            int tex = manager.getTexture(biome.rockTex);
+            addTriangleToBuilder(builders, tex, 1f, x1, z1, x2, z2, x3, z3, y1, y2, y3, texScale);
+            return;
+        }
+
+        float wx = (cx * SIZE + (x1 + x2 + x3) / 3f) * scale;
+        float wz = (cz * SIZE + (z1 + z2 + z3) / 3f) * scale;
+        BiomeBlend blend = getBiomeBlend(wx, wz, manager);
+        int primaryTex = pickTextureForBiome(blend.primary, height, slope, manager);
+        addTriangleToBuilder(builders, primaryTex, 1f, x1, z1, x2, z2, x3, z3, y1, y2, y3, texScale);
+        if (blend.blend > 0.0f && blend.secondary != null) {
+            int secondaryTex = pickTextureForBiome(blend.secondary, height, slope, manager);
+            if (secondaryTex != primaryTex) {
+                addTriangleToBuilder(builders, secondaryTex, blend.blend, x1, z1, x2, z2, x3, z3, y1, y2, y3,
+                        texScale);
+            }
+        }
     }
 
     private void drawTriangle(int x1, int z1, int x2, int z2, int x3, int z3, float y1, float y2, float y3,
             float texScale) {
         float slope = (computeSlope(x1, z1) + computeSlope(x2, z2) + computeSlope(x3, z3)) / 3f;
         float height = Math.max(y1, Math.max(y2, y3));
-        int tex = pickTexture(height, slope);
+        int tex = isRiverBed(x1, z1, y1) || isRiverBed(x2, z2, y2) || isRiverBed(x3, z3, y3)
+                ? manager.getTexture(biome.rockTex)
+                : pickTexture(height, slope);
 
         float wx1 = (cx * SIZE + x1) * scale;
         float wz1 = (cz * SIZE + z1) * scale;
@@ -463,6 +748,89 @@ public class Chunk {
         glEnd();
     }
 
+    private void addTriangleToBuilder(Map<BatchKey, FloatBuilder> builders, int tex, float alpha,
+                                      int x1, int z1, int x2, int z2, int x3, int z3,
+                                      float y1, float y2, float y3, float texScale) {
+        FloatBuilder builder = getBuilder(builders, tex, alpha);
+        if (builder == null) {
+            return;
+        }
+        float[] normal = computeNormal(x1, z1, x2, z2, x3, z3);
+
+        float wx1 = (cx * SIZE + x1) * scale;
+        float wz1 = (cz * SIZE + z1) * scale;
+        float wx2 = (cx * SIZE + x2) * scale;
+        float wz2 = (cz * SIZE + z2) * scale;
+        float wx3 = (cx * SIZE + x3) * scale;
+        float wz3 = (cz * SIZE + z3) * scale;
+
+        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx2, y2, wz2, normal, x2 * texScale, z2 * texScale);
+        builder.putVertex(wx3, y3, wz3, normal, x3 * texScale, z3 * texScale);
+    }
+
+    private FloatBuilder getBuilder(Map<BatchKey, FloatBuilder> builders, int tex, float alpha) {
+        int bucket = quantizeAlpha(alpha);
+        if (bucket == 0) {
+            return null;
+        }
+        BatchKey key = new BatchKey(tex, bucket);
+        return builders.computeIfAbsent(key, k -> new FloatBuilder());
+    }
+
+    private int quantizeAlpha(float alpha) {
+        float clamped = Math.max(0f, Math.min(1f, alpha));
+        int bucket = (int) Math.floor(clamped * BLEND_STEPS + 0.0001f);
+        return Math.min(BLEND_STEPS, Math.max(0, bucket));
+    }
+
+    private float alphaFromBucket(int bucket) {
+        return Math.min(1f, Math.max(0f, bucket / (float) BLEND_STEPS));
+    }
+
+    private static final class BiomeBlend {
+        private final Biome primary;
+        private final Biome secondary;
+        private final float blend;
+
+        private BiomeBlend(Biome primary, Biome secondary, float blend) {
+            this.primary = primary;
+            this.secondary = secondary;
+            this.blend = blend;
+        }
+    }
+
+    private BiomeBlend getBiomeBlend(float wx, float wz, TerrainManager manager) {
+        Map<Biome, Float> weights = manager.getBiomeWeights(wx, wz);
+        Biome primary = Biome.PLAINS;
+        Biome secondary = Biome.PLAINS;
+        float primaryWeight = -1f;
+        float secondaryWeight = -1f;
+        for (Map.Entry<Biome, Float> entry : weights.entrySet()) {
+            float weight = entry.getValue();
+            if (weight > primaryWeight) {
+                secondary = primary;
+                secondaryWeight = primaryWeight;
+                primary = entry.getKey();
+                primaryWeight = weight;
+            } else if (weight > secondaryWeight) {
+                secondary = entry.getKey();
+                secondaryWeight = weight;
+            }
+        }
+        if (secondaryWeight <= 0.0001f) {
+            return new BiomeBlend(primary, null, 0f);
+        }
+        float blend = secondaryWeight / Math.max(0.0001f, primaryWeight + secondaryWeight);
+        blend = (float) smoothstep(BLEND_EDGE_START, BLEND_EDGE_END, blend);
+        if (blend < 0.2f || blend > 0.8f) {
+            return new BiomeBlend(primary, null, 0f);
+        }
+        float minStep = 1f / BLEND_STEPS;
+        blend = Math.max(minStep, Math.min(1f - minStep, blend));
+        return new BiomeBlend(primary, secondary, blend);
+    }
+
     public List<Feature> getFeatures() {
         return features;
     }
@@ -475,7 +843,7 @@ public class Chunk {
         if (Math.abs(cx - pcx) > featureRenderDist || Math.abs(cz - pcz) > featureRenderDist) {
             // Remove only non-lake features
             features.removeIf(f -> !(f instanceof Lake));
-            featuresGenerated = false;
+            featuresGenerated = biome.features == null || biome.features.isEmpty();
             disposeGrassBatch();
 
             for (int x = 0; x < SIZE; x++) {
@@ -486,57 +854,10 @@ public class Chunk {
     }
 
     private void generateFeatures() {
-        if (biome.features == null || biome.features.isEmpty())
-            return;
-
-        long chunkSeed = FeatureUtil.hashSeed(cx, 0, cz, manager.getSeed());
-        Random rand = new Random(chunkSeed);
-
-        for (int x = 0; x < SIZE; x++) {
-            for (int z = 0; z < SIZE; z++) {
-                if (featureMask[x][z] || lakeMask[x][z])
-                    continue;
-
-                float height = heights[x][z];
-                float slope = computeSlope(x, z);
-
-                if (height < FEATURE_MIN_HEIGHT || height > FEATURE_MAX_HEIGHT)
-                    continue;
-
-                if (height > FEATURE_MAX_HEIGHT || slope > FEATURE_SLOPE_SPAWN_THRESHOLD)
-                    continue;
-
-
-                float wx = (cx * SIZE + x + 0.5f) * scale;
-                float wz = (cz * SIZE + z + 0.5f) * scale;
-
-                // --- Adjust feature height DOWNWARD based on slope ---
-                float slopeAdjustment = slope * 2.0f; // You can tweak 2.0f to make it stronger/weaker
-                float wy = height - slopeAdjustment;
-
-                for (Map.Entry<FeatureSpawner, Float> entry : biome.features.entrySet()) {
-                    if (entry.getKey() instanceof LakeSpawner)
-                        continue;
-                    if (entry.getKey().getClass().getSimpleName().contains("TreeSpawner")) {
-                        if (height > FEATURE_TREE_MAX_HEIGHT)
-                            continue;
-                    }
-
-                    if (rand.nextFloat() < entry.getValue()) {
-                        int ix = cx * SIZE + x;
-                        int iz = cz * SIZE + z;
-                        int iy = Math.round(height * 1000);
-                        long seed = FeatureUtil.hashSeed(ix, iy, iz, manager.getSeed());
-
-                        Feature f = entry.getKey().spawn(wx, wy, wz, seed);
-                        features.add(f);
-                        featureMask[x][z] = true;
-                        break;
-                    }
-                }
-            }
-        }
-        buildGrassBatch();
+        FeatureGenerationResult result = generateFeatureSpawns(
+                new FeatureGenerationInput(cx, cz, scale, biome, heights, riverSurface, featureMask, lakeMask,
+                        manager.getSeed()));
+        applyFeatureGenerationResult(result);
     }
 
     private float averageSurroundingSlope(int centerX, int centerZ, int radius) {
@@ -558,7 +879,88 @@ public class Chunk {
         return (count > 0) ? totalSlope / count : 1f; // 1f is max slope fallback
     }
 
+    private static void applyCavesAndRavines(float[][] heights, float[][] riverSurface, int cx, int cz, float scale,
+                                             OpenSimplexNoise terrainNoise, long seed) {
+        final double riverFreq = 0.0018;
+        final double riverWidth = 0.06;
+        final double riverBlendWidth = 0.12;
+        final double riverDepth = 8.0;
+        final double riverMaskFreq = 0.0009;
+        final double riverMaskThreshold = 0.38;
+        final float ridgeOffset = 0.55f;
+        final float surfaceNoiseAmp = 0.2f;
+        final float flowSlopeScale = 0.00075f;
+        final float minRiverDepth = 1.8f;
+        final float surfaceCarveRatio = 0.6f;
+
+        for (int x = 0; x <= SIZE; x++) {
+            for (int z = 0; z <= SIZE; z++) {
+                double wx = (cx * SIZE + x) * scale;
+                double wz = (cz * SIZE + z) * scale;
+
+                double riverNoise = terrainNoise.eval(wx * riverFreq + 2200.0, wz * riverFreq - 1300.0);
+                double warpNoise = terrainNoise.eval(wx * riverFreq * 1.6 - 500.0, wz * riverFreq * 1.6 + 900.0);
+                double riverBand = Math.abs(riverNoise + warpNoise * 0.15);
+                if (riverBand < riverBlendWidth) {
+                    double riverMask = terrainNoise.eval(wx * riverMaskFreq - 3400.0, wz * riverMaskFreq + 2600.0);
+                    double maskValue = Math.abs(riverMask);
+                    double maskBlend = 1.0 - smoothstep(riverMaskThreshold, riverMaskThreshold + 0.2, maskValue);
+                    if (maskBlend > 0.001) {
+                        double t = (riverBlendWidth - riverBand) / riverBlendWidth;
+                        double bankBlend = t * t * (3.0 - 2.0 * t) * maskBlend;
+                        float localSlope = computeSlope(heights, x, z);
+                        float slopeBoost = Math.min(1.0f, localSlope * 0.9f);
+                        double localWidth = riverWidth
+                                * (0.76 + 0.28 * (terrainNoise.eval(wx * 0.002, wz * 0.002) * 0.5 + 0.5))
+                                * (1.0 + 0.6 * slopeBoost);
+                        double depthFactor = riverBand < localWidth ? (localWidth - riverBand) / localWidth : 0.0;
+                        depthFactor = depthFactor * depthFactor * (3.0 - 2.0 * depthFactor);
+                        depthFactor = Math.max(depthFactor, bankBlend * 0.2) * maskBlend;
+                        float baseHeight = heights[x][z];
+                        float surfaceNoise = (float) (terrainNoise.eval(wx * 0.00012 + 1200.0, wz * 0.00012 - 800.0) * surfaceNoiseAmp);
+                        double flowAngle = terrainNoise.eval(wx * 0.0006 - 2000.0, wz * 0.0006 + 1500.0) * Math.PI;
+                        double flowX = Math.cos(flowAngle);
+                        double flowZ = Math.sin(flowAngle);
+                        float flowCoord = (float) (wx * flowX + wz * flowZ);
+                        float flowSlope = flowCoord * flowSlopeScale;
+                        float downhillSurface = (float) (terrainNoise.eval(wx * 0.00015 + 5000.0, wz * 0.00015 - 5000.0) * 4.0)
+                                - flowSlope;
+                        float depthNoise = (float) (terrainNoise.eval(wx * 0.004 - 2200.0, wz * 0.004 + 1900.0) * 0.5 + 0.5);
+                        float carveDepth = (float) (riverDepth * (0.7f + 0.6f * depthNoise) * depthFactor);
+                        carveDepth = Math.max(carveDepth, minRiverDepth * (float) Math.max(0.15, depthFactor));
+                        float bedHeight = baseHeight - carveDepth;
+                        float surfaceFromCarve = baseHeight - carveDepth * surfaceCarveRatio;
+                        float riverSurfaceHeight = Math.min(baseHeight - ridgeOffset * 0.35f,
+                                Math.min(surfaceFromCarve + 0.2f, downhillSurface + surfaceNoise));
+                        riverSurfaceHeight = Math.max(WATER_LEVEL, riverSurfaceHeight);
+                        float target = Math.min(bedHeight, riverSurfaceHeight - minRiverDepth);
+                        float blended = (float) (baseHeight * (1.0 - bankBlend) + target * bankBlend);
+                        heights[x][z] = blended;
+                        if (riverSurface != null && bankBlend > 0.0) {
+                            riverSurface[x][z] = riverSurfaceHeight;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static void resetRiverSurface(float[][] riverSurface) {
+        for (int x = 0; x < riverSurface.length; x++) {
+            Arrays.fill(riverSurface[x], Float.NEGATIVE_INFINITY);
+        }
+    }
+
+    private static double smoothstep(double edge0, double edge1, double x) {
+        double t = Math.max(0.0, Math.min(1.0, (x - edge0) / (edge1 - edge0)));
+        return t * t * (3.0 - 2.0 * t);
+    }
+
     private float computeSlope(int x, int z) {
+        return computeSlope(heights, x, z);
+    }
+
+    private static float computeSlope(float[][] heights, int x, int z) {
         int x0 = Math.max(0, x - 1);
         int x1 = Math.min(SIZE, x + 1);
         int z0 = Math.max(0, z - 1);
@@ -575,6 +977,10 @@ public class Chunk {
     }
 
     private int pickTexture(float height, float slope) {
+        return pickTextureForBiome(biome, height, slope, manager);
+    }
+
+    private static int pickTextureForBiome(Biome targetBiome, float height, float slope, TerrainManager manager) {
         Random rand = new Random((int)(height * 1000 + slope * 1000));
 
 
@@ -599,13 +1005,25 @@ public class Chunk {
 
         // --- Slope-based textures ---
         if (slope > ROCK_SLOPE_START) {
-            return manager.getTexture(biome.rockTex);
+            return manager.getTexture(targetBiome.rockTex);
         }
         if (slope > DIRT_SLOPE_START) {
-            return manager.getTexture(biome.dirtTex);
+            return manager.getTexture(targetBiome.dirtTex);
         }
 
-        return manager.getTexture(biome.grassTex);
+        return manager.getTexture(targetBiome.grassTex);
+    }
+
+
+    private boolean isRiverCell(int x, int z) {
+        return riverSurface[x][z] > Float.NEGATIVE_INFINITY / 2;
+    }
+
+    private boolean isRiverBed(int x, int z, float height) {
+        if (!isRiverCell(x, z)) {
+            return false;
+        }
+        return height <= riverSurface[x][z] + 0.02f;
     }
 
 
@@ -656,12 +1074,123 @@ public class Chunk {
         disposeGrassBatch();
     }
 
+    public void refreshAfterNeighborUpdate() {
+        stitchEdges();
+        buildTerrainBuffers();
+        buildWaterDisplayList();
+    }
+
     public OpenSimplexNoise getTerrainNoise() {
         return terrainNoise;
     }
 
     public float getScale() {
         return scale;
+    }
+
+    private void applyPrecomputedData(ChunkBuildData data) {
+        copyHeightsInto(data.heights, heights);
+        copyMaskInto(data.featureMask, featureMask);
+        copyMaskInto(data.lakeMask, lakeMask);
+        if (data.riverSurface != null) {
+            copyHeightsInto(data.riverSurface, riverSurface);
+        } else {
+            resetRiverSurface(riverSurface);
+        }
+        if (data.lakes != null) {
+            features.addAll(data.lakes);
+        }
+        featuresGenerated = biome.features == null || biome.features.isEmpty();
+    }
+
+    private static float[][] copyHeights(float[][] source) {
+        float[][] copy = new float[source.length][];
+        for (int i = 0; i < source.length; i++) {
+            copy[i] = Arrays.copyOf(source[i], source[i].length);
+        }
+        return copy;
+    }
+
+    private static boolean[][] copyMask(boolean[][] source) {
+        boolean[][] copy = new boolean[source.length][];
+        for (int i = 0; i < source.length; i++) {
+            copy[i] = Arrays.copyOf(source[i], source[i].length);
+        }
+        return copy;
+    }
+
+    private static void copyHeightsInto(float[][] source, float[][] target) {
+        for (int i = 0; i < source.length && i < target.length; i++) {
+            System.arraycopy(source[i], 0, target[i], 0, Math.min(source[i].length, target[i].length));
+        }
+    }
+
+    private static void copyMaskInto(boolean[][] source, boolean[][] target) {
+        for (int i = 0; i < source.length && i < target.length; i++) {
+            System.arraycopy(source[i], 0, target[i], 0, Math.min(source[i].length, target[i].length));
+        }
+    }
+
+
+    public static FeatureGenerationResult generateFeatureSpawns(FeatureGenerationInput input) {
+        List<FeatureSpawn> spawns = new ArrayList<>();
+        if (input.biome.features == null || input.biome.features.isEmpty()) {
+            return new FeatureGenerationResult(input.cx, input.cz, spawns, input.featureMask);
+        }
+
+        long chunkSeed = FeatureUtil.hashSeed(input.cx, 0, input.cz, input.seed);
+        Random rand = new Random(chunkSeed);
+
+        for (int x = 0; x < SIZE; x++) {
+            for (int z = 0; z < SIZE; z++) {
+                if (input.featureMask[x][z] || input.lakeMask[x][z]) {
+                    continue;
+                }
+                if (input.riverSurface != null && input.riverSurface[x][z] > Float.NEGATIVE_INFINITY / 2) {
+                    continue;
+                }
+
+                float height = input.heights[x][z];
+                float slope = computeSlope(input.heights, x, z);
+
+                if (height < FEATURE_MIN_HEIGHT || height > FEATURE_MAX_HEIGHT) {
+                    continue;
+                }
+
+                if (height > FEATURE_MAX_HEIGHT || slope > FEATURE_SLOPE_SPAWN_THRESHOLD) {
+                    continue;
+                }
+
+                float wx = (input.cx * SIZE + x + 0.5f) * input.scale;
+                float wz = (input.cz * SIZE + z + 0.5f) * input.scale;
+                float slopeAdjustment = slope * 2.0f;
+                float wy = height - slopeAdjustment;
+
+                for (Map.Entry<FeatureSpawner, Float> entry : input.biome.features.entrySet()) {
+                    if (entry.getKey() instanceof LakeSpawner) {
+                        continue;
+                    }
+                    if (entry.getKey().getClass().getSimpleName().contains("TreeSpawner")) {
+                        if (height > FEATURE_TREE_MAX_HEIGHT) {
+                            continue;
+                        }
+                    }
+
+                    if (rand.nextFloat() < entry.getValue()) {
+                        int ix = input.cx * SIZE + x;
+                        int iz = input.cz * SIZE + z;
+                        int iy = Math.round(height * 1000);
+                        long seed = FeatureUtil.hashSeed(ix, iy, iz, input.seed);
+
+                        spawns.add(new FeatureSpawn(entry.getKey(), wx, wy, wz, seed));
+                        input.featureMask[x][z] = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return new FeatureGenerationResult(input.cx, input.cz, spawns, input.featureMask);
     }
 
     public int getLOD() {
@@ -712,15 +1241,44 @@ public class Chunk {
 
     private static final int STRIDE_FLOATS = 8;
 
+    private static final class BatchKey {
+        private final int textureId;
+        private final int alphaBucket;
+
+        private BatchKey(int textureId, int alphaBucket) {
+            this.textureId = textureId;
+            this.alphaBucket = alphaBucket;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (obj == null || getClass() != obj.getClass()) {
+                return false;
+            }
+            BatchKey other = (BatchKey) obj;
+            return textureId == other.textureId && alphaBucket == other.alphaBucket;
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * textureId + alphaBucket;
+        }
+    }
+
     private static final class TerrainBatch {
         private final int textureId;
         private final int vboId;
         private final int vertexCount;
+        private final float alpha;
 
-        private TerrainBatch(int textureId, int vboId, int vertexCount) {
+        private TerrainBatch(int textureId, int vboId, int vertexCount, float alpha) {
             this.textureId = textureId;
             this.vboId = vboId;
             this.vertexCount = vertexCount;
+            this.alpha = alpha;
         }
     }
 
