@@ -14,11 +14,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class TerrainManager {
-    private static final int MAX_CHUNKS_PER_FRAME = 12;
+    private static final int MAX_CHUNKS_PER_FRAME = 20;
     private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 8;
-    private static final long CHUNK_BUDGET_NS = 4_000_000L;
+    private static final long CHUNK_BUDGET_NS = 10_000_000L;
     private static final long FEATURE_BUDGET_NS = 6_000_000L;
-    private static final int MAX_APPLIED_CHUNKS_PER_FRAME = 4;
+    private static final int MAX_APPLIED_CHUNKS_PER_FRAME = 8;
     private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
     private static final int MAX_RENDER_BUILDS_PER_FRAME = 2;
     private static final long RENDER_BUILD_BUDGET_NS = 3_000_000L;
@@ -36,7 +36,7 @@ public class TerrainManager {
             new ConcurrentLinkedQueue<>();
     private final ArrayDeque<Chunk> pendingRenderBuilds = new ArrayDeque<>();
     private final Set<Long> pendingRenderBuildKeys = new HashSet<>();
-    private final ExecutorService chunkGenerator = Executors.newSingleThreadExecutor(r -> {
+    private final ExecutorService chunkGenerator = Executors.newFixedThreadPool(2, r -> {
         Thread t = new Thread(r, "chunk-generator");
         t.setDaemon(true);
         return t;
