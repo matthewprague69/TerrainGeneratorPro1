@@ -20,17 +20,17 @@ public enum Biome {
         BLOOM(0.8f, 0.01f, 7f, 5f, "bloom_grass.png", "bloom_dirt.png", "gold_ore_rock.png", 0.2f, 0.15f),
         BIG_TREES(0.9f, 0.01f, 4f, 2f, "dark_grass.png", "dirt.png", "rock.png", 0.1f, 0.15f),
         PREHISTORIC(1.0f, 0.005f, 150f, 5f, "prehistoric_grass.png", "dark_dirt.png", "rock.png", 0.15f, 0.15f);*/
-        PLAINS(0.20f, 0.005f, 100f, 30f, "grass.png", "dirt.png", "rock.png", 0.15f, 0.25f),
-        HILLS(0.50f, 0.01f, 25f, 15f, "grass.png", "dirt.png", "rock.png", 0.25f, 0.25f),
-        SAND(0.40f, 0.03f, 10f, 5f, "sand.png", "sand.png", "sand_rock.png", 0.12f, 0.25f),
-        MOUNTAINS(0.75f, 0.02f, 35f, 40f, "grass.png", "dirt.png", "rock.png", 0.2f, 0.25f),
-        HIGH_MOUNTAINS(0.90f, 0.03f, 70f, 70f, "grass.png", "dirt.png", "rock.png", 0.035f, 0.25f),
-        DEAD_FOREST(0.1f, 0.01f, 1f, 7f, "dead_grass.png", "dark_dirt.png", "dark_rock.png", 0.05f, 0.25f),
-        BLOOM(0.2f, 0.01f, 7f, 5f, "bloom_grass.png", "bloom_dirt.png", "gold_ore_rock.png", 0.2f, 0.25f),
-        BIG_TREES(0.35f, 0.01f, 4f, 2f, "dark_grass.png", "dirt.png", "rock.png", 0.1f, 0.25f),
-        PREHISTORIC(0.37f, 0.005f, 150f, 5f, "prehistoric_grass.png", "dark_dirt.png", "rock.png", 0.15f, 0.25f),
-        SWAMP(0.01f, 0.01f, 3f, 2f, "swamp_grass.png", "dirt.png", "rock.png", 0.15f, 0.25f),
-        SPRUCE_FOREST(0.6f, 0.008f, 18f, 10f, "dark_grass.png", "dirt.png", "rock.png", 0.2f, 0.25f);
+        PLAINS(0.20f, 0.005f, 100f, 30f, 1.5f, "grass.png", "dirt.png", "rock.png", 0.15f, 0.25f),
+        HILLS(0.50f, 0.01f, 25f, 15f, 1.0f, "grass.png", "dirt.png", "rock.png", 0.25f, 0.25f),
+        SAND(0.40f, 0.03f, 10f, 5f, 0.9f, "sand.png", "sand.png", "sand_rock.png", 0.12f, 0.25f),
+        MOUNTAINS(0.75f, 0.02f, 35f, 40f, 1.0f, "grass.png", "dirt.png", "rock.png", 0.2f, 0.25f),
+        HIGH_MOUNTAINS(0.90f, 0.03f, 70f, 70f, 0.8f, "grass.png", "dirt.png", "rock.png", 0.035f, 0.25f),
+        DEAD_FOREST(0.1f, 0.01f, 1f, 7f, 0.8f, "dead_grass.png", "dark_dirt.png", "dark_rock.png", 0.05f, 0.25f),
+        BLOOM(0.2f, 0.01f, 7f, 5f, 0.5f, "bloom_grass.png", "bloom_dirt.png", "gold_ore_rock.png", 0.2f, 0.25f),
+        BIG_TREES(0.35f, 0.01f, 4f, 2f, 1.0f, "dark_grass.png", "dirt.png", "rock.png", 0.1f, 0.25f),
+        PREHISTORIC(0.37f, 0.005f, 150f, 5f, 1.1f, "prehistoric_grass.png", "dark_dirt.png", "rock.png", 0.15f, 0.25f),
+        SWAMP(0.01f, 0.01f, 3f, 2f, 0.7f, "swamp_grass.png", "dirt.png", "rock.png", 0.15f, 0.25f),
+        SPRUCE_FOREST(0.6f, 0.008f, 18f, 10f, 0.9f, "dark_grass.png", "dirt.png", "rock.png", 0.2f, 0.25f);
         //OCEAN(0.1f, 0.008f, 0f, 0f, "dark_grass.png", "dirt.png", "rock.png", 0.5f, 0.01f);
 
 
@@ -38,6 +38,7 @@ public enum Biome {
 
         public final float center;
         public final float frequency, amplitude, baseHeight;
+        public final float patchScale;
         public final float spawnChance;
         public final float blendRadius;
         public final String grassTex, dirtTex, rockTex;
@@ -46,13 +47,14 @@ public enum Biome {
         // Global multiplier for all feature spawn rates
         public static float featureSpawnMultiplier = 0.25f;
 
-        Biome(float center, float frequency, float amplitude, float baseHeight,
+        Biome(float center, float frequency, float amplitude, float baseHeight, float patchScale,
                         String grassTex, String dirtTex, String rockTex,
                         float spawnChance, float blendRadius) {
                 this.center = center;
                 this.frequency = frequency;
                 this.amplitude = amplitude;
                 this.baseHeight = baseHeight;
+                this.patchScale = patchScale;
                 this.grassTex = grassTex;
                 this.dirtTex = dirtTex;
                 this.rockTex = rockTex;
