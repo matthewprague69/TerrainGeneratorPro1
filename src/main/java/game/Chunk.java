@@ -3,6 +3,7 @@ import generators.LakeGenerator;
 import objects.BatchableFeature;
 import objects.Cactus;
 import objects.Feature;
+import objects.ColorBatchableFeature;
 import objects.Flower;
 import objects.Grass;
 import objects.Lake;
@@ -43,6 +44,8 @@ public class Chunk {
     private int grassBatchVbo = -1;
     private int grassBatchVertexCount = 0;
     private int grassBatchTexture = 0;
+    private int flowerBatchVbo = -1;
+    private int flowerBatchVertexCount = 0;
     private boolean renderResourcesBuilt = false;
     public static final float WATER_LEVEL = 4.0f;
     public static final float WATER_SURROUNDING_LEVEL = 5.5f;
@@ -285,7 +288,7 @@ public class Chunk {
         stitchEdges();
         buildTerrainBuffers();
         buildWaterDisplayList();
-        buildGrassBatch();
+        buildFeatureBatches();
 
     }
 
@@ -354,7 +357,7 @@ public class Chunk {
             features.add(f);
         }
         featuresGenerated = true;
-        buildGrassBatch();
+        buildFeatureBatches();
     }
 
     public Biome getBiomeType() {
@@ -391,6 +394,9 @@ public class Chunk {
         if (chunkDistance <= grassDetailDistance && chunkDistance <= featureRenderDist) {
             renderGrassBatch();
         }
+        if (chunkDistance <= featureRenderDist) {
+            renderFlowerBatch();
+        }
 
         glDisable(GL_TEXTURE_2D);
 
@@ -402,7 +408,7 @@ public class Chunk {
                 featureDetailDistance + 3);
         // Draw features if they are above water
         for (Feature f : features) {
-            if (f instanceof Grass) {
+            if (f instanceof Grass || f instanceof ColorBatchableFeature) {
                 continue;
             }
             if (!shouldDrawFeatureForLod(f, lod)) {
@@ -539,6 +545,35 @@ public class Chunk {
         grassBatchTexture = texture;
     }
 
+    private void buildFlowerBatch() {
+        disposeFlowerBatch();
+        util.VertexColorBatchBuilder builder = new util.VertexColorBatchBuilder();
+
+        for (Feature feature : features) {
+            if (feature instanceof ColorBatchableFeature) {
+                ((ColorBatchableFeature) feature).appendToColorBatch(builder);
+            }
+        }
+
+        int vertexCount = builder.getVertexCount();
+        if (vertexCount == 0) {
+            return;
+        }
+
+        int vboId = glGenBuffers();
+        glBindBuffer(GL_ARRAY_BUFFER, vboId);
+        glBufferData(GL_ARRAY_BUFFER, builder.toBuffer(), GL_STATIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        flowerBatchVbo = vboId;
+        flowerBatchVertexCount = vertexCount;
+    }
+
+    private void buildFeatureBatches() {
+        buildGrassBatch();
+        buildFlowerBatch();
+    }
+
     private void renderGrassBatch() {
         if (grassBatchVbo == -1 || grassBatchVertexCount == 0) {
             return;
@@ -562,6 +597,23 @@ public class Chunk {
         glDisable(GL_BLEND);
     }
 
+    private void renderFlowerBatch() {
+        if (flowerBatchVbo == -1 || flowerBatchVertexCount == 0) {
+            return;
+        }
+
+        glDisable(GL_TEXTURE_2D);
+        glBindBuffer(GL_ARRAY_BUFFER, flowerBatchVbo);
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glEnableClientState(GL_COLOR_ARRAY);
+        glVertexPointer(3, GL_FLOAT, 6 * Float.BYTES, 0);
+        glColorPointer(3, GL_FLOAT, 6 * Float.BYTES, 3 * Float.BYTES);
+        glDrawArrays(GL_TRIANGLES, 0, flowerBatchVertexCount);
+        glDisableClientState(GL_COLOR_ARRAY);
+        glDisableClientState(GL_VERTEX_ARRAY);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
     private void renderGrassBatchDepth() {
         if (grassBatchVbo == -1 || grassBatchVertexCount == 0) {
             return;
@@ -571,6 +623,19 @@ public class Chunk {
         glEnableClientState(GL_VERTEX_ARRAY);
         glVertexPointer(3, GL_FLOAT, 5 * Float.BYTES, 0);
         glDrawArrays(GL_QUADS, 0, grassBatchVertexCount);
+        glDisableClientState(GL_VERTEX_ARRAY);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
+    private void renderFlowerBatchDepth() {
+        if (flowerBatchVbo == -1 || flowerBatchVertexCount == 0) {
+            return;
+        }
+
+        glBindBuffer(GL_ARRAY_BUFFER, flowerBatchVbo);
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glVertexPointer(3, GL_FLOAT, 6 * Float.BYTES, 0);
+        glDrawArrays(GL_TRIANGLES, 0, flowerBatchVertexCount);
         glDisableClientState(GL_VERTEX_ARRAY);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
@@ -649,6 +714,9 @@ public class Chunk {
         if (chunkDistance <= grassDetailDistance && chunkDistance <= featureRenderDist) {
             renderGrassBatchDepth();
         }
+        if (chunkDistance <= featureRenderDist) {
+            renderFlowerBatchDepth();
+        }
 
         if (chunkDistance > featureRenderDist) {
             return;
@@ -657,7 +725,7 @@ public class Chunk {
         FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
                 featureDetailDistance + 2);
         for (Feature f : features) {
-            if (f instanceof Grass) {
+            if (f instanceof Grass || f instanceof ColorBatchableFeature) {
                 continue;
             }
             if (!shouldDrawFeatureForLod(f, lod)) {
@@ -910,6 +978,7 @@ public class Chunk {
             features.removeIf(f -> !(f instanceof Lake));
             featuresGenerated = false;
             disposeGrassBatch();
+            disposeFlowerBatch();
 
             for (int x = 0; x < SIZE; x++) {
                 Arrays.fill(featureMask[x], false);
@@ -1137,6 +1206,7 @@ public class Chunk {
         disposeTerrainBuffers();
         disposeWaterDisplayList();
         disposeGrassBatch();
+        disposeFlowerBatch();
     }
 
     public void refreshAfterNeighborUpdate() {
@@ -1161,7 +1231,7 @@ public class Chunk {
         stitchEdges();
         buildTerrainBuffers();
         buildWaterDisplayList();
-        buildGrassBatch();
+        buildFeatureBatches();
         renderResourcesBuilt = true;
     }
 
@@ -1340,6 +1410,14 @@ public class Chunk {
         }
         grassBatchVertexCount = 0;
         grassBatchTexture = 0;
+    }
+
+    private void disposeFlowerBatch() {
+        if (flowerBatchVbo != -1) {
+            glDeleteBuffers(flowerBatchVbo);
+            flowerBatchVbo = -1;
+        }
+        flowerBatchVertexCount = 0;
     }
 
     private float[] computeNormal(int x1, int z1, int x2, int z2, int x3, int z3) {
