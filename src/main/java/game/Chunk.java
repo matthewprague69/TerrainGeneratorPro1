@@ -195,17 +195,74 @@ public class Chunk {
         boolean[][] lakeMask = new boolean[SIZE][SIZE];
         List<Feature> lakes = new ArrayList<>();
 
+        final int weightStep = 4;
+        List<Integer> weightXs = new ArrayList<>();
+        List<Integer> weightZs = new ArrayList<>();
+        for (int x = 0; x <= SIZE; x += weightStep) {
+            weightXs.add(x);
+        }
+        if (weightXs.get(weightXs.size() - 1) != SIZE) {
+            weightXs.add(SIZE);
+        }
+        for (int z = 0; z <= SIZE; z += weightStep) {
+            weightZs.add(z);
+        }
+        if (weightZs.get(weightZs.size() - 1) != SIZE) {
+            weightZs.add(SIZE);
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<Biome, Float>[][] weightGrid = new Map[weightXs.size()][weightZs.size()];
+        for (int gx = 0; gx < weightXs.size(); gx++) {
+            int lx = weightXs.get(gx);
+            double wx = (cx * SIZE + lx) * scale;
+            for (int gz = 0; gz < weightZs.size(); gz++) {
+                int lz = weightZs.get(gz);
+                double wz = (cz * SIZE + lz) * scale;
+                weightGrid[gx][gz] = manager.getBiomeWeights(wx, wz);
+            }
+        }
+
         for (int x = 0; x <= SIZE; x++) {
             for (int z = 0; z <= SIZE; z++) {
                 double wx = (cx * SIZE + x) * scale;
                 double wz = (cz * SIZE + z) * scale;
 
-                Map<Biome, Float> weights = manager.getBiomeWeights(wx, wz);
+                int gxIndex = Math.min(x / weightStep, weightXs.size() - 2);
+                int gzIndex = Math.min(z / weightStep, weightZs.size() - 2);
+                int x0 = weightXs.get(gxIndex);
+                int x1 = weightXs.get(gxIndex + 1);
+                int z0 = weightZs.get(gzIndex);
+                int z1 = weightZs.get(gzIndex + 1);
+
+                float tx = x1 == x0 ? 0f : (float) (x - x0) / (float) (x1 - x0);
+                float tz = z1 == z0 ? 0f : (float) (z - z0) / (float) (z1 - z0);
+                float sx = 1f - tx;
+                float sz = 1f - tz;
+
+                float w00 = sx * sz;
+                float w10 = tx * sz;
+                float w01 = sx * tz;
+                float w11 = tx * tz;
+
+                Map<Biome, Double> weights = new HashMap<>();
+                for (Map.Entry<Biome, Float> entry : weightGrid[gxIndex][gzIndex].entrySet()) {
+                    weights.merge(entry.getKey(), entry.getValue() * (double) w00, Double::sum);
+                }
+                for (Map.Entry<Biome, Float> entry : weightGrid[gxIndex + 1][gzIndex].entrySet()) {
+                    weights.merge(entry.getKey(), entry.getValue() * (double) w10, Double::sum);
+                }
+                for (Map.Entry<Biome, Float> entry : weightGrid[gxIndex][gzIndex + 1].entrySet()) {
+                    weights.merge(entry.getKey(), entry.getValue() * (double) w01, Double::sum);
+                }
+                for (Map.Entry<Biome, Float> entry : weightGrid[gxIndex + 1][gzIndex + 1].entrySet()) {
+                    weights.merge(entry.getKey(), entry.getValue() * (double) w11, Double::sum);
+                }
                 double blendedHeight = 0;
 
-                for (Map.Entry<Biome, Float> entry : weights.entrySet()) {
+                for (Map.Entry<Biome, Double> entry : weights.entrySet()) {
                     Biome entryBiome = entry.getKey();
-                    float weight = entry.getValue();
+                    double weight = entry.getValue();
 
                     double freq = entryBiome.frequency;
                     double amp = entryBiome.amplitude * 0.5;
