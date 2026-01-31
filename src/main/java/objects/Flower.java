@@ -1,11 +1,12 @@
 package objects;
 import renderers.ShadowRenderer;
 import util.FeatureUtil;
+import util.VertexColorBatchBuilder;
 
 import static org.lwjgl.opengl.GL11.*;
 import java.util.Random;
 
-public class Flower extends Feature {
+public class Flower extends Feature implements ColorBatchableFeature {
     private final FlowerType type;
     private final float[] petalAngles;
     private final float[] petalScales;
@@ -14,6 +15,7 @@ public class Flower extends Feature {
     private final Random rand;
 
     private int displayList = -1;
+    private final float[] batchVertices;
 
     public Flower(float x, float y, float z, FlowerType type, long globalSeed) {
         super(x, y, z);
@@ -40,6 +42,7 @@ public class Flower extends Feature {
         };
 
         buildDisplayList();
+        this.batchVertices = buildBatchVertices();
     }
 
     private void buildDisplayList() {
@@ -124,6 +127,11 @@ public class Flower extends Feature {
     }
 
     @Override
+    public void appendToColorBatch(VertexColorBatchBuilder builder) {
+        builder.append(batchVertices, x, y, z);
+    }
+
+    @Override
     protected float getShadowRadius() {
         return 0.25f;
     }
@@ -143,5 +151,39 @@ public class Flower extends Feature {
         if (displayList != -1) {
             glDeleteLists(displayList, 1);
         }
+    }
+
+    private float[] buildBatchVertices() {
+        float width = 0.18f;
+        float height = type.height;
+        float half = width * 0.5f;
+        float[] vertices = new float[6 * 6 * 2];
+        int idx = 0;
+        idx = putQuad(vertices, idx, -half, 0f, 0f, half, height, 0f, type.r, type.g, type.b);
+        idx = putQuad(vertices, idx, 0f, 0f, -half, 0f, height, half, type.r, type.g, type.b);
+        return vertices;
+    }
+
+    private int putQuad(float[] vertices, int idx,
+                        float x1, float y1, float z1,
+                        float x2, float y2, float z2,
+                        float r, float g, float b) {
+        idx = putVertex(vertices, idx, x1, y1, z1, r, g, b);
+        idx = putVertex(vertices, idx, x2, y1, z2, r, g, b);
+        idx = putVertex(vertices, idx, x2, y2, z2, r, g, b);
+        idx = putVertex(vertices, idx, x1, y1, z1, r, g, b);
+        idx = putVertex(vertices, idx, x2, y2, z2, r, g, b);
+        idx = putVertex(vertices, idx, x1, y2, z1, r, g, b);
+        return idx;
+    }
+
+    private int putVertex(float[] vertices, int idx, float x, float y, float z, float r, float g, float b) {
+        vertices[idx++] = x;
+        vertices[idx++] = y;
+        vertices[idx++] = z;
+        vertices[idx++] = r;
+        vertices[idx++] = g;
+        vertices[idx++] = b;
+        return idx;
     }
 }
