@@ -20,8 +20,24 @@ public class Tree extends Feature {
     private static final Map<TreeType, Branch> spruceTemplateCache = new HashMap<>();
     private static final Map<TreeType, Integer> spruceDisplayLists = new HashMap<>();
     private static final Map<TreeType, Integer> spruceTrunkDisplayLists = new HashMap<>();
+    private static final Map<String, List<TreeVariant>> treeVariants = new HashMap<>();
+    private static final int VARIANTS_PER_TYPE = 3;
     private int displayList = -1; // Per-tree list (for normal trees)
     private int trunkDisplayList = -1;
+    private boolean sharedDisplayList = false;
+    private float variantScale = 1f;
+
+    private static class TreeVariant {
+        final int displayList;
+        final int trunkDisplayList;
+        final float height;
+
+        TreeVariant(int displayList, int trunkDisplayList, float height) {
+            this.displayList = displayList;
+            this.trunkDisplayList = trunkDisplayList;
+            this.height = height;
+        }
+    }
 
     public Tree(float x, float y, float z, TreeType type, boolean hasLeaves, long globalSeed) {
         super(x, y, z);
@@ -41,10 +57,16 @@ public class Tree extends Feature {
             this.root = cloneBranch(template);
             buildSpruceDisplayListIfNeeded(type);
             buildSpruceTrunkDisplayListIfNeeded(type);
+            this.sharedDisplayList = true;
         } else {
-            this.root = generateTrunk(height, type.baseThickness);
-            buildDisplayList(true); // For normal trees
-            buildDisplayList(false);
+            this.root = null;
+            List<TreeVariant> variants = getOrCreateTreeVariants(type, hasLeaves);
+            int variantIndex = (int) (Math.abs(seed) % variants.size());
+            TreeVariant variant = variants.get(variantIndex);
+            this.displayList = variant.displayList;
+            this.trunkDisplayList = variant.trunkDisplayList;
+            this.sharedDisplayList = true;
+            this.variantScale = height / Math.max(0.0001f, variant.height);
         }
     }
 
@@ -54,13 +76,45 @@ public class Tree extends Feature {
 
     @Override
     public void dispose() {
-        if (displayList != -1) {
+        if (displayList != -1 && !sharedDisplayList) {
             glDeleteLists(displayList, 1);
         }
-        if (trunkDisplayList != -1) {
+        if (trunkDisplayList != -1 && !sharedDisplayList) {
             glDeleteLists(trunkDisplayList, 1);
         }
         // Note: Spruce display lists are static/shared, we don't delete them here
+    }
+
+    private static List<TreeVariant> getOrCreateTreeVariants(TreeType type, boolean hasLeaves) {
+        String key = type.name() + ":" + hasLeaves;
+        List<TreeVariant> variants = treeVariants.get(key);
+        if (variants != null) {
+            return variants;
+        }
+        variants = new ArrayList<>(VARIANTS_PER_TYPE);
+        for (int i = 0; i < VARIANTS_PER_TYPE; i++) {
+            long seed = FeatureUtil.hashSeed(type.ordinal(), hasLeaves ? 1 : 0, i, 987654321L);
+            Random rand = new Random(seed);
+            float height = type.minHeight + rand.nextFloat() * (type.maxHeight - type.minHeight);
+            Branch root = generateTrunk(rand, type, height, type.baseThickness);
+            Tree temp = new Tree(type, hasLeaves, rand, height, root);
+            temp.buildDisplayList(true);
+            temp.buildDisplayList(false);
+            variants.add(new TreeVariant(temp.displayList, temp.trunkDisplayList, height));
+        }
+        treeVariants.put(key, variants);
+        return variants;
+    }
+
+    private Tree(TreeType type, boolean hasLeaves, Random rand, float height, Branch root) {
+        super(0f, 0f, 0f);
+        this.type = type;
+        this.hasLeaves = hasLeaves;
+        this.rand = rand;
+        this.barkTex = TextureLoader.getOrLoad(type.trunkTex);
+        this.leafTex = TextureLoader.getOrLoad(type.leafTex);
+        this.height = height;
+        this.root = root;
     }
 
     private static Branch getOrCreateSpruceTemplate(TreeType type, float height) {
@@ -209,6 +263,14 @@ public class Tree extends Feature {
     }
 
     private Branch generateTrunk(float totalHeight, float thickness) {
+        return generateTrunk(rand, type, totalHeight, thickness);
+    }
+
+    private Branch generateBranch(int depth, float length, float thickness) {
+        return generateBranch(rand, type, depth, length, thickness);
+    }
+
+    private static Branch generateTrunk(Random rand, TreeType type, float totalHeight, float thickness) {
         if (type.trunkSegments <= 0) {
             Branch root = new Branch();
             root.length = 0f;
@@ -220,7 +282,7 @@ public class Tree extends Feature {
             for (int i = 0; i < branchCount; i++) {
                 float branchLength = totalHeight * (0.6f + rand.nextFloat() * 0.4f);
                 float branchThickness = thickness * 0.6f;
-                root.children.add(generateBranch(1, branchLength, branchThickness));
+                root.children.add(generateBranch(rand, type, 1, branchLength, branchThickness));
             }
             return root;
         }
@@ -253,13 +315,13 @@ public class Tree extends Feature {
         for (int i = 0; i < branchCount; i++) {
             float branchLength = lastSegmentLength * (0.6f + rand.nextFloat() * 0.4f);
             float branchThickness = thickness * 0.6f;
-            current.children.add(generateBranch(1, branchLength, branchThickness));
+            current.children.add(generateBranch(rand, type, 1, branchLength, branchThickness));
         }
 
         return root;
     }
 
-    private Branch generateBranch(int depth, float length, float thickness) {
+    private static Branch generateBranch(Random rand, TreeType type, int depth, float length, float thickness) {
         Branch b = new Branch();
         b.length = length;
         b.thickness = thickness;
@@ -273,7 +335,7 @@ public class Tree extends Feature {
             for (int i = 0; i < count; i++) {
                 float newLength = length * (0.6f + rand.nextFloat() * 0.3f);
                 float newThickness = thickness * 0.6f;
-                b.children.add(generateBranch(depth + 1, newLength, newThickness));
+                b.children.add(generateBranch(rand, type, depth + 1, newLength, newThickness));
             }
         }
 
@@ -284,6 +346,9 @@ public class Tree extends Feature {
     public void draw() {
         glPushMatrix();
         glTranslatef(x, y, z);
+        if (type.renderStyle != TreeRenderStyle.SPRUCE) {
+            glScalef(variantScale, variantScale, variantScale);
+        }
 
         glEnable(GL_TEXTURE_2D);
         glEnable(GL_BLEND);
@@ -309,6 +374,9 @@ public class Tree extends Feature {
     public void drawSimplified() {
         glPushMatrix();
         glTranslatef(x, y, z);
+        if (type.renderStyle != TreeRenderStyle.SPRUCE) {
+            glScalef(variantScale, variantScale, variantScale);
+        }
 
         glEnable(GL_TEXTURE_2D);
         glEnable(GL_BLEND);
