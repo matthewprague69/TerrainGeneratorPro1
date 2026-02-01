@@ -406,6 +406,23 @@ public class TerrainManager {
                 iterator.remove();
             }
         }
+        if (visibleKeys.isEmpty()) {
+            List<Long> fallbackKeys = new ArrayList<>();
+            Iterator<Long> fallbackIterator = pendingChunks.iterator();
+            while (fallbackIterator.hasNext()) {
+                fallbackKeys.add(fallbackIterator.next());
+            }
+            fallbackKeys.sort(Comparator.comparingInt(key -> {
+                int cx = (int) (key >> 32);
+                int cz = (int) (long) key;
+                return Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            }));
+            for (int i = 0; i < Math.min(budget, fallbackKeys.size()); i++) {
+                long key = fallbackKeys.get(i);
+                visibleKeys.add(key);
+                pendingChunks.remove(key);
+            }
+        }
         int count = 0;
         for (long key : visibleKeys) {
             if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
