@@ -390,15 +390,64 @@ public class TerrainManager {
     private void processPendingChunkGenerations(int pcx, int pcz, Frustum frustum) {
         int backlog = pendingChunks.size();
         int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
-        int count = 0;
         long start = System.nanoTime();
-        int attempts = 0;
-        int maxAttempts = pendingChunks.size();
-        while (count < budget && !pendingChunks.isEmpty() && attempts < maxAttempts) {
+        if (frustum == null) {
+            processPendingChunkGenerationsWithoutFrustum(budget, start);
+            return;
+        }
+        List<Long> visibleKeys = new ArrayList<>();
+        Iterator<Long> iterator = pendingChunks.iterator();
+        while (iterator.hasNext() && visibleKeys.size() < budget) {
+            long key = iterator.next();
+            int cx = (int) (key >> 32);
+            int cz = (int) key;
+            if (isChunkVisible(frustum, cx, cz)) {
+                visibleKeys.add(key);
+                iterator.remove();
+            }
+        }
+        int count = 0;
+        for (long key : visibleKeys) {
+            if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                pendingChunks.addFirst(key);
+                continue;
+            }
+            Integer pendingLod = pendingChunkLods.remove(key);
+            if (pendingLod == null) {
+                continue;
+            }
+            if (inflightChunkKeys.contains(key)) {
+                pendingChunkLods.put(key, pendingLod);
+                pendingChunks.addFirst(key);
+                continue;
+            }
+            int cx = (int) (key >> 32);
+            int cz = (int) key;
+            int targetLOD = pendingLod;
+            Biome b = pickBiome(cx, cz);
+            Chunk existing = chunks.get(key);
+            if (existing != null && targetLOD >= existing.getLOD()) {
+                continue;
+            }
+            inflightChunkKeys.add(key);
+            chunkGenerator.submit(() -> {
+                Chunk.ChunkBuildData data =
+                        Chunk.generateChunkData(cx, cz, terrainNoise, scale, b, this, targetLOD);
+                completedChunkBuilds.add(data);
+            });
+            count++;
+            if (count >= budget) {
+                break;
+            }
+        }
+    }
+
+    private void processPendingChunkGenerationsWithoutFrustum(int budget, long start) {
+        int count = 0;
+        while (count < budget && !pendingChunks.isEmpty()) {
             if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
                 break;
             }
-            attempts++;
             long key = pendingChunks.pollFirst();
             Integer pendingLod = pendingChunkLods.remove(key);
             if (pendingLod == null) {
@@ -413,11 +462,6 @@ public class TerrainManager {
             }
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            if (frustum != null && !isChunkVisible(frustum, cx, cz)) {
-                pendingChunkLods.put(key, pendingLod);
-                pendingChunks.addLast(key);
-                continue;
-            }
             int targetLOD = pendingLod;
             Biome b = pickBiome(cx, cz);
             Chunk existing = chunks.get(key);
