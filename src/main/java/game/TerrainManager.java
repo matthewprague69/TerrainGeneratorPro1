@@ -232,13 +232,25 @@ public class TerrainManager {
 
         Chunk existing = chunks.get(k);
         int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
-        int targetLOD = 0;
+        int targetLOD = computeTargetLod(dist);
 
         if (existing == null) {
             queueChunkGeneration(k, cx, cz, targetLOD, dist);
         } else if (existing.getLOD() != targetLOD) {
             queueChunkGeneration(k, cx, cz, targetLOD, dist);
         }
+    }
+
+    private int computeTargetLod(int dist) {
+        int nearThreshold = Math.max(1, renderDist / 3);
+        int midThreshold = Math.max(nearThreshold + 1, (renderDist * 2) / 3);
+        if (dist > midThreshold) {
+            return 2;
+        }
+        if (dist > nearThreshold) {
+            return 1;
+        }
+        return 0;
     }
 
     private void removeNeededChunk(int cx, int cz) {
