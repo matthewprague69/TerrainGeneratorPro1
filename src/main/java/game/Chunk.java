@@ -7,6 +7,7 @@ import objects.ColorBatchableFeature;
 import objects.Flower;
 import objects.Grass;
 import objects.Lake;
+import objects.Tree;
 import spawners.FeatureSpawner;
 import spawners.LakeSpawner;
 import util.BoundingBox;
@@ -849,7 +850,9 @@ public class Chunk {
     }
 
     private void drawFeatureForLod(Feature feature, FeatureLod lod) {
-        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.IMPOSTOR) {
+        if (lod == FeatureLod.IMPOSTOR) {
+            drawFeatureImpostor(feature);
+        } else if (lod == FeatureLod.SIMPLIFIED) {
             feature.drawSimplified();
         } else {
             feature.draw();
@@ -857,11 +860,90 @@ public class Chunk {
     }
 
     private void drawFeatureDepthForLod(Feature feature, FeatureLod lod) {
-        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.IMPOSTOR) {
+        if (lod == FeatureLod.IMPOSTOR) {
+            drawFeatureImpostorDepth(feature);
+        } else if (lod == FeatureLod.SIMPLIFIED) {
             feature.drawSimplified();
         } else {
             feature.drawDepth();
         }
+    }
+
+    private void drawFeatureImpostor(Feature feature) {
+        int texture = manager.getTexture(biome.grassTex);
+        float width = 2.5f;
+        float height = 4.5f;
+        if (feature instanceof Tree) {
+            width = 3.5f;
+            height = 6.5f;
+            texture = manager.getTexture(biome.grassTex);
+        } else if (feature instanceof Lake) {
+            width = 5.0f;
+            height = 1.5f;
+            texture = manager.getTexture(biome.dirtTex);
+        }
+
+        float[] modelView = new float[16];
+        glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
+        float rightX = modelView[0];
+        float rightY = modelView[4];
+        float rightZ = modelView[8];
+
+        float halfW = width * 0.5f;
+        float x1 = feature.x - rightX * halfW;
+        float y1 = feature.y;
+        float z1 = feature.z - rightZ * halfW;
+        float x2 = feature.x + rightX * halfW;
+        float y2 = feature.y;
+        float z2 = feature.z + rightZ * halfW;
+
+        glEnable(GL_TEXTURE_2D);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glEnable(GL_ALPHA_TEST);
+        glAlphaFunc(GL_GREATER, 0.3f);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glBegin(GL_QUADS);
+        glTexCoord2f(0f, 0f);
+        glVertex3f(x1, y1, z1);
+        glTexCoord2f(1f, 0f);
+        glVertex3f(x2, y2, z2);
+        glTexCoord2f(1f, 1f);
+        glVertex3f(x2, y2 + height, z2);
+        glTexCoord2f(0f, 1f);
+        glVertex3f(x1, y1 + height, z1);
+        glEnd();
+        glDisable(GL_ALPHA_TEST);
+        glDisable(GL_BLEND);
+    }
+
+    private void drawFeatureImpostorDepth(Feature feature) {
+        float width = feature instanceof Tree ? 3.5f : 2.5f;
+        float height = feature instanceof Tree ? 6.5f : 4.5f;
+        if (feature instanceof Lake) {
+            width = 5.0f;
+            height = 1.5f;
+        }
+
+        float[] modelView = new float[16];
+        glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
+        float rightX = modelView[0];
+        float rightZ = modelView[8];
+
+        float halfW = width * 0.5f;
+        float x1 = feature.x - rightX * halfW;
+        float y1 = feature.y;
+        float z1 = feature.z - rightZ * halfW;
+        float x2 = feature.x + rightX * halfW;
+        float y2 = feature.y;
+        float z2 = feature.z + rightZ * halfW;
+
+        glBegin(GL_QUADS);
+        glVertex3f(x1, y1, z1);
+        glVertex3f(x2, y2, z2);
+        glVertex3f(x2, y2 + height, z2);
+        glVertex3f(x1, y1 + height, z1);
+        glEnd();
     }
 
     private void addSkirts(Map<BatchKey, FloatBuilder> builders, int step, float texScale) {
