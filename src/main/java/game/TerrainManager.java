@@ -397,14 +397,11 @@ public class TerrainManager {
             return;
         }
         List<Long> visibleKeys = new ArrayList<>();
-        Iterator<Long> iterator = pendingChunks.iterator();
-        while (iterator.hasNext() && visibleKeys.size() < budget) {
-            long key = iterator.next();
+        for (long key : pendingChunks) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
             if (isChunkVisible(frustum, cx, cz)) {
                 visibleKeys.add(key);
-                iterator.remove();
             }
         }
         if (visibleKeys.isEmpty()) {
@@ -428,6 +425,10 @@ public class TerrainManager {
             int distB = Math.max(Math.abs(cxB - pcx), Math.abs(czB - pcz));
             return Integer.compare(distA, distB);
         });
+        if (visibleKeys.size() > budget) {
+            visibleKeys = new ArrayList<>(visibleKeys.subList(0, budget));
+        }
+        pendingChunks.removeAll(new HashSet<>(visibleKeys));
         int count = 0;
         for (long key : visibleKeys) {
             if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
