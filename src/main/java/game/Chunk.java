@@ -14,12 +14,14 @@ import util.FeatureUtil;
 import util.VertexBatchBuilder;
 
 import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.opengl.GL14.*;
 import static org.lwjgl.opengl.GL15.*;
 import java.util.*;
 
 public class Chunk {
     public static final int SIZE = 30;
     private static final float SKIRT_DEPTH = 12f;
+    private static final float DEFAULT_TEXTURE_LOD_BIAS = 1f;
     private enum FeatureLod {
         FULL,
         SIMPLIFIED,
@@ -645,6 +647,7 @@ public class Chunk {
         glEnable(GL_ALPHA_TEST);
         glAlphaFunc(GL_GREATER, 0.3f);
         glBindTexture(GL_TEXTURE_2D, grassBatchTexture);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, getTextureLodBias());
         glBindBuffer(GL_ARRAY_BUFFER, grassBatchVbo);
         glEnableClientState(GL_VERTEX_ARRAY);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -654,6 +657,7 @@ public class Chunk {
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, DEFAULT_TEXTURE_LOD_BIAS);
         glDisable(GL_ALPHA_TEST);
         glDisable(GL_BLEND);
     }
@@ -710,6 +714,7 @@ public class Chunk {
         glEnableClientState(GL_VERTEX_ARRAY);
         glEnableClientState(GL_NORMAL_ARRAY);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        float lodBias = getTextureLodBias();
 
         int strideBytes = STRIDE_FLOATS * Float.BYTES;
         for (TerrainBatch batch : terrainBatches) {
@@ -717,6 +722,7 @@ public class Chunk {
                 continue;
             }
             glBindTexture(GL_TEXTURE_2D, batch.textureId);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, lodBias);
             glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
             glVertexPointer(3, GL_FLOAT, strideBytes, 0);
             glNormalPointer(GL_FLOAT, strideBytes, 3 * Float.BYTES);
@@ -736,6 +742,7 @@ public class Chunk {
             }
             glColor4f(1f, 1f, 1f, batch.alpha);
             glBindTexture(GL_TEXTURE_2D, batch.textureId);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, lodBias);
             glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
             glVertexPointer(3, GL_FLOAT, strideBytes, 0);
             glNormalPointer(GL_FLOAT, strideBytes, 3 * Float.BYTES);
@@ -747,11 +754,25 @@ public class Chunk {
         glDepthMask(true);
         glDisable(GL_BLEND);
         glColor4f(1f, 1f, 1f, 1f);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, DEFAULT_TEXTURE_LOD_BIAS);
 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisableClientState(GL_NORMAL_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
+    }
+
+    private float getTextureLodBias() {
+        if (lod >= 3) {
+            return 4f;
+        }
+        if (lod == 2) {
+            return 3f;
+        }
+        if (lod == 1) {
+            return 2f;
+        }
+        return DEFAULT_TEXTURE_LOD_BIAS;
     }
 
     public void renderDepth(int chunkDistance, int featureDetailDistance, int grassDetailDistance,
