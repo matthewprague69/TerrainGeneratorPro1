@@ -22,6 +22,9 @@ public class TerrainManager {
     private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
     private static final int MAX_RENDER_BUILDS_PER_FRAME = 2;
     private static final long RENDER_BUILD_BUDGET_NS = 3_000_000L;
+    private static final int LOD_NEAR_THRESHOLD = 10;
+    private static final int LOD_MID_THRESHOLD = 15;
+    private static final int LOD_FAR_THRESHOLD = 20;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -262,16 +265,13 @@ public class TerrainManager {
     }
 
     private int computeTargetLod(int dist) {
-        final int nearThreshold = 10;
-        final int midThreshold = 15;
-        final int farThreshold = 20;
-        if (dist > farThreshold) {
+        if (dist > LOD_FAR_THRESHOLD) {
             return 3;
         }
-        if (dist > midThreshold) {
+        if (dist > LOD_MID_THRESHOLD) {
             return 2;
         }
-        if (dist > nearThreshold) {
+        if (dist > LOD_NEAR_THRESHOLD) {
             return 1;
         }
         return 0;
@@ -402,7 +402,8 @@ public class TerrainManager {
             long key = iterator.next();
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            if (isChunkVisible(frustum, cx, cz)) {
+            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            if (isChunkVisible(frustum, cx, cz) || dist <= LOD_NEAR_THRESHOLD) {
                 visibleKeys.add(key);
                 iterator.remove();
             }
