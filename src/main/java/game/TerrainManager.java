@@ -402,8 +402,7 @@ public class TerrainManager {
             long key = iterator.next();
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
-            if (isChunkVisible(frustum, cx, cz) || dist <= LOD_NEAR_THRESHOLD) {
+            if (isChunkVisible(frustum, cx, cz)) {
                 visibleKeys.add(key);
                 iterator.remove();
             }
