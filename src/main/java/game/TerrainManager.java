@@ -392,21 +392,13 @@ public class TerrainManager {
         int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
         int count = 0;
         long start = System.nanoTime();
-        boolean hasVisiblePending = false;
-        if (frustum != null) {
-            for (long pendingKey : pendingChunks) {
-                int pendingCx = (int) (pendingKey >> 32);
-                int pendingCz = (int) pendingKey;
-                if (isChunkVisible(frustum, pendingCx, pendingCz)) {
-                    hasVisiblePending = true;
-                    break;
-                }
-            }
-        }
-        while (count < budget && !pendingChunks.isEmpty()) {
+        int attempts = 0;
+        int maxAttempts = pendingChunks.size();
+        while (count < budget && !pendingChunks.isEmpty() && attempts < maxAttempts) {
             if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
                 break;
             }
+            attempts++;
             long key = pendingChunks.pollFirst();
             Integer pendingLod = pendingChunkLods.remove(key);
             if (pendingLod == null) {
@@ -421,7 +413,7 @@ public class TerrainManager {
             }
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            if (frustum != null && hasVisiblePending && !isChunkVisible(frustum, cx, cz)) {
+            if (frustum != null && !isChunkVisible(frustum, cx, cz)) {
                 pendingChunkLods.put(key, pendingLod);
                 pendingChunks.addLast(key);
                 continue;
