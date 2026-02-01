@@ -449,8 +449,8 @@ public class Chunk {
         }
     }
 
-    public void drawTerrainAndFeatures(int chunkDistance, int featureDetailDistance, int grassDetailDistance,
-                                       int featureRenderDist) {
+    public void drawTerrainAndFeatures(int chunkDistance, int featureDetailDistance, int featureImpostorDistance,
+                                       int grassDetailDistance, int featureRenderDist) {
         glEnable(GL_TEXTURE_2D);
         glColor3f(1f, 1f, 1f);
 
@@ -468,7 +468,7 @@ public class Chunk {
             return;
         }
 
-        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
+        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureImpostorDistance,
                 featureRenderDist);
         // Draw features if they are above water
         for (Feature f : features) {
@@ -777,8 +777,8 @@ public class Chunk {
         return DEFAULT_TEXTURE_LOD_BIAS;
     }
 
-    public void renderDepth(int chunkDistance, int featureDetailDistance, int grassDetailDistance,
-                            int featureRenderDist) {
+    public void renderDepth(int chunkDistance, int featureDetailDistance, int featureImpostorDistance,
+                            int grassDetailDistance, int featureRenderDist) {
         if (terrainBatches.isEmpty()) {
             return;
         }
@@ -806,7 +806,7 @@ public class Chunk {
             return;
         }
 
-        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
+        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureImpostorDistance,
                 featureRenderDist);
         for (Feature f : features) {
             if (f instanceof Grass || f instanceof ColorBatchableFeature) {
