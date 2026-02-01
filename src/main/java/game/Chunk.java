@@ -21,6 +21,7 @@ import java.util.*;
 public class Chunk {
     public static final int SIZE = 30;
     private static final float SKIRT_DEPTH = 24f;
+    private static final float SKIRT_TOP_OFFSET = 0.02f;
     private static final float DEFAULT_TEXTURE_LOD_BIAS = 1f;
     private enum FeatureLod {
         FULL,
@@ -890,11 +891,14 @@ public class Chunk {
         float y1b = y1 - SKIRT_DEPTH;
         float y2b = y2 - SKIRT_DEPTH;
 
-        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
-        builder.putVertex(wx2, y2, wz2, normal, x2 * texScale, z2 * texScale);
+        float y1Top = y1 - SKIRT_TOP_OFFSET;
+        float y2Top = y2 - SKIRT_TOP_OFFSET;
+
+        builder.putVertex(wx1, y1Top, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx2, y2Top, wz2, normal, x2 * texScale, z2 * texScale);
         builder.putVertex(wx2, y2b, wz2, normal, x2 * texScale, z2 * texScale);
 
-        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx1, y1Top, wz1, normal, x1 * texScale, z1 * texScale);
         builder.putVertex(wx2, y2b, wz2, normal, x2 * texScale, z2 * texScale);
         builder.putVertex(wx1, y1b, wz1, normal, x1 * texScale, z1 * texScale);
     }
