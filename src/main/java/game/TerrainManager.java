@@ -142,7 +142,7 @@ public class TerrainManager {
         if (renderDistanceDirty) {
             rebuildNeededChunks(pcx, pcz);
             refreshChunkLods(pcx, pcz);
-            reprioritizePendingQueues(pcx, pcz);
+            reprioritizePendingQueues(pcx, pcz, frustum);
             lastUpdateChunkX = pcx;
             lastUpdateChunkZ = pcz;
             renderDistanceDirty = false;
@@ -161,7 +161,7 @@ public class TerrainManager {
         lastUpdateChunkZ = pcz;
         updateNeededChunks(pcx, pcz, prevChunkX, prevChunkZ);
 
-        reprioritizePendingQueues(pcx, pcz);
+        reprioritizePendingQueues(pcx, pcz, frustum);
 
         // Generate/unload features based on featureRenderDist
         for (Chunk c : chunks.values()) {
@@ -288,7 +288,10 @@ public class TerrainManager {
         Integer existing = pendingChunkLods.get(key);
         if (existing != null) {
             pendingChunkLods.put(key, Math.min(existing, targetLOD));
-            if (!pendingChunks.contains(key)) {
+            if (dist == 0) {
+                pendingChunks.remove(key);
+                pendingChunks.addFirst(key);
+            } else if (!pendingChunks.contains(key)) {
                 if (dist <= 2) {
                     pendingChunks.addFirst(key);
                 } else {
@@ -305,10 +308,12 @@ public class TerrainManager {
         }
     }
 
-    private void reprioritizePendingQueues(int pcx, int pcz) {
+    private void reprioritizePendingQueues(int pcx, int pcz, Frustum frustum) {
         if (!pendingChunks.isEmpty()) {
-            ArrayDeque<Long> near = new ArrayDeque<>();
-            ArrayDeque<Long> far = new ArrayDeque<>();
+            ArrayDeque<Long> visibleNear = new ArrayDeque<>();
+            ArrayDeque<Long> visibleFar = new ArrayDeque<>();
+            ArrayDeque<Long> hiddenNear = new ArrayDeque<>();
+            ArrayDeque<Long> hiddenFar = new ArrayDeque<>();
             Iterator<Long> iterator = pendingChunks.iterator();
             while (iterator.hasNext()) {
                 long key = iterator.next();
@@ -320,15 +325,26 @@ public class TerrainManager {
                     iterator.remove();
                     continue;
                 }
+                boolean visible = frustum != null && isChunkVisible(frustum, cx, cz);
                 if (dist <= 2) {
-                    near.addLast(key);
+                    if (visible) {
+                        visibleNear.addLast(key);
+                    } else {
+                        hiddenNear.addLast(key);
+                    }
                 } else {
-                    far.addLast(key);
+                    if (visible) {
+                        visibleFar.addLast(key);
+                    } else {
+                        hiddenFar.addLast(key);
+                    }
                 }
                 iterator.remove();
             }
-            pendingChunks.addAll(near);
-            pendingChunks.addAll(far);
+            pendingChunks.addAll(visibleNear);
+            pendingChunks.addAll(visibleFar);
+            pendingChunks.addAll(hiddenNear);
+            pendingChunks.addAll(hiddenFar);
         }
 
         if (!pendingFeatureChunks.isEmpty()) {
@@ -359,6 +375,16 @@ public class TerrainManager {
             pendingFeatureChunks.addAll(near);
             pendingFeatureChunks.addAll(far);
         }
+    }
+
+    private boolean isChunkVisible(Frustum frustum, int cx, int cz) {
+        float minX = cx * Chunk.SIZE * scale;
+        float minZ = cz * Chunk.SIZE * scale;
+        float maxX = (cx + 1) * Chunk.SIZE * scale;
+        float maxZ = (cz + 1) * Chunk.SIZE * scale;
+        float minY = -10000f;
+        float maxY = 10000f;
+        return frustum.isBoxVisible(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
     private void processPendingChunkGenerations() {
