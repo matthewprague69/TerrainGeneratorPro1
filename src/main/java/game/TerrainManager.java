@@ -410,6 +410,24 @@ public class TerrainManager {
         if (visibleKeys.isEmpty()) {
             return;
         }
+        visibleKeys.sort((a, b) -> {
+            Integer lodA = pendingChunkLods.get(a);
+            Integer lodB = pendingChunkLods.get(b);
+            Chunk chunkA = chunks.get(a);
+            Chunk chunkB = chunks.get(b);
+            boolean upgradeA = lodA != null && chunkA != null && lodA < chunkA.getLOD();
+            boolean upgradeB = lodB != null && chunkB != null && lodB < chunkB.getLOD();
+            if (upgradeA != upgradeB) {
+                return upgradeA ? -1 : 1;
+            }
+            int cxA = (int) (a >> 32);
+            int czA = (int) (long) a;
+            int cxB = (int) (b >> 32);
+            int czB = (int) (long) b;
+            int distA = Math.max(Math.abs(cxA - pcx), Math.abs(czA - pcz));
+            int distB = Math.max(Math.abs(cxB - pcx), Math.abs(czB - pcz));
+            return Integer.compare(distA, distB);
+        });
         int count = 0;
         for (long key : visibleKeys) {
             if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
