@@ -514,6 +514,10 @@ public class Chunk {
             }
         }
 
+        if (lod > 0) {
+            addEdgeStitch(builders, texScale);
+        }
+
         addSkirts(builders, step, texScale);
 
         for (Map.Entry<BatchKey, FloatBuilder> entry : builders.entrySet()) {
@@ -872,6 +876,49 @@ public class Chunk {
             int z2 = Math.min(z + step, SIZE);
             addSkirtQuad(builders, 0, z, 0, z2, heights[0][z], heights[0][z2], texScale);
             addSkirtQuad(builders, SIZE, z, SIZE, z2, heights[SIZE][z], heights[SIZE][z2], texScale);
+        }
+    }
+
+    private void addEdgeStitch(Map<BatchKey, FloatBuilder> builders, float texScale) {
+        float offset = 0.05f;
+        for (int x = 0; x < SIZE; x++) {
+            int x2 = x + 1;
+            if (x2 > SIZE) {
+                break;
+            }
+            float y00 = heights[x][0] - offset;
+            float y10 = heights[x2][0] - offset;
+            float y01 = heights[x][1] - offset;
+            float y11 = heights[x2][1] - offset;
+            addTriangle(builders, x, 0, x2, 0, x, 1, y00, y10, y01, texScale);
+            addTriangle(builders, x2, 0, x2, 1, x, 1, y10, y11, y01, texScale);
+
+            y00 = heights[x][SIZE - 1] - offset;
+            y10 = heights[x2][SIZE - 1] - offset;
+            y01 = heights[x][SIZE] - offset;
+            y11 = heights[x2][SIZE] - offset;
+            addTriangle(builders, x, SIZE - 1, x2, SIZE - 1, x, SIZE, y00, y10, y01, texScale);
+            addTriangle(builders, x2, SIZE - 1, x2, SIZE, x, SIZE, y10, y11, y01, texScale);
+        }
+
+        for (int z = 0; z < SIZE; z++) {
+            int z2 = z + 1;
+            if (z2 > SIZE) {
+                break;
+            }
+            float y00 = heights[0][z] - offset;
+            float y10 = heights[1][z] - offset;
+            float y01 = heights[0][z2] - offset;
+            float y11 = heights[1][z2] - offset;
+            addTriangle(builders, 0, z, 1, z, 0, z2, y00, y10, y01, texScale);
+            addTriangle(builders, 1, z, 1, z2, 0, z2, y10, y11, y01, texScale);
+
+            y00 = heights[SIZE - 1][z] - offset;
+            y10 = heights[SIZE][z] - offset;
+            y01 = heights[SIZE - 1][z2] - offset;
+            y11 = heights[SIZE][z2] - offset;
+            addTriangle(builders, SIZE - 1, z, SIZE, z, SIZE - 1, z2, y00, y10, y01, texScale);
+            addTriangle(builders, SIZE, z, SIZE, z2, SIZE - 1, z2, y10, y11, y01, texScale);
         }
     }
 
