@@ -141,6 +141,7 @@ public class TerrainManager {
         processPendingRenderBuilds(pcx, pcz);
         if (renderDistanceDirty) {
             rebuildNeededChunks(pcx, pcz);
+            refreshChunkLods(pcx, pcz);
             reprioritizePendingQueues(pcx, pcz);
             lastUpdateChunkX = pcx;
             lastUpdateChunkZ = pcz;
@@ -228,7 +229,7 @@ public class TerrainManager {
             int targetLOD = computeTargetLod(dist);
             Chunk existing = chunks.get(key);
             if (existing != null && existing.getLOD() != targetLOD) {
-                queueChunkGeneration(key, cx, cz, targetLOD, dist);
+                queueChunkGeneration(key, cx, cz, targetLOD, 0);
             }
         }
     }
@@ -259,8 +260,12 @@ public class TerrainManager {
     }
 
     private int computeTargetLod(int dist) {
-        int nearThreshold = Math.max(1, renderDist / 3);
-        int midThreshold = Math.max(nearThreshold + 1, (renderDist * 2) / 3);
+        int nearThreshold = Math.max(2, (int) Math.floor(renderDist * 0.5));
+        int midThreshold = Math.max(nearThreshold + 1, (int) Math.floor(renderDist * 0.7));
+        int farThreshold = Math.max(midThreshold + 1, (int) Math.floor(renderDist * 0.85));
+        if (dist > farThreshold) {
+            return 3;
+        }
         if (dist > midThreshold) {
             return 2;
         }

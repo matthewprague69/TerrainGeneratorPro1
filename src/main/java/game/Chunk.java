@@ -190,7 +190,8 @@ public class Chunk {
         final double macroAmp = 2.0;
         final int lodClamped = Math.max(0, lod);
         final int baseOctaves = 2;
-        final int lodOctaves = Math.max(baseOctaves, OCTAVES - lodClamped);
+        final int lodPenalty = Math.max(0, lodClamped - 1);
+        final int lodOctaves = Math.max(baseOctaves, OCTAVES - lodPenalty);
 
         float[][] heights = new float[SIZE + 1][SIZE + 1];
         float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
