@@ -407,16 +407,18 @@ public class TerrainManager {
         if (visibleKeys.isEmpty()) {
             return;
         }
-        visibleKeys.sort((a, b) -> {
-            Integer lodA = pendingChunkLods.get(a);
-            Integer lodB = pendingChunkLods.get(b);
-            Chunk chunkA = chunks.get(a);
-            Chunk chunkB = chunks.get(b);
-            boolean upgradeA = lodA != null && chunkA != null && lodA < chunkA.getLOD();
-            boolean upgradeB = lodB != null && chunkB != null && lodB < chunkB.getLOD();
-            if (upgradeA != upgradeB) {
-                return upgradeA ? -1 : 1;
+        List<Long> upgradeKeys = new ArrayList<>();
+        List<Long> newKeys = new ArrayList<>();
+        for (long key : visibleKeys) {
+            Integer pendingLod = pendingChunkLods.get(key);
+            Chunk existing = chunks.get(key);
+            if (pendingLod != null && existing != null && pendingLod < existing.getLOD()) {
+                upgradeKeys.add(key);
+            } else {
+                newKeys.add(key);
             }
+        }
+        Comparator<Long> distanceComparator = (a, b) -> {
             int cxA = (int) (a >> 32);
             int czA = (int) (long) a;
             int cxB = (int) (b >> 32);
@@ -424,9 +426,21 @@ public class TerrainManager {
             int distA = Math.max(Math.abs(cxA - pcx), Math.abs(czA - pcz));
             int distB = Math.max(Math.abs(cxB - pcx), Math.abs(czB - pcz));
             return Integer.compare(distA, distB);
-        });
-        if (visibleKeys.size() > budget) {
-            visibleKeys = new ArrayList<>(visibleKeys.subList(0, budget));
+        };
+        upgradeKeys.sort(distanceComparator);
+        newKeys.sort(distanceComparator);
+        visibleKeys = new ArrayList<>(Math.min(budget, visibleKeys.size()));
+        for (long key : upgradeKeys) {
+            if (visibleKeys.size() >= budget) {
+                break;
+            }
+            visibleKeys.add(key);
+        }
+        for (long key : newKeys) {
+            if (visibleKeys.size() >= budget) {
+                break;
+            }
+            visibleKeys.add(key);
         }
         pendingChunks.removeAll(new HashSet<>(visibleKeys));
         int count = 0;
