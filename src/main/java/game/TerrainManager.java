@@ -382,8 +382,8 @@ public class TerrainManager {
         float minZ = cz * Chunk.SIZE * scale;
         float maxX = (cx + 1) * Chunk.SIZE * scale;
         float maxZ = (cz + 1) * Chunk.SIZE * scale;
-        float minY = -10000f;
-        float maxY = 10000f;
+        float minY = -50f;
+        float maxY = 250f;
         return frustum.isBoxVisible(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
