@@ -36,6 +36,7 @@ public class TerrainManager {
             new ConcurrentLinkedQueue<>();
     private final ArrayDeque<Chunk> pendingRenderBuilds = new ArrayDeque<>();
     private final Set<Long> pendingRenderBuildKeys = new HashSet<>();
+    private final Map<Long, Chunk> pendingChunkReplacements = new HashMap<>();
     private final ExecutorService chunkGenerator = Executors.newFixedThreadPool(2, r -> {
         Thread t = new Thread(r, "chunk-generator");
         t.setDaemon(true);
@@ -468,6 +469,11 @@ public class TerrainManager {
                 continue;
             }
             Chunk built = new Chunk(data.cx, data.cz, terrainNoise, scale, data.biome, this, data.lod, data);
+            if (existing != null && built.needsRenderResources()) {
+                pendingChunkReplacements.put(key, built);
+                queueRenderBuild(built, dist);
+                continue;
+            }
             if (existing != null) {
                 existing.dispose();
             }
@@ -527,16 +533,37 @@ public class TerrainManager {
             Chunk chunk = pendingRenderBuilds.poll();
             long key = key(chunk.cx, chunk.cz);
             pendingRenderBuildKeys.remove(key);
-            if (chunks.get(key) != chunk) {
+            Chunk pendingReplacement = pendingChunkReplacements.get(key);
+            if (chunks.get(key) != chunk && pendingReplacement != chunk) {
+                if (pendingReplacement != null) {
+                    chunk.dispose();
+                }
                 continue;
             }
             int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
             if (dist > cacheRenderDist) {
+                if (pendingReplacement == chunk) {
+                    pendingChunkReplacements.remove(key);
+                    chunk.dispose();
+                }
                 continue;
             }
             chunk.buildRenderResources();
-            if (chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
-                queueFeatureGeneration(chunk, pcx, pcz);
+            if (pendingReplacement == chunk) {
+                Chunk existing = chunks.get(key);
+                if (existing != null) {
+                    existing.dispose();
+                }
+                chunks.put(key, chunk);
+                pendingChunkReplacements.remove(key);
+                if (chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                    queueFeatureGeneration(chunk, pcx, pcz);
+                }
+                refreshNeighborEdges(chunk, pcx, pcz);
+            } else {
+                if (chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                    queueFeatureGeneration(chunk, pcx, pcz);
+                }
             }
             built++;
         }
