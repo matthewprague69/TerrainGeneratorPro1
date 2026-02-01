@@ -260,12 +260,8 @@ public class TerrainManager {
     }
 
     private int computeTargetLod(int dist) {
-        int nearThreshold = Math.max(2, (int) Math.floor(renderDist * 0.5));
-        int midThreshold = Math.max(nearThreshold + 1, (int) Math.floor(renderDist * 0.7));
-        int farThreshold = Math.max(midThreshold + 1, (int) Math.floor(renderDist * 0.85));
-        if (dist > farThreshold) {
-            return 3;
-        }
+        int nearThreshold = Math.max(1, renderDist / 2);
+        int midThreshold = Math.max(nearThreshold + 1, (renderDist * 3) / 4);
         if (dist > midThreshold) {
             return 2;
         }
