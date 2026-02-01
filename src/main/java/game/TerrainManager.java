@@ -150,6 +150,7 @@ public class TerrainManager {
         boolean movedChunk = pcx != lastUpdateChunkX || pcz != lastUpdateChunkZ;
         if (!movedChunk) {
             refreshChunkLods(pcx, pcz);
+            reprioritizePendingQueues(pcx, pcz, frustum);
             processPendingChunkGenerations(pcx, pcz, frustum);
             processPendingFeatureGenerations(pcx, pcz);
             processPendingRenderBuilds(pcx, pcz);
