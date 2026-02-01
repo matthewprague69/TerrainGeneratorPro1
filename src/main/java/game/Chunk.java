@@ -26,7 +26,7 @@ public class Chunk {
     private enum FeatureLod {
         FULL,
         SIMPLIFIED,
-        FAR,
+        IMPOSTOR,
         CULLED
     }
     public final int cx, cz;
@@ -469,7 +469,7 @@ public class Chunk {
         }
 
         FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
-                featureDetailDistance + 3);
+                featureRenderDist);
         // Draw features if they are above water
         for (Feature f : features) {
             if (f instanceof Grass || f instanceof ColorBatchableFeature) {
@@ -807,7 +807,7 @@ public class Chunk {
         }
 
         FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
-                featureDetailDistance + 2);
+                featureRenderDist);
         for (Feature f : features) {
             if (f instanceof Grass || f instanceof ColorBatchableFeature) {
                 continue;
@@ -821,12 +821,13 @@ public class Chunk {
         }
     }
 
-    private FeatureLod getFeatureLod(int chunkDistance, int simplifiedDistance, int farDistance, int cullDistance) {
+    private FeatureLod getFeatureLod(int chunkDistance, int simplifiedDistance, int impostorDistance,
+                                     int cullDistance) {
         if (chunkDistance > cullDistance) {
             return FeatureLod.CULLED;
         }
-        if (chunkDistance > farDistance) {
-            return FeatureLod.FAR;
+        if (chunkDistance > impostorDistance) {
+            return FeatureLod.IMPOSTOR;
         }
         if (chunkDistance > simplifiedDistance) {
             return FeatureLod.SIMPLIFIED;
@@ -838,7 +839,7 @@ public class Chunk {
         if (lod == FeatureLod.CULLED) {
             return false;
         }
-        if (lod == FeatureLod.FAR) {
+        if (lod == FeatureLod.IMPOSTOR) {
             return feature instanceof Tree || feature instanceof Lake;
         }
         if (lod == FeatureLod.SIMPLIFIED) {
@@ -848,7 +849,7 @@ public class Chunk {
     }
 
     private void drawFeatureForLod(Feature feature, FeatureLod lod) {
-        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.FAR) {
+        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.IMPOSTOR) {
             feature.drawSimplified();
         } else {
             feature.draw();
@@ -856,7 +857,7 @@ public class Chunk {
     }
 
     private void drawFeatureDepthForLod(Feature feature, FeatureLod lod) {
-        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.FAR) {
+        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.IMPOSTOR) {
             feature.drawSimplified();
         } else {
             feature.drawDepth();
