@@ -150,7 +150,7 @@ public class TerrainManager {
         boolean movedChunk = pcx != lastUpdateChunkX || pcz != lastUpdateChunkZ;
         if (!movedChunk) {
             refreshChunkLods(pcx, pcz);
-            processPendingChunkGenerations();
+            processPendingChunkGenerations(pcx, pcz, frustum);
             processPendingFeatureGenerations(pcx, pcz);
             processPendingRenderBuilds(pcx, pcz);
             return;
@@ -187,7 +187,7 @@ public class TerrainManager {
             }
         }
 
-        processPendingChunkGenerations();
+        processPendingChunkGenerations(pcx, pcz, frustum);
         processPendingFeatureGenerations(pcx, pcz);
         processPendingRenderBuilds(pcx, pcz);
     }
@@ -387,11 +387,22 @@ public class TerrainManager {
         return frustum.isBoxVisible(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
-    private void processPendingChunkGenerations() {
+    private void processPendingChunkGenerations(int pcx, int pcz, Frustum frustum) {
         int backlog = pendingChunks.size();
         int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
         int count = 0;
         long start = System.nanoTime();
+        boolean hasVisiblePending = false;
+        if (frustum != null) {
+            for (long pendingKey : pendingChunks) {
+                int pendingCx = (int) (pendingKey >> 32);
+                int pendingCz = (int) pendingKey;
+                if (isChunkVisible(frustum, pendingCx, pendingCz)) {
+                    hasVisiblePending = true;
+                    break;
+                }
+            }
+        }
         while (count < budget && !pendingChunks.isEmpty()) {
             if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
                 break;
@@ -410,6 +421,11 @@ public class TerrainManager {
             }
             int cx = (int) (key >> 32);
             int cz = (int) key;
+            if (frustum != null && hasVisiblePending && !isChunkVisible(frustum, cx, cz)) {
+                pendingChunkLods.put(key, pendingLod);
+                pendingChunks.addLast(key);
+                continue;
+            }
             int targetLOD = pendingLod;
             Biome b = pickBiome(cx, cz);
             Chunk existing = chunks.get(key);
