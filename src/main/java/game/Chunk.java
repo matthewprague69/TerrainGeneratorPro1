@@ -717,6 +717,8 @@ public class Chunk {
         float lodBias = getTextureLodBias();
 
         int strideBytes = STRIDE_FLOATS * Float.BYTES;
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(-0.5f, -0.5f);
         for (TerrainBatch batch : terrainBatches) {
             if (batch.alpha < 0.999f) {
                 continue;
@@ -734,7 +736,6 @@ public class Chunk {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(false);
         glDepthFunc(GL_LEQUAL);
-        glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(-1f, -1f);
         for (TerrainBatch batch : terrainBatches) {
             if (batch.alpha >= 0.999f) {
