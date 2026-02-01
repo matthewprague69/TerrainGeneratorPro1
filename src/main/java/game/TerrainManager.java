@@ -22,6 +22,9 @@ public class TerrainManager {
     private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
     private static final int MAX_RENDER_BUILDS_PER_FRAME = 2;
     private static final long RENDER_BUILD_BUDGET_NS = 3_000_000L;
+    private static final int LOD_NEAR_THRESHOLD = 10;
+    private static final int LOD_MID_THRESHOLD = 15;
+    private static final int LOD_FAR_THRESHOLD = 20;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -36,6 +39,7 @@ public class TerrainManager {
             new ConcurrentLinkedQueue<>();
     private final ArrayDeque<Chunk> pendingRenderBuilds = new ArrayDeque<>();
     private final Set<Long> pendingRenderBuildKeys = new HashSet<>();
+    private final Map<Long, Chunk> pendingChunkReplacements = new HashMap<>();
     private final ExecutorService chunkGenerator = Executors.newFixedThreadPool(2, r -> {
         Thread t = new Thread(r, "chunk-generator");
         t.setDaemon(true);
@@ -140,14 +144,17 @@ public class TerrainManager {
         processPendingRenderBuilds(pcx, pcz);
         if (renderDistanceDirty) {
             rebuildNeededChunks(pcx, pcz);
-            reprioritizePendingQueues(pcx, pcz);
+            refreshChunkLods(pcx, pcz);
+            reprioritizePendingQueues(pcx, pcz, frustum);
             lastUpdateChunkX = pcx;
             lastUpdateChunkZ = pcz;
             renderDistanceDirty = false;
         }
         boolean movedChunk = pcx != lastUpdateChunkX || pcz != lastUpdateChunkZ;
         if (!movedChunk) {
-            processPendingChunkGenerations();
+            refreshChunkLods(pcx, pcz);
+            reprioritizePendingQueues(pcx, pcz, frustum);
+            processPendingChunkGenerations(pcx, pcz, frustum);
             processPendingFeatureGenerations(pcx, pcz);
             processPendingRenderBuilds(pcx, pcz);
             return;
@@ -158,7 +165,7 @@ public class TerrainManager {
         lastUpdateChunkZ = pcz;
         updateNeededChunks(pcx, pcz, prevChunkX, prevChunkZ);
 
-        reprioritizePendingQueues(pcx, pcz);
+        reprioritizePendingQueues(pcx, pcz, frustum);
 
         // Generate/unload features based on featureRenderDist
         for (Chunk c : chunks.values()) {
@@ -184,7 +191,7 @@ public class TerrainManager {
             }
         }
 
-        processPendingChunkGenerations();
+        processPendingChunkGenerations(pcx, pcz, frustum);
         processPendingFeatureGenerations(pcx, pcz);
         processPendingRenderBuilds(pcx, pcz);
     }
@@ -192,6 +199,7 @@ public class TerrainManager {
     private void updateNeededChunks(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
         if (neededKeys.isEmpty() || Math.abs(pcx - prevChunkX) > 1 || Math.abs(pcz - prevChunkZ) > 1) {
             rebuildNeededChunks(pcx, pcz);
+            refreshChunkLods(pcx, pcz);
             return;
         }
 
@@ -214,6 +222,21 @@ public class TerrainManager {
                 removeNeededChunk(pcx + offset, oldRow);
             }
         }
+
+        refreshChunkLods(pcx, pcz);
+    }
+
+    private void refreshChunkLods(int pcx, int pcz) {
+        for (long key : neededKeys) {
+            int cx = (int) (key >> 32);
+            int cz = (int) key;
+            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            int targetLOD = computeTargetLod(dist);
+            Chunk existing = chunks.get(key);
+            if (existing != null && existing.getLOD() != targetLOD) {
+                queueChunkGeneration(key, cx, cz, targetLOD, 0);
+            }
+        }
     }
 
     private void rebuildNeededChunks(int pcx, int pcz) {
@@ -232,13 +255,26 @@ public class TerrainManager {
 
         Chunk existing = chunks.get(k);
         int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
-        int targetLOD = 0;
+        int targetLOD = computeTargetLod(dist);
 
         if (existing == null) {
             queueChunkGeneration(k, cx, cz, targetLOD, dist);
         } else if (existing.getLOD() != targetLOD) {
             queueChunkGeneration(k, cx, cz, targetLOD, dist);
         }
+    }
+
+    private int computeTargetLod(int dist) {
+        if (dist > LOD_FAR_THRESHOLD) {
+            return 3;
+        }
+        if (dist > LOD_MID_THRESHOLD) {
+            return 2;
+        }
+        if (dist > LOD_NEAR_THRESHOLD) {
+            return 1;
+        }
+        return 0;
     }
 
     private void removeNeededChunk(int cx, int cz) {
@@ -253,7 +289,10 @@ public class TerrainManager {
         Integer existing = pendingChunkLods.get(key);
         if (existing != null) {
             pendingChunkLods.put(key, Math.min(existing, targetLOD));
-            if (!pendingChunks.contains(key)) {
+            if (dist == 0) {
+                pendingChunks.remove(key);
+                pendingChunks.addFirst(key);
+            } else if (!pendingChunks.contains(key)) {
                 if (dist <= 2) {
                     pendingChunks.addFirst(key);
                 } else {
@@ -270,10 +309,12 @@ public class TerrainManager {
         }
     }
 
-    private void reprioritizePendingQueues(int pcx, int pcz) {
+    private void reprioritizePendingQueues(int pcx, int pcz, Frustum frustum) {
         if (!pendingChunks.isEmpty()) {
-            ArrayDeque<Long> near = new ArrayDeque<>();
-            ArrayDeque<Long> far = new ArrayDeque<>();
+            ArrayDeque<Long> visibleNear = new ArrayDeque<>();
+            ArrayDeque<Long> visibleFar = new ArrayDeque<>();
+            ArrayDeque<Long> hiddenNear = new ArrayDeque<>();
+            ArrayDeque<Long> hiddenFar = new ArrayDeque<>();
             Iterator<Long> iterator = pendingChunks.iterator();
             while (iterator.hasNext()) {
                 long key = iterator.next();
@@ -285,15 +326,26 @@ public class TerrainManager {
                     iterator.remove();
                     continue;
                 }
+                boolean visible = frustum != null && isChunkVisible(frustum, cx, cz);
                 if (dist <= 2) {
-                    near.addLast(key);
+                    if (visible) {
+                        visibleNear.addLast(key);
+                    } else {
+                        hiddenNear.addLast(key);
+                    }
                 } else {
-                    far.addLast(key);
+                    if (visible) {
+                        visibleFar.addLast(key);
+                    } else {
+                        hiddenFar.addLast(key);
+                    }
                 }
                 iterator.remove();
             }
-            pendingChunks.addAll(near);
-            pendingChunks.addAll(far);
+            pendingChunks.addAll(visibleNear);
+            pendingChunks.addAll(visibleFar);
+            pendingChunks.addAll(hiddenNear);
+            pendingChunks.addAll(hiddenFar);
         }
 
         if (!pendingFeatureChunks.isEmpty()) {
@@ -326,11 +378,109 @@ public class TerrainManager {
         }
     }
 
-    private void processPendingChunkGenerations() {
+    private boolean isChunkVisible(Frustum frustum, int cx, int cz) {
+        float minX = cx * Chunk.SIZE * scale;
+        float minZ = cz * Chunk.SIZE * scale;
+        float maxX = (cx + 1) * Chunk.SIZE * scale;
+        float maxZ = (cz + 1) * Chunk.SIZE * scale;
+        float minY = -50f;
+        float maxY = 250f;
+        return frustum.isBoxVisible(minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    private void processPendingChunkGenerations(int pcx, int pcz, Frustum frustum) {
         int backlog = pendingChunks.size();
         int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
-        int count = 0;
         long start = System.nanoTime();
+        if (frustum == null) {
+            processPendingChunkGenerationsWithoutFrustum(budget, start);
+            return;
+        }
+        List<Long> visibleKeys = new ArrayList<>();
+        for (long key : pendingChunks) {
+            int cx = (int) (key >> 32);
+            int cz = (int) key;
+            if (isChunkVisible(frustum, cx, cz)) {
+                visibleKeys.add(key);
+            }
+        }
+        if (visibleKeys.isEmpty()) {
+            return;
+        }
+        List<Long> upgradeKeys = new ArrayList<>();
+        List<Long> newKeys = new ArrayList<>();
+        for (long key : visibleKeys) {
+            Integer pendingLod = pendingChunkLods.get(key);
+            Chunk existing = chunks.get(key);
+            if (pendingLod != null && existing != null && pendingLod < existing.getLOD()) {
+                upgradeKeys.add(key);
+            } else {
+                newKeys.add(key);
+            }
+        }
+        Comparator<Long> distanceComparator = (a, b) -> {
+            int cxA = (int) (a >> 32);
+            int czA = (int) (long) a;
+            int cxB = (int) (b >> 32);
+            int czB = (int) (long) b;
+            int distA = Math.max(Math.abs(cxA - pcx), Math.abs(czA - pcz));
+            int distB = Math.max(Math.abs(cxB - pcx), Math.abs(czB - pcz));
+            return Integer.compare(distA, distB);
+        };
+        upgradeKeys.sort(distanceComparator);
+        newKeys.sort(distanceComparator);
+        visibleKeys = new ArrayList<>(Math.min(budget, visibleKeys.size()));
+        for (long key : upgradeKeys) {
+            if (visibleKeys.size() >= budget) {
+                break;
+            }
+            visibleKeys.add(key);
+        }
+        for (long key : newKeys) {
+            if (visibleKeys.size() >= budget) {
+                break;
+            }
+            visibleKeys.add(key);
+        }
+        pendingChunks.removeAll(new HashSet<>(visibleKeys));
+        int count = 0;
+        for (long key : visibleKeys) {
+            if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                pendingChunks.addFirst(key);
+                continue;
+            }
+            Integer pendingLod = pendingChunkLods.remove(key);
+            if (pendingLod == null) {
+                continue;
+            }
+            if (inflightChunkKeys.contains(key)) {
+                pendingChunkLods.put(key, pendingLod);
+                pendingChunks.addFirst(key);
+                continue;
+            }
+            int cx = (int) (key >> 32);
+            int cz = (int) key;
+            int targetLOD = pendingLod;
+            Biome b = pickBiome(cx, cz);
+            Chunk existing = chunks.get(key);
+            if (existing != null && targetLOD >= existing.getLOD()) {
+                continue;
+            }
+            inflightChunkKeys.add(key);
+            chunkGenerator.submit(() -> {
+                Chunk.ChunkBuildData data =
+                        Chunk.generateChunkData(cx, cz, terrainNoise, scale, b, this, targetLOD);
+                completedChunkBuilds.add(data);
+            });
+            count++;
+            if (count >= budget) {
+                break;
+            }
+        }
+    }
+
+    private void processPendingChunkGenerationsWithoutFrustum(int budget, long start) {
+        int count = 0;
         while (count < budget && !pendingChunks.isEmpty()) {
             if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
                 break;
@@ -440,6 +590,11 @@ public class TerrainManager {
                 continue;
             }
             Chunk built = new Chunk(data.cx, data.cz, terrainNoise, scale, data.biome, this, data.lod, data);
+            if (existing != null && built.needsRenderResources()) {
+                pendingChunkReplacements.put(key, built);
+                queueRenderBuild(built, dist);
+                continue;
+            }
             if (existing != null) {
                 existing.dispose();
             }
@@ -499,16 +654,37 @@ public class TerrainManager {
             Chunk chunk = pendingRenderBuilds.poll();
             long key = key(chunk.cx, chunk.cz);
             pendingRenderBuildKeys.remove(key);
-            if (chunks.get(key) != chunk) {
+            Chunk pendingReplacement = pendingChunkReplacements.get(key);
+            if (chunks.get(key) != chunk && pendingReplacement != chunk) {
+                if (pendingReplacement != null) {
+                    chunk.dispose();
+                }
                 continue;
             }
             int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
             if (dist > cacheRenderDist) {
+                if (pendingReplacement == chunk) {
+                    pendingChunkReplacements.remove(key);
+                    chunk.dispose();
+                }
                 continue;
             }
             chunk.buildRenderResources();
-            if (chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
-                queueFeatureGeneration(chunk, pcx, pcz);
+            if (pendingReplacement == chunk) {
+                Chunk existing = chunks.get(key);
+                if (existing != null) {
+                    existing.dispose();
+                }
+                chunks.put(key, chunk);
+                pendingChunkReplacements.remove(key);
+                if (chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                    queueFeatureGeneration(chunk, pcx, pcz);
+                }
+                refreshNeighborEdges(chunk, pcx, pcz);
+            } else {
+                if (chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
+                    queueFeatureGeneration(chunk, pcx, pcz);
+                }
             }
             built++;
         }

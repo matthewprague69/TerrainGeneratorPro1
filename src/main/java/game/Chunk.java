@@ -14,16 +14,19 @@ import util.FeatureUtil;
 import util.VertexBatchBuilder;
 
 import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.opengl.GL14.*;
 import static org.lwjgl.opengl.GL15.*;
 import java.util.*;
 
 public class Chunk {
     public static final int SIZE = 30;
-    private static final float SKIRT_DEPTH = 6f;
+    private static final float SKIRT_DEPTH = 24f;
+    private static final float SKIRT_TOP_OFFSET = 0.02f;
+    private static final float DEFAULT_TEXTURE_LOD_BIAS = 1f;
     private enum FeatureLod {
         FULL,
         SIMPLIFIED,
-        FAR,
+        IMPOSTOR,
         CULLED
     }
     public final int cx, cz;
@@ -188,6 +191,10 @@ public class Chunk {
         final double PERSISTENCE = 0.35;
         final double macroFreq = 0.002;
         final double macroAmp = 2.0;
+        final int lodClamped = Math.max(0, lod);
+        final int baseOctaves = 2;
+        final int lodPenalty = Math.max(0, lodClamped - 1);
+        final int lodOctaves = Math.max(baseOctaves, OCTAVES - lodPenalty);
 
         float[][] heights = new float[SIZE + 1][SIZE + 1];
         float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
@@ -268,7 +275,7 @@ public class Chunk {
                     double amp = entryBiome.amplitude * 0.5;
                     double sum = 0;
 
-                    for (int o = 0; o < OCTAVES; o++) {
+                    for (int o = 0; o < lodOctaves; o++) {
                         double offset = o * 100.0;
                         double val = terrainNoise.eval((wx + offset) * freq, (wz - offset) * freq);
                         val = (val * val * val) * 1.2;
@@ -462,7 +469,7 @@ public class Chunk {
         }
 
         FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
-                featureDetailDistance + 3);
+                featureRenderDist);
         // Draw features if they are above water
         for (Feature f : features) {
             if (f instanceof Grass || f instanceof ColorBatchableFeature) {
@@ -641,6 +648,7 @@ public class Chunk {
         glEnable(GL_ALPHA_TEST);
         glAlphaFunc(GL_GREATER, 0.3f);
         glBindTexture(GL_TEXTURE_2D, grassBatchTexture);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, getTextureLodBias());
         glBindBuffer(GL_ARRAY_BUFFER, grassBatchVbo);
         glEnableClientState(GL_VERTEX_ARRAY);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -650,6 +658,7 @@ public class Chunk {
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, DEFAULT_TEXTURE_LOD_BIAS);
         glDisable(GL_ALPHA_TEST);
         glDisable(GL_BLEND);
     }
@@ -706,13 +715,17 @@ public class Chunk {
         glEnableClientState(GL_VERTEX_ARRAY);
         glEnableClientState(GL_NORMAL_ARRAY);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        float lodBias = getTextureLodBias();
 
         int strideBytes = STRIDE_FLOATS * Float.BYTES;
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(-0.5f, -0.5f);
         for (TerrainBatch batch : terrainBatches) {
             if (batch.alpha < 0.999f) {
                 continue;
             }
             glBindTexture(GL_TEXTURE_2D, batch.textureId);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, lodBias);
             glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
             glVertexPointer(3, GL_FLOAT, strideBytes, 0);
             glNormalPointer(GL_FLOAT, strideBytes, 3 * Float.BYTES);
@@ -724,7 +737,6 @@ public class Chunk {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(false);
         glDepthFunc(GL_LEQUAL);
-        glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(-1f, -1f);
         for (TerrainBatch batch : terrainBatches) {
             if (batch.alpha >= 0.999f) {
@@ -732,6 +744,7 @@ public class Chunk {
             }
             glColor4f(1f, 1f, 1f, batch.alpha);
             glBindTexture(GL_TEXTURE_2D, batch.textureId);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, lodBias);
             glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
             glVertexPointer(3, GL_FLOAT, strideBytes, 0);
             glNormalPointer(GL_FLOAT, strideBytes, 3 * Float.BYTES);
@@ -743,11 +756,25 @@ public class Chunk {
         glDepthMask(true);
         glDisable(GL_BLEND);
         glColor4f(1f, 1f, 1f, 1f);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, DEFAULT_TEXTURE_LOD_BIAS);
 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisableClientState(GL_NORMAL_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
+    }
+
+    private float getTextureLodBias() {
+        if (lod >= 3) {
+            return 4f;
+        }
+        if (lod == 2) {
+            return 3f;
+        }
+        if (lod == 1) {
+            return 2f;
+        }
+        return DEFAULT_TEXTURE_LOD_BIAS;
     }
 
     public void renderDepth(int chunkDistance, int featureDetailDistance, int grassDetailDistance,
@@ -780,7 +807,7 @@ public class Chunk {
         }
 
         FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
-                featureDetailDistance + 2);
+                featureRenderDist);
         for (Feature f : features) {
             if (f instanceof Grass || f instanceof ColorBatchableFeature) {
                 continue;
@@ -794,12 +821,13 @@ public class Chunk {
         }
     }
 
-    private FeatureLod getFeatureLod(int chunkDistance, int simplifiedDistance, int farDistance, int cullDistance) {
+    private FeatureLod getFeatureLod(int chunkDistance, int simplifiedDistance, int impostorDistance,
+                                     int cullDistance) {
         if (chunkDistance > cullDistance) {
             return FeatureLod.CULLED;
         }
-        if (chunkDistance > farDistance) {
-            return FeatureLod.FAR;
+        if (chunkDistance > impostorDistance) {
+            return FeatureLod.IMPOSTOR;
         }
         if (chunkDistance > simplifiedDistance) {
             return FeatureLod.SIMPLIFIED;
@@ -811,7 +839,7 @@ public class Chunk {
         if (lod == FeatureLod.CULLED) {
             return false;
         }
-        if (lod == FeatureLod.FAR) {
+        if (lod == FeatureLod.IMPOSTOR) {
             return feature instanceof Tree || feature instanceof Lake;
         }
         if (lod == FeatureLod.SIMPLIFIED) {
@@ -821,7 +849,7 @@ public class Chunk {
     }
 
     private void drawFeatureForLod(Feature feature, FeatureLod lod) {
-        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.FAR) {
+        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.IMPOSTOR) {
             feature.drawSimplified();
         } else {
             feature.draw();
@@ -829,7 +857,7 @@ public class Chunk {
     }
 
     private void drawFeatureDepthForLod(Feature feature, FeatureLod lod) {
-        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.FAR) {
+        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.IMPOSTOR) {
             feature.drawSimplified();
         } else {
             feature.drawDepth();
@@ -864,11 +892,14 @@ public class Chunk {
         float y1b = y1 - SKIRT_DEPTH;
         float y2b = y2 - SKIRT_DEPTH;
 
-        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
-        builder.putVertex(wx2, y2, wz2, normal, x2 * texScale, z2 * texScale);
+        float y1Top = y1 - SKIRT_TOP_OFFSET;
+        float y2Top = y2 - SKIRT_TOP_OFFSET;
+
+        builder.putVertex(wx1, y1Top, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx2, y2Top, wz2, normal, x2 * texScale, z2 * texScale);
         builder.putVertex(wx2, y2b, wz2, normal, x2 * texScale, z2 * texScale);
 
-        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx1, y1Top, wz1, normal, x1 * texScale, z1 * texScale);
         builder.putVertex(wx2, y2b, wz2, normal, x2 * texScale, z2 * texScale);
         builder.putVertex(wx1, y1b, wz1, normal, x1 * texScale, z1 * texScale);
     }
