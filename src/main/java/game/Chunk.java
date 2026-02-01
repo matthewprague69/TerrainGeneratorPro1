@@ -19,7 +19,7 @@ import java.util.*;
 
 public class Chunk {
     public static final int SIZE = 30;
-    private static final float SKIRT_DEPTH = 6f;
+    private static final float SKIRT_DEPTH = 12f;
     private enum FeatureLod {
         FULL,
         SIMPLIFIED,
