@@ -192,6 +192,7 @@ public class TerrainManager {
     private void updateNeededChunks(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
         if (neededKeys.isEmpty() || Math.abs(pcx - prevChunkX) > 1 || Math.abs(pcz - prevChunkZ) > 1) {
             rebuildNeededChunks(pcx, pcz);
+            refreshChunkLods(pcx, pcz);
             return;
         }
 
@@ -212,6 +213,21 @@ public class TerrainManager {
             for (int offset = -renderDist; offset <= renderDist; offset++) {
                 addNeededChunk(pcx + offset, newRow, pcx, pcz);
                 removeNeededChunk(pcx + offset, oldRow);
+            }
+        }
+
+        refreshChunkLods(pcx, pcz);
+    }
+
+    private void refreshChunkLods(int pcx, int pcz) {
+        for (long key : neededKeys) {
+            int cx = (int) (key >> 32);
+            int cz = (int) key;
+            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            int targetLOD = computeTargetLod(dist);
+            Chunk existing = chunks.get(key);
+            if (existing != null && existing.getLOD() != targetLOD) {
+                queueChunkGeneration(key, cx, cz, targetLOD, dist);
             }
         }
     }
