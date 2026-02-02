@@ -22,9 +22,9 @@ public class TerrainManager {
     private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
     private static final int MAX_RENDER_BUILDS_PER_FRAME = 2;
     private static final long RENDER_BUILD_BUDGET_NS = 3_000_000L;
-    private static final int LOD_NEAR_THRESHOLD = 10;
-    private static final int LOD_MID_THRESHOLD = 15;
-    private static final int LOD_FAR_THRESHOLD = 20;
+    private static final int LOD_NEAR_THRESHOLD = 16;
+    private static final int LOD_MID_THRESHOLD = 24;
+    private static final int LOD_FAR_THRESHOLD = 32;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -265,13 +265,17 @@ public class TerrainManager {
     }
 
     private int computeTargetLod(int dist) {
+        int nearThreshold = Math.max(LOD_NEAR_THRESHOLD, featureRenderDist);
+        if (dist <= nearThreshold) {
+            return 0;
+        }
         if (dist > LOD_FAR_THRESHOLD) {
             return 3;
         }
         if (dist > LOD_MID_THRESHOLD) {
             return 2;
         }
-        if (dist > LOD_NEAR_THRESHOLD) {
+        if (dist > nearThreshold) {
             return 1;
         }
         return 0;
