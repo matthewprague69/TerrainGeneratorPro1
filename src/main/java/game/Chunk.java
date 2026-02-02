@@ -1,10 +1,8 @@
 package game;
 import generators.LakeGenerator;
 import objects.BatchableFeature;
-import objects.Cactus;
 import objects.Feature;
 import objects.ColorBatchableFeature;
-import objects.Flower;
 import objects.Grass;
 import objects.Lake;
 import objects.Tree;
@@ -28,7 +26,6 @@ public class Chunk {
     private static final int IMPOSTOR_TEXTURE_SIZE = 128;
     private enum FeatureLod {
         FULL,
-        SIMPLIFIED,
         IMPOSTOR,
         CULLED
     }
@@ -454,7 +451,7 @@ public class Chunk {
         }
     }
 
-    public void drawTerrainAndFeatures(int chunkDistance, int featureDetailDistance, int featureImpostorDistance,
+    public void drawTerrainAndFeatures(int chunkDistance, int featureImpostorDistance,
                                        int grassDetailDistance, int featureRenderDist) {
         glEnable(GL_TEXTURE_2D);
         glColor3f(1f, 1f, 1f);
@@ -473,8 +470,7 @@ public class Chunk {
             return;
         }
 
-        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureImpostorDistance,
-                featureRenderDist);
+        FeatureLod lod = getFeatureLod(chunkDistance, featureImpostorDistance, featureRenderDist);
         // Draw features if they are above water
         for (Feature f : features) {
             if (f instanceof Grass || f instanceof ColorBatchableFeature) {
@@ -782,7 +778,7 @@ public class Chunk {
         return DEFAULT_TEXTURE_LOD_BIAS;
     }
 
-    public void renderDepth(int chunkDistance, int featureDetailDistance, int featureImpostorDistance,
+    public void renderDepth(int chunkDistance, int featureImpostorDistance,
                             int grassDetailDistance, int featureRenderDist) {
         if (terrainBatches.isEmpty()) {
             return;
@@ -811,8 +807,7 @@ public class Chunk {
             return;
         }
 
-        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureImpostorDistance,
-                featureRenderDist);
+        FeatureLod lod = getFeatureLod(chunkDistance, featureImpostorDistance, featureRenderDist);
         for (Feature f : features) {
             if (f instanceof Grass || f instanceof ColorBatchableFeature) {
                 continue;
@@ -826,16 +821,13 @@ public class Chunk {
         }
     }
 
-    private FeatureLod getFeatureLod(int chunkDistance, int simplifiedDistance, int impostorDistance,
+    private FeatureLod getFeatureLod(int chunkDistance, int impostorDistance,
                                      int cullDistance) {
         if (chunkDistance > cullDistance) {
             return FeatureLod.CULLED;
         }
         if (chunkDistance > impostorDistance) {
             return FeatureLod.IMPOSTOR;
-        }
-        if (chunkDistance > simplifiedDistance) {
-            return FeatureLod.SIMPLIFIED;
         }
         return FeatureLod.FULL;
     }
@@ -847,17 +839,12 @@ public class Chunk {
         if (lod == FeatureLod.IMPOSTOR) {
             return feature instanceof Tree || feature instanceof Lake;
         }
-        if (lod == FeatureLod.SIMPLIFIED) {
-            return !(feature instanceof Flower) && !(feature instanceof Cactus);
-        }
         return true;
     }
 
     private void drawFeatureForLod(Feature feature, FeatureLod lod) {
         if (lod == FeatureLod.IMPOSTOR) {
             drawFeatureImpostor(feature);
-        } else if (lod == FeatureLod.SIMPLIFIED) {
-            feature.drawSimplified();
         } else {
             feature.draw();
         }
@@ -866,8 +853,6 @@ public class Chunk {
     private void drawFeatureDepthForLod(Feature feature, FeatureLod lod) {
         if (lod == FeatureLod.IMPOSTOR) {
             drawFeatureImpostorDepth(feature);
-        } else if (lod == FeatureLod.SIMPLIFIED) {
-            feature.drawSimplified();
         } else {
             feature.drawDepth();
         }
@@ -1002,7 +987,7 @@ public class Chunk {
         glPushMatrix();
         glLoadIdentity();
         glTranslatef(-feature.x, -feature.y, -feature.z);
-        feature.drawSimplified();
+        feature.draw();
         glPopMatrix();
 
         glMatrixMode(GL_PROJECTION);

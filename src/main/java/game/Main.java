@@ -136,7 +136,7 @@ public class Main {
     private void drawMenuOverlay(int width, int height, double mouseX, double mouseY) {
         UIRenderer.begin2D(width, height);
         float panelWidth = 520f;
-        float panelHeight = 400f;
+        float panelHeight = 360f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
 
@@ -153,9 +153,6 @@ public class Main {
                 mouseX, mouseY);
         rowY -= 40;
         drawMenuRow("Feature render distance", terrain.getFeatureRenderDistance(), panelX + 20, rowY,
-                mouseX, mouseY);
-        rowY -= 40;
-        drawMenuRow("Low-res feature distance", terrain.getFeatureSimplifiedDistance(), panelX + 20, rowY,
                 mouseX, mouseY);
         rowY -= 40;
         drawMenuRow("Impostor feature distance", terrain.getFeatureImpostorDistance(), panelX + 20, rowY,
@@ -208,7 +205,7 @@ public class Main {
 
     private void handleMenuClick(double mouseX, double mouseY, int width, int height) {
         float panelWidth = 520f;
-        float panelHeight = 400f;
+        float panelHeight = 360f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
         float rowY = panelY + panelHeight - 80;
@@ -229,11 +226,7 @@ public class Main {
             return;
         }
         rowY -= 40;
-        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 4)) {
-            return;
-        }
-        rowY -= 40;
-        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 5);
+        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 4);
     }
 
     private boolean handleRowClick(double mouseX, double mouseY, float x, float y, int rowIndex) {
@@ -260,15 +253,12 @@ public class Main {
                 terrain.setFeatureRenderDistance(terrain.getFeatureRenderDistance() + delta);
                 break;
             case 2:
-                terrain.setFeatureSimplifiedDistance(terrain.getFeatureSimplifiedDistance() + delta);
-                break;
-            case 3:
                 terrain.setFeatureImpostorDistance(terrain.getFeatureImpostorDistance() + delta);
                 break;
-            case 4:
+            case 3:
                 terrain.setGrassDetailDistance(terrain.getGrassDetailDistance() + delta);
                 break;
-            case 5:
+            case 4:
                 terrain.setShadowRenderDistance(terrain.getShadowRenderDistance() + delta);
                 break;
             default:

@@ -62,7 +62,6 @@ public class TerrainManager {
     private int shadowRenderDist;
     private int cacheRenderDist;
     private int cacheFeatureRenderDist;
-    private int featureSimplifiedDistance;
     private int featureImpostorDistance;
     private int grassDetailDistance;
     private boolean renderDistanceDirty = true;
@@ -88,7 +87,6 @@ public class TerrainManager {
         this.shadowRenderDist = renderDist + 12;
         this.cacheRenderDist = renderDist + 4;
         this.cacheFeatureRenderDist = featureRenderDist + 4;
-        this.featureSimplifiedDistance = Math.max(1, featureRenderDist - 1);
         this.featureImpostorDistance = Math.max(1, featureRenderDist);
         this.grassDetailDistance = Math.max(1, featureRenderDist - 2);
         this.regionGenerator = new BiomeRegionGenerator(seed);
@@ -723,7 +721,6 @@ public class TerrainManager {
 
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
-        int featureDetailDistance = Math.min(featureSimplifiedDistance, featureRenderDist);
         int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
@@ -732,7 +729,7 @@ public class TerrainManager {
             if (dist > renderDist) {
                 continue;
             }
-            c.drawTerrainAndFeatures(dist, featureDetailDistance, impostorDistance, grassDetailDistance,
+            c.drawTerrainAndFeatures(dist, impostorDistance, grassDetailDistance,
                     featureRenderDist);
         }
 
@@ -754,7 +751,6 @@ public class TerrainManager {
     public void drawDepth(float wx, float wz) {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
-        int featureDetailDistance = Math.min(featureSimplifiedDistance, featureRenderDist);
         int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
@@ -763,7 +759,7 @@ public class TerrainManager {
             if (dist > shadowRenderDist) {
                 continue;
             }
-            c.renderDepth(dist, featureDetailDistance, impostorDistance, grassDetailDistance,
+            c.renderDepth(dist, impostorDistance, grassDetailDistance,
                     featureRenderDist);
         }
     }
@@ -876,7 +872,6 @@ public class TerrainManager {
         featureRenderDist = Math.max(0, r);
         cacheFeatureRenderDist = featureRenderDist + 2;
         shadowRenderDist = Math.max(shadowRenderDist, renderDist + 12);
-        featureSimplifiedDistance = Math.min(featureSimplifiedDistance, featureRenderDist);
         featureImpostorDistance = Math.min(featureImpostorDistance, featureRenderDist);
         grassDetailDistance = Math.min(grassDetailDistance, featureRenderDist);
         renderDistanceDirty = true;
@@ -884,14 +879,6 @@ public class TerrainManager {
 
     public int getFeatureRenderDistance() {
         return featureRenderDist;
-    }
-
-    public void setFeatureSimplifiedDistance(int r) {
-        featureSimplifiedDistance = Math.max(0, Math.min(r, featureRenderDist));
-    }
-
-    public int getFeatureSimplifiedDistance() {
-        return featureSimplifiedDistance;
     }
 
     public void setFeatureImpostorDistance(int r) {
