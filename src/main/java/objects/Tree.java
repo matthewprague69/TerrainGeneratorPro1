@@ -16,6 +16,7 @@ public class Tree extends Feature {
     private final TreeType type;
     private final boolean hasLeaves;
     private final float height;
+    private final float visualHeight;
 
     private static final Map<TreeType, Branch> spruceTemplateCache = new HashMap<>();
     private static final Map<TreeType, Integer> spruceDisplayLists = new HashMap<>();
@@ -31,11 +32,13 @@ public class Tree extends Feature {
         final int displayList;
         final int trunkDisplayList;
         final float height;
+        final float visualHeight;
 
-        TreeVariant(int displayList, int trunkDisplayList, float height) {
+        TreeVariant(int displayList, int trunkDisplayList, float height, float visualHeight) {
             this.displayList = displayList;
             this.trunkDisplayList = trunkDisplayList;
             this.height = height;
+            this.visualHeight = visualHeight;
         }
     }
 
@@ -58,6 +61,7 @@ public class Tree extends Feature {
             buildSpruceDisplayListIfNeeded(type);
             buildSpruceTrunkDisplayListIfNeeded(type);
             this.sharedDisplayList = true;
+            this.visualHeight = computeVisualHeight(root, hasLeaves, type.leafSize);
         } else {
             this.root = null;
             List<TreeVariant> variants = getOrCreateTreeVariants(type, hasLeaves);
@@ -67,11 +71,28 @@ public class Tree extends Feature {
             this.trunkDisplayList = variant.trunkDisplayList;
             this.sharedDisplayList = true;
             this.variantScale = height / Math.max(0.0001f, variant.height);
+            this.visualHeight = variant.visualHeight * this.variantScale;
         }
     }
 
     public Tree(float x, float y, float z, TreeType type, long globalSeed) {
         this(x, y, z, type, true, globalSeed);
+    }
+
+    public TreeType getType() {
+        return type;
+    }
+
+    public boolean hasLeaves() {
+        return hasLeaves;
+    }
+
+    public float getHeight() {
+        return height;
+    }
+
+    public float getVisualHeight() {
+        return visualHeight;
     }
 
     @Override
@@ -100,7 +121,8 @@ public class Tree extends Feature {
             Tree temp = new Tree(type, hasLeaves, rand, height, root);
             temp.buildDisplayList(true);
             temp.buildDisplayList(false);
-            variants.add(new TreeVariant(temp.displayList, temp.trunkDisplayList, height));
+            float visualHeight = computeVisualHeight(root, hasLeaves, type.leafSize);
+            variants.add(new TreeVariant(temp.displayList, temp.trunkDisplayList, height, visualHeight));
         }
         treeVariants.put(key, variants);
         return variants;
@@ -115,6 +137,7 @@ public class Tree extends Feature {
         this.leafTex = TextureLoader.getOrLoad(type.leafTex);
         this.height = height;
         this.root = root;
+        this.visualHeight = computeVisualHeight(root, hasLeaves, type.leafSize);
     }
 
     private static Branch getOrCreateSpruceTemplate(TreeType type, float height) {
@@ -319,6 +342,89 @@ public class Tree extends Feature {
         }
 
         return root;
+    }
+
+    private static float computeVisualHeight(Branch root, boolean hasLeaves, float leafSize) {
+        float maxHeight = computeMaxBranchHeight(root, 0f, new float[] {1f, 0f, 0f},
+                new float[] {0f, 1f, 0f}, new float[] {0f, 0f, 1f});
+        if (hasLeaves) {
+            maxHeight += leafSize * 0.5f;
+        }
+        return maxHeight;
+    }
+
+    private static float computeMaxBranchHeight(Branch branch, float currentY,
+                                                float[] axisX, float[] axisY, float[] axisZ) {
+        float[] localX = axisX.clone();
+        float[] localY = axisY.clone();
+        float[] localZ = axisZ.clone();
+
+        if (branch.applyOutwardTilt) {
+            rotateAroundY(localX, localY, localZ, branch.rotZ);
+            rotateAroundX(localX, localY, localZ, branch.rotX);
+        } else {
+            rotateAroundX(localX, localY, localZ, branch.rotX);
+            rotateAroundZ(localX, localY, localZ, branch.rotZ);
+        }
+
+        float maxY = currentY;
+        if (branch.length > 0f) {
+            currentY += localY[1] * branch.length;
+            maxY = Math.max(maxY, currentY);
+        }
+
+        for (Branch child : branch.children) {
+            maxY = Math.max(maxY, computeMaxBranchHeight(child, currentY, localX, localY, localZ));
+        }
+        return maxY;
+    }
+
+    private static void rotateAroundX(float[] axisX, float[] axisY, float[] axisZ, float degrees) {
+        float radians = (float) Math.toRadians(degrees);
+        float cos = (float) Math.cos(radians);
+        float sin = (float) Math.sin(radians);
+
+        float y1 = axisY[1] * cos - axisY[2] * sin;
+        float y2 = axisY[1] * sin + axisY[2] * cos;
+        float z1 = axisZ[1] * cos - axisZ[2] * sin;
+        float z2 = axisZ[1] * sin + axisZ[2] * cos;
+
+        axisY[1] = y1;
+        axisY[2] = y2;
+        axisZ[1] = z1;
+        axisZ[2] = z2;
+    }
+
+    private static void rotateAroundY(float[] axisX, float[] axisY, float[] axisZ, float degrees) {
+        float radians = (float) Math.toRadians(degrees);
+        float cos = (float) Math.cos(radians);
+        float sin = (float) Math.sin(radians);
+
+        float x0 = axisX[0] * cos + axisX[2] * sin;
+        float x2 = -axisX[0] * sin + axisX[2] * cos;
+        float z0 = axisZ[0] * cos + axisZ[2] * sin;
+        float z2 = -axisZ[0] * sin + axisZ[2] * cos;
+
+        axisX[0] = x0;
+        axisX[2] = x2;
+        axisZ[0] = z0;
+        axisZ[2] = z2;
+    }
+
+    private static void rotateAroundZ(float[] axisX, float[] axisY, float[] axisZ, float degrees) {
+        float radians = (float) Math.toRadians(degrees);
+        float cos = (float) Math.cos(radians);
+        float sin = (float) Math.sin(radians);
+
+        float x0 = axisX[0] * cos - axisX[1] * sin;
+        float x1 = axisX[0] * sin + axisX[1] * cos;
+        float y0 = axisY[0] * cos - axisY[1] * sin;
+        float y1 = axisY[0] * sin + axisY[1] * cos;
+
+        axisX[0] = x0;
+        axisX[1] = x1;
+        axisY[0] = y0;
+        axisY[1] = y1;
     }
 
     private static Branch generateBranch(Random rand, TreeType type, int depth, float length, float thickness) {
