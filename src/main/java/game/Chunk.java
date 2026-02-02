@@ -1045,7 +1045,7 @@ public class Chunk {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
         glDisable(GL_FOG);
-        glDisable(GL_LIGHTING);
+        manager.applySkyLighting();
         glDisable(GL_CULL_FACE);
         glColor4f(1f, 1f, 1f, 1f);
 
@@ -1068,6 +1068,9 @@ public class Chunk {
         glMatrixMode(GL_MODELVIEW);
 
         glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        glDisable(GL_LIGHTING);
+        glDisable(GL_LIGHT0);
+        glDisable(GL_COLOR_MATERIAL);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glDeleteRenderbuffers(depthBuffer);
         glDeleteFramebuffers(fbo);

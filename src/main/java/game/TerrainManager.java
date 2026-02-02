@@ -799,6 +799,10 @@ public class TerrainManager {
         return new float[] { fogStart, fogEnd, r, g, b };
     }
 
+    public void applySkyLighting() {
+        skyRenderer.setLightDirectionFixed();
+    }
+
 
     private float getFogBrightness(float time) {
         if (time > 0.2f && time < 0.3f) {
