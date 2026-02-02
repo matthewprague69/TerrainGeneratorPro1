@@ -920,6 +920,7 @@ public class Chunk {
     }
 
     private void drawFeatureImpostorDepth(Feature feature) {
+        ImpostorEntry entry = getImpostorEntry(feature);
         ImpostorSize size = getActualImpostorSize(feature);
 
         float[] modelView = new float[16];
@@ -935,12 +936,22 @@ public class Chunk {
         float y2 = feature.y;
         float z2 = feature.z + rightZ * halfW;
 
+        glEnable(GL_TEXTURE_2D);
+        glEnable(GL_ALPHA_TEST);
+        glAlphaFunc(GL_GREATER, 0.05f);
+        glBindTexture(GL_TEXTURE_2D, entry.textureId);
         glBegin(GL_QUADS);
+        glTexCoord2f(0f, 0f);
         glVertex3f(x1, y1, z1);
+        glTexCoord2f(1f, 0f);
         glVertex3f(x2, y2, z2);
+        glTexCoord2f(1f, 1f);
         glVertex3f(x2, y2 + size.height, z2);
+        glTexCoord2f(0f, 1f);
         glVertex3f(x1, y1 + size.height, z1);
         glEnd();
+        glDisable(GL_ALPHA_TEST);
+        glDisable(GL_TEXTURE_2D);
     }
 
     private ImpostorSize getImpostorSize(Feature feature, float heightBucket, float canopyBucket,
