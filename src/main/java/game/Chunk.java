@@ -900,10 +900,16 @@ public class Chunk {
         glDisable(GL_LIGHTING);
         glDisable(GL_CULL_FACE);
         glColor4f(1f, 1f, 1f, 1f);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glEnable(GL_ALPHA_TEST);
-        glAlphaFunc(GL_GREATER, 0.05f);
+        if (feature instanceof Tree) {
+            glDisable(GL_BLEND);
+            glEnable(GL_ALPHA_TEST);
+            glAlphaFunc(GL_GREATER, 0.5f);
+        } else {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glEnable(GL_ALPHA_TEST);
+            glAlphaFunc(GL_GREATER, 0.05f);
+        }
         glBindTexture(GL_TEXTURE_2D, texture);
         glBegin(GL_QUADS);
         glTexCoord2f(0f, 0f);
@@ -962,7 +968,7 @@ public class Chunk {
         float height = 4.5f;
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
-            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
+            float canopy = Math.max(tree.getCanopyRadius(), tree.getType().baseThickness * 2f);
             width = canopy * 1.8f;
             height = tree.getHeight();
         } else if (feature instanceof Lake) {
@@ -981,7 +987,7 @@ public class Chunk {
         float lakeRadiusBucket = 0f;
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
-            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
+            float canopy = Math.max(tree.getCanopyRadius(), tree.getType().baseThickness * 2f);
             heightBucket = Math.max(0.25f, quantizeUp(tree.getHeight(), 0.25f));
             canopyBucket = Math.max(0.1f, quantizeUp(canopy, 0.1f));
             key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves() + ":" + heightBucket + ":" + canopyBucket;
@@ -1008,6 +1014,8 @@ public class Chunk {
                 0, GL_RGBA, GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
         int fbo = glGenFramebuffers();
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
