@@ -899,12 +899,12 @@ public class Chunk {
         glEnable(GL_TEXTURE_2D);
         glDisable(GL_LIGHTING);
         glDisable(GL_CULL_FACE);
-        glColor4f(1f, 1f, 1f, 1f);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glEnable(GL_ALPHA_TEST);
-        glAlphaFunc(GL_GREATER, 0.15f);
         glBindTexture(GL_TEXTURE_2D, texture);
+
+        glEnable(GL_ALPHA_TEST);
+        glAlphaFunc(GL_GREATER, 0.35f);
+        glColorMask(false, false, false, false);
+        glDepthMask(true);
         glBegin(GL_QUADS);
         glTexCoord2f(0f, 0f);
         glVertex3f(x1, y1, z1);
@@ -915,8 +915,27 @@ public class Chunk {
         glTexCoord2f(0f, 1f);
         glVertex3f(x1, y1 + size.height, z1);
         glEnd();
+
+        glColorMask(true, true, true, true);
+        glDepthMask(false);
+        glColor4f(1f, 1f, 1f, 1f);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glAlphaFunc(GL_GREATER, 0.15f);
+        glBegin(GL_QUADS);
+        glTexCoord2f(0f, 0f);
+        glVertex3f(x1, y1, z1);
+        glTexCoord2f(1f, 0f);
+        glVertex3f(x2, y2, z2);
+        glTexCoord2f(1f, 1f);
+        glVertex3f(x2, y2 + size.height, z2);
+        glTexCoord2f(0f, 1f);
+        glVertex3f(x1, y1 + size.height, z1);
+        glEnd();
+
         glDisable(GL_ALPHA_TEST);
         glDisable(GL_BLEND);
+        glDepthMask(true);
     }
 
     private void drawFeatureImpostorDepth(Feature feature) {
