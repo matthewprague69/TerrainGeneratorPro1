@@ -83,7 +83,7 @@ public class Tree extends Feature {
     }
 
     public float getHeight() {
-        return height;
+        return getVisualHeight();
     }
 
     @Override
@@ -422,12 +422,23 @@ public class Tree extends Feature {
 
     @Override
     protected float getShadowHeight() {
-        return height;
+        return getVisualHeight();
     }
 
     @Override
     protected float getShadowAlpha() {
         return 0.5f;
+    }
+
+    private float getVisualHeight() {
+        float leafLift = type.leafSize * 0.5f;
+        float branchLift = 0f;
+        if (type.trunkSegments > 0) {
+            float branchBase = height / type.trunkSegments;
+            branchLift = branchBase * 0.6f;
+        }
+        float extraHeight = Math.max(leafLift, branchLift);
+        return height + extraHeight;
     }
 
     private void drawBranchRecursive(Branch branch, int depth, boolean drawLeaves) {
