@@ -34,6 +34,15 @@ public class Chunk {
             this.height = height;
         }
     }
+    private static final class ImpostorEntry {
+        private final int textureId;
+        private final ImpostorSize size;
+
+        private ImpostorEntry(int textureId, ImpostorSize size) {
+            this.textureId = textureId;
+            this.size = size;
+        }
+    }
     private enum FeatureLod {
         FULL,
         IMPOSTOR,
@@ -79,7 +88,7 @@ public class Chunk {
     public static final float FEATURE_SLOPE_SPAWN_THRESHOLD = DIRT_SLOPE_START;
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
 
-    private static final Map<String, Integer> IMPOSTOR_TEXTURES = new HashMap<>();
+    private static final Map<String, ImpostorEntry> IMPOSTOR_TEXTURES = new HashMap<>();
 
     public static class ChunkBuildData {
         public final int cx;
@@ -869,8 +878,9 @@ public class Chunk {
     }
 
     private void drawFeatureImpostor(Feature feature) {
-        int texture = getImpostorTexture(feature);
-        ImpostorSize size = getImpostorSize(feature);
+        ImpostorEntry entry = getImpostorEntry(feature);
+        int texture = entry.textureId;
+        ImpostorSize size = entry.size;
 
         float[] modelView = new float[16];
         glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
@@ -907,7 +917,7 @@ public class Chunk {
     }
 
     private void drawFeatureImpostorDepth(Feature feature) {
-        ImpostorSize size = getImpostorSize(feature);
+        ImpostorSize size = getImpostorEntry(feature).size;
 
         float[] modelView = new float[16];
         glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
@@ -930,35 +940,48 @@ public class Chunk {
         glEnd();
     }
 
-    private ImpostorSize getImpostorSize(Feature feature) {
+    private ImpostorSize getImpostorSize(Feature feature, float heightBucket, float canopyBucket,
+                                         float lakeRadiusBucket) {
         float width = 2.5f;
         float height = 4.5f;
         if (feature instanceof Tree) {
-            Tree tree = (Tree) feature;
-            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
-            width = canopy * 1.8f;
-            height = tree.getHeight();
+            width = canopyBucket * 1.8f;
+            height = heightBucket;
         } else if (feature instanceof Lake) {
-            Lake lake = (Lake) feature;
-            float radius = Math.max(lake.getRadiusX(), lake.getRadiusZ());
-            width = radius * 2.2f;
+            width = lakeRadiusBucket * 2.2f;
             height = 1.5f;
         }
         return new ImpostorSize(width * IMPOSTOR_PADDING, height * IMPOSTOR_PADDING);
     }
 
-    private int getImpostorTexture(Feature feature) {
+    private ImpostorEntry getImpostorEntry(Feature feature) {
         String key = feature.getClass().getSimpleName();
+        float heightBucket = 0f;
+        float canopyBucket = 0f;
+        float lakeRadiusBucket = 0f;
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
-            key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves();
+            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
+            heightBucket = quantize(tree.getHeight(), 0.25f);
+            canopyBucket = quantize(canopy, 0.1f);
+            key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves() + ":" + heightBucket + ":" + canopyBucket;
         } else if (feature instanceof Lake) {
-            key = "Lake";
+            Lake lake = (Lake) feature;
+            float radius = Math.max(lake.getRadiusX(), lake.getRadiusZ());
+            lakeRadiusBucket = quantize(radius, 0.5f);
+            key = "Lake:" + lakeRadiusBucket;
         }
-        return IMPOSTOR_TEXTURES.computeIfAbsent(key, ignored -> renderImpostorTexture(feature));
+        float finalHeightBucket = heightBucket;
+        float finalCanopyBucket = canopyBucket;
+        float finalLakeRadiusBucket = lakeRadiusBucket;
+        return IMPOSTOR_TEXTURES.computeIfAbsent(key, ignored -> {
+            ImpostorSize size = getImpostorSize(feature, finalHeightBucket, finalCanopyBucket, finalLakeRadiusBucket);
+            int textureId = renderImpostorTexture(feature, size);
+            return new ImpostorEntry(textureId, size);
+        });
     }
 
-    private int renderImpostorTexture(Feature feature) {
+    private int renderImpostorTexture(Feature feature, ImpostorSize size) {
         int textureId = glGenTextures();
         glBindTexture(GL_TEXTURE_2D, textureId);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE,
@@ -992,7 +1015,6 @@ public class Chunk {
         glEnable(GL_DEPTH_TEST);
         glDisable(GL_FOG);
 
-        ImpostorSize size = getImpostorSize(feature);
         float halfWidth = size.width * 0.5f;
 
         glMatrixMode(GL_PROJECTION);
@@ -1017,6 +1039,13 @@ public class Chunk {
         glDeleteFramebuffers(fbo);
 
         return textureId;
+    }
+
+    private float quantize(float value, float step) {
+        if (step <= 0f) {
+            return value;
+        }
+        return Math.round(value / step) * step;
     }
 
     private void addSkirts(Map<BatchKey, FloatBuilder> builders, int step, float texScale) {
