@@ -82,6 +82,10 @@ public class Tree extends Feature {
         return hasLeaves;
     }
 
+    public float getHeight() {
+        return height;
+    }
+
     @Override
     public void dispose() {
         if (displayList != -1 && !sharedDisplayList) {
