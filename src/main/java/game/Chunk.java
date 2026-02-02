@@ -11,6 +11,7 @@ import spawners.LakeSpawner;
 import util.BoundingBox;
 import util.FeatureUtil;
 import util.VertexBatchBuilder;
+import org.lwjgl.BufferUtils;
 
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL14.*;
@@ -900,10 +901,16 @@ public class Chunk {
         glDisable(GL_LIGHTING);
         glDisable(GL_CULL_FACE);
         glColor4f(1f, 1f, 1f, 1f);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glEnable(GL_ALPHA_TEST);
-        glAlphaFunc(GL_GREATER, 0.05f);
+        if (feature instanceof Tree) {
+            glDisable(GL_BLEND);
+            glEnable(GL_ALPHA_TEST);
+            glAlphaFunc(GL_GREATER, 0.5f);
+        } else {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glEnable(GL_ALPHA_TEST);
+            glAlphaFunc(GL_GREATER, 0.05f);
+        }
         glBindTexture(GL_TEXTURE_2D, texture);
         glBegin(GL_QUADS);
         glTexCoord2f(0f, 0f);
@@ -962,7 +969,7 @@ public class Chunk {
         float height = 4.5f;
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
-            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
+            float canopy = Math.max(tree.getCanopyRadius(), tree.getType().baseThickness * 2f);
             width = canopy * 1.8f;
             height = tree.getHeight();
         } else if (feature instanceof Lake) {
@@ -981,7 +988,7 @@ public class Chunk {
         float lakeRadiusBucket = 0f;
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
-            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
+            float canopy = Math.max(tree.getCanopyRadius(), tree.getType().baseThickness * 2f);
             heightBucket = Math.max(0.25f, quantizeUp(tree.getHeight(), 0.25f));
             canopyBucket = Math.max(0.1f, quantizeUp(canopy, 0.1f));
             key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves() + ":" + heightBucket + ":" + canopyBucket;
@@ -1008,6 +1015,8 @@ public class Chunk {
                 0, GL_RGBA, GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
         int fbo = glGenFramebuffers();
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -1036,8 +1045,21 @@ public class Chunk {
         glClearColor(0f, 0f, 0f, 0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
+        glPushAttrib(GL_ENABLE_BIT | GL_LIGHTING_BIT | GL_CURRENT_BIT);
         glDisable(GL_FOG);
-        glDisable(GL_LIGHTING);
+        glEnable(GL_LIGHTING);
+        glEnable(GL_LIGHT0);
+        glEnable(GL_COLOR_MATERIAL);
+        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+        FloatBuffer impostorLightPos = BufferUtils.createFloatBuffer(4).put(new float[] { -0.2f, 1f, 0.3f, 0f })
+                .flip();
+        glLightfv(GL_LIGHT0, GL_POSITION, impostorLightPos);
+        FloatBuffer impostorDiffuse = BufferUtils.createFloatBuffer(4).put(new float[] { 0.9f, 0.9f, 0.9f, 1f })
+                .flip();
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, impostorDiffuse);
+        FloatBuffer impostorAmbient = BufferUtils.createFloatBuffer(4).put(new float[] { 0.3f, 0.3f, 0.3f, 1f })
+                .flip();
+        glLightfv(GL_LIGHT0, GL_AMBIENT, impostorAmbient);
         glDisable(GL_CULL_FACE);
         glColor4f(1f, 1f, 1f, 1f);
 
@@ -1058,6 +1080,7 @@ public class Chunk {
         glMatrixMode(GL_PROJECTION);
         glPopMatrix();
         glMatrixMode(GL_MODELVIEW);
+        glPopAttrib();
 
         glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
