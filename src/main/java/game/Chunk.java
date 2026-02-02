@@ -1031,8 +1031,19 @@ public class Chunk {
         glMatrixMode(GL_MODELVIEW);
         glPushMatrix();
         glLoadIdentity();
-        glTranslatef(-feature.x, -feature.y, -feature.z);
-        feature.draw();
+        float originalX = feature.x;
+        float originalY = feature.y;
+        float originalZ = feature.z;
+        feature.x = 0f;
+        feature.y = 0f;
+        feature.z = 0f;
+        try {
+            feature.draw();
+        } finally {
+            feature.x = originalX;
+            feature.y = originalY;
+            feature.z = originalZ;
+        }
         glPopMatrix();
 
         glMatrixMode(GL_PROJECTION);
