@@ -17,6 +17,7 @@ import util.VertexBatchBuilder;
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL14.*;
 import static org.lwjgl.opengl.GL15.*;
+import static org.lwjgl.opengl.GL30.*;
 import java.util.*;
 
 public class Chunk {
@@ -24,6 +25,7 @@ public class Chunk {
     private static final float SKIRT_DEPTH = 24f;
     private static final float SKIRT_TOP_OFFSET = 0.02f;
     private static final float DEFAULT_TEXTURE_LOD_BIAS = 1f;
+    private static final int IMPOSTOR_TEXTURE_SIZE = 128;
     private enum FeatureLod {
         FULL,
         SIMPLIFIED,
@@ -69,6 +71,8 @@ public class Chunk {
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
     public static final float FEATURE_SLOPE_SPAWN_THRESHOLD = DIRT_SLOPE_START;
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
+
+    private static final Map<String, Integer> IMPOSTOR_TEXTURES = new HashMap<>();
 
     public static class ChunkBuildData {
         public final int cx;
@@ -870,17 +874,15 @@ public class Chunk {
     }
 
     private void drawFeatureImpostor(Feature feature) {
-        int texture = manager.getTexture(biome.grassTex);
+        int texture = getImpostorTexture(feature);
         float width = 2.5f;
         float height = 4.5f;
         if (feature instanceof Tree) {
             width = 3.5f;
             height = 6.5f;
-            texture = manager.getTexture(biome.grassTex);
         } else if (feature instanceof Lake) {
             width = 5.0f;
             height = 1.5f;
-            texture = manager.getTexture(biome.dirtTex);
         }
 
         float[] modelView = new float[16];
@@ -944,6 +946,75 @@ public class Chunk {
         glVertex3f(x2, y2 + height, z2);
         glVertex3f(x1, y1 + height, z1);
         glEnd();
+    }
+
+    private int getImpostorTexture(Feature feature) {
+        String key = feature.getClass().getSimpleName();
+        if (feature instanceof Tree) {
+            Tree tree = (Tree) feature;
+            key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves();
+        } else if (feature instanceof Lake) {
+            key = "Lake";
+        }
+        return IMPOSTOR_TEXTURES.computeIfAbsent(key, ignored -> renderImpostorTexture(feature));
+    }
+
+    private int renderImpostorTexture(Feature feature) {
+        int textureId = glGenTextures();
+        glBindTexture(GL_TEXTURE_2D, textureId);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE,
+                0, GL_RGBA, GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        int fbo = glGenFramebuffers();
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureId, 0);
+
+        int depthBuffer = glGenRenderbuffers();
+        glBindRenderbuffer(GL_RENDERBUFFER, depthBuffer);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer);
+
+        int status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (status != GL_FRAMEBUFFER_COMPLETE) {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glDeleteRenderbuffers(depthBuffer);
+            glDeleteFramebuffers(fbo);
+            return manager.getTexture(biome.grassTex);
+        }
+
+        int[] viewport = new int[4];
+        glGetIntegerv(GL_VIEWPORT, viewport);
+        glViewport(0, 0, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE);
+
+        glClearColor(0f, 0f, 0f, 0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+        glDisable(GL_FOG);
+
+        glMatrixMode(GL_PROJECTION);
+        glPushMatrix();
+        glLoadIdentity();
+        glOrtho(-4f, 4f, 0f, 8f, -10f, 10f);
+
+        glMatrixMode(GL_MODELVIEW);
+        glPushMatrix();
+        glLoadIdentity();
+        glTranslatef(-feature.x, -feature.y, -feature.z);
+        feature.drawSimplified();
+        glPopMatrix();
+
+        glMatrixMode(GL_PROJECTION);
+        glPopMatrix();
+        glMatrixMode(GL_MODELVIEW);
+
+        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDeleteRenderbuffers(depthBuffer);
+        glDeleteFramebuffers(fbo);
+
+        return textureId;
     }
 
     private void addSkirts(Map<BatchKey, FloatBuilder> builders, int step, float texScale) {
