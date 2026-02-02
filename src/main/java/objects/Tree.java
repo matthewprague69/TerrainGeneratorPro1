@@ -74,6 +74,14 @@ public class Tree extends Feature {
         this(x, y, z, type, true, globalSeed);
     }
 
+    public TreeType getType() {
+        return type;
+    }
+
+    public boolean hasLeaves() {
+        return hasLeaves;
+    }
+
     @Override
     public void dispose() {
         if (displayList != -1 && !sharedDisplayList) {
