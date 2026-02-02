@@ -997,10 +997,6 @@ public class Chunk {
             angle += Math.PI * 2.0;
         }
         double sector = (Math.PI * 2.0) / angleCount;
-        angle += sector;
-        if (angle >= Math.PI * 2.0) {
-            angle -= Math.PI * 2.0;
-        }
         int index = (int) Math.floor((angle + sector * 0.5) / sector) % angleCount;
         return entry.textureIds[index];
     }
