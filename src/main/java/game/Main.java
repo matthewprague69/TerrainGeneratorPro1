@@ -155,7 +155,7 @@ public class Main {
         drawMenuRow("Feature render distance", terrain.getFeatureRenderDistance(), panelX + 20, rowY,
                 mouseX, mouseY);
         rowY -= 40;
-        drawMenuRow("Low-res feature distance", terrain.getFeatureSimplifiedDistance(), panelX + 20, rowY,
+        drawMenuRow("Impostor feature distance", terrain.getFeatureImpostorDistance(), panelX + 20, rowY,
                 mouseX, mouseY);
         rowY -= 40;
         drawMenuRow("Grass detail distance", terrain.getGrassDetailDistance(), panelX + 20, rowY,
@@ -253,7 +253,7 @@ public class Main {
                 terrain.setFeatureRenderDistance(terrain.getFeatureRenderDistance() + delta);
                 break;
             case 2:
-                terrain.setFeatureSimplifiedDistance(terrain.getFeatureSimplifiedDistance() + delta);
+                terrain.setFeatureImpostorDistance(terrain.getFeatureImpostorDistance() + delta);
                 break;
             case 3:
                 terrain.setGrassDetailDistance(terrain.getGrassDetailDistance() + delta);
