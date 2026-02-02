@@ -1046,6 +1046,8 @@ public class Chunk {
         glGetIntegerv(GL_VIEWPORT, viewport);
         glViewport(0, 0, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE);
 
+        glPushAttrib(GL_COLOR_BUFFER_BIT);
+        glColorMask(true, true, true, true);
         glClearColor(0f, 0f, 0f, 0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
@@ -1072,6 +1074,7 @@ public class Chunk {
         glPopMatrix();
         glMatrixMode(GL_MODELVIEW);
 
+        glPopAttrib();
         glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glDeleteRenderbuffers(depthBuffer);
