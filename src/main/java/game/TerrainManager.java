@@ -64,6 +64,7 @@ public class TerrainManager {
     private int cacheFeatureRenderDist;
     private int featureImpostorDistance;
     private int grassDetailDistance;
+    private int impostorAngleCount = 1;
     private boolean renderDistanceDirty = true;
     private int lastUpdateChunkX = Integer.MIN_VALUE;
     private int lastUpdateChunkZ = Integer.MIN_VALUE;
@@ -899,6 +900,20 @@ public class TerrainManager {
 
     public int getFeatureImpostorDistance() {
         return featureImpostorDistance;
+    }
+
+    public void setImpostorAngleCount(int count) {
+        if (count >= 8) {
+            impostorAngleCount = 8;
+        } else if (count >= 4) {
+            impostorAngleCount = 4;
+        } else {
+            impostorAngleCount = 1;
+        }
+    }
+
+    public int getImpostorAngleCount() {
+        return impostorAngleCount;
     }
 
     public void setGrassDetailDistance(int r) {

@@ -37,11 +37,11 @@ public class Chunk {
         }
     }
     private static final class ImpostorEntry {
-        private final int textureId;
+        private final int[] textureIds;
         private final ImpostorSize size;
 
-        private ImpostorEntry(int textureId, ImpostorSize size) {
-            this.textureId = textureId;
+        private ImpostorEntry(int[] textureIds, ImpostorSize size) {
+            this.textureIds = textureIds;
             this.size = size;
         }
     }
@@ -933,7 +933,7 @@ public class Chunk {
 
     private void drawFeatureImpostor(Feature feature) {
         ImpostorEntry entry = getImpostorEntry(feature);
-        int texture = entry.textureId;
+        int texture = pickImpostorTexture(entry, feature);
         ImpostorSize size = getActualImpostorSize(feature);
 
         float[] modelView = new float[16];
@@ -977,6 +977,26 @@ public class Chunk {
         glEnd();
         glDisable(GL_ALPHA_TEST);
         glDisable(GL_BLEND);
+    }
+
+    private int pickImpostorTexture(ImpostorEntry entry, Feature feature) {
+        int angleCount = entry.textureIds.length;
+        if (angleCount <= 1) {
+            return entry.textureIds[0];
+        }
+        float[] modelView = new float[16];
+        glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
+        float camX = -(modelView[0] * modelView[12] + modelView[1] * modelView[13] + modelView[2] * modelView[14]);
+        float camZ = -(modelView[8] * modelView[12] + modelView[9] * modelView[13] + modelView[10] * modelView[14]);
+        float dx = camX - feature.x;
+        float dz = camZ - feature.z;
+        double angle = Math.atan2(dz, dx);
+        if (angle < 0) {
+            angle += Math.PI * 2.0;
+        }
+        double sector = (Math.PI * 2.0) / angleCount;
+        int index = (int) Math.floor((angle + sector * 0.5) / sector) % angleCount;
+        return entry.textureIds[index];
     }
 
     private void drawFeatureImpostorDepth(Feature feature) {
@@ -1039,29 +1059,41 @@ public class Chunk {
         float heightBucket = 0f;
         float canopyBucket = 0f;
         float lakeRadiusBucket = 0f;
+        int angleCount = manager.getImpostorAngleCount();
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
             float canopy = Math.max(tree.getCanopyRadius(), tree.getType().baseThickness * 2f);
             heightBucket = Math.max(0.25f, quantizeUp(tree.getHeight(), 0.25f));
             canopyBucket = Math.max(0.1f, quantizeUp(canopy, 0.1f));
-            key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves() + ":" + heightBucket + ":" + canopyBucket;
+            key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves() + ":" + heightBucket + ":" + canopyBucket
+                    + ":" + angleCount;
         } else if (feature instanceof Lake) {
             Lake lake = (Lake) feature;
             float radius = Math.max(lake.getRadiusX(), lake.getRadiusZ());
             lakeRadiusBucket = Math.max(0.5f, quantizeUp(radius, 0.5f));
-            key = "Lake:" + lakeRadiusBucket;
+            key = "Lake:" + lakeRadiusBucket + ":" + angleCount;
         }
         float finalHeightBucket = heightBucket;
         float finalCanopyBucket = canopyBucket;
         float finalLakeRadiusBucket = lakeRadiusBucket;
         return IMPOSTOR_TEXTURES.computeIfAbsent(key, ignored -> {
             ImpostorSize size = getImpostorSize(feature, finalHeightBucket, finalCanopyBucket, finalLakeRadiusBucket);
-            int textureId = renderImpostorTexture(feature, size);
-            return new ImpostorEntry(textureId, size);
+            int[] textureIds = renderImpostorTextures(feature, size, angleCount);
+            return new ImpostorEntry(textureIds, size);
         });
     }
 
-    private int renderImpostorTexture(Feature feature, ImpostorSize size) {
+    private int[] renderImpostorTextures(Feature feature, ImpostorSize size, int angleCount) {
+        int count = Math.max(1, angleCount);
+        int[] textureIds = new int[count];
+        for (int i = 0; i < count; i++) {
+            float angle = (360f / count) * i;
+            textureIds[i] = renderImpostorTexture(feature, size, angle);
+        }
+        return textureIds;
+    }
+
+    private int renderImpostorTexture(Feature feature, ImpostorSize size, float angleDegrees) {
         int textureId = glGenTextures();
         glBindTexture(GL_TEXTURE_2D, textureId);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE,
@@ -1137,6 +1169,7 @@ public class Chunk {
         glMatrixMode(GL_MODELVIEW);
         glPushMatrix();
         glLoadIdentity();
+        glRotatef(angleDegrees, 0f, 1f, 0f);
         glTranslatef(-feature.x, -feature.y, -feature.z);
         feature.draw();
         glPopMatrix();
