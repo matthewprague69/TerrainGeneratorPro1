@@ -962,7 +962,7 @@ public class Chunk {
         float height = 4.5f;
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
-            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
+            float canopy = Math.max(tree.getCanopyRadius(), tree.getType().baseThickness * 2f);
             width = canopy * 1.8f;
             height = tree.getHeight();
         } else if (feature instanceof Lake) {
@@ -981,7 +981,7 @@ public class Chunk {
         float lakeRadiusBucket = 0f;
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
-            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
+            float canopy = Math.max(tree.getCanopyRadius(), tree.getType().baseThickness * 2f);
             heightBucket = Math.max(0.25f, quantizeUp(tree.getHeight(), 0.25f));
             canopyBucket = Math.max(0.1f, quantizeUp(canopy, 0.1f));
             key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves() + ":" + heightBucket + ":" + canopyBucket;
