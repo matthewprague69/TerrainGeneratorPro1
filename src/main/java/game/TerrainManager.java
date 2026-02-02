@@ -724,7 +724,7 @@ public class TerrainManager {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         int featureDetailDistance = Math.min(featureSimplifiedDistance, featureRenderDist);
-        int featureImpostorDistance = Math.min(featureImpostorDistance, featureRenderDist);
+        int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
         for (Chunk c : chunks.values()) {
@@ -732,7 +732,7 @@ public class TerrainManager {
             if (dist > renderDist) {
                 continue;
             }
-            c.drawTerrainAndFeatures(dist, featureDetailDistance, featureImpostorDistance, grassDetailDistance,
+            c.drawTerrainAndFeatures(dist, featureDetailDistance, impostorDistance, grassDetailDistance,
                     featureRenderDist);
         }
 
@@ -755,7 +755,7 @@ public class TerrainManager {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         int featureDetailDistance = Math.min(featureSimplifiedDistance, featureRenderDist);
-        int featureImpostorDistance = Math.min(featureImpostorDistance, featureRenderDist);
+        int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
         for (Chunk c : chunks.values()) {
@@ -763,7 +763,7 @@ public class TerrainManager {
             if (dist > shadowRenderDist) {
                 continue;
             }
-            c.renderDepth(dist, featureDetailDistance, featureImpostorDistance, grassDetailDistance,
+            c.renderDepth(dist, featureDetailDistance, impostorDistance, grassDetailDistance,
                     featureRenderDist);
         }
     }
