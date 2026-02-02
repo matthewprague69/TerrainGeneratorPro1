@@ -962,13 +962,13 @@ public class Chunk {
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
             float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
-            heightBucket = quantize(tree.getHeight(), 0.25f);
-            canopyBucket = quantize(canopy, 0.1f);
+            heightBucket = Math.max(0.25f, quantizeUp(tree.getHeight(), 0.25f));
+            canopyBucket = Math.max(0.1f, quantizeUp(canopy, 0.1f));
             key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves() + ":" + heightBucket + ":" + canopyBucket;
         } else if (feature instanceof Lake) {
             Lake lake = (Lake) feature;
             float radius = Math.max(lake.getRadiusX(), lake.getRadiusZ());
-            lakeRadiusBucket = quantize(radius, 0.5f);
+            lakeRadiusBucket = Math.max(0.5f, quantizeUp(radius, 0.5f));
             key = "Lake:" + lakeRadiusBucket;
         }
         float finalHeightBucket = heightBucket;
@@ -1041,11 +1041,11 @@ public class Chunk {
         return textureId;
     }
 
-    private float quantize(float value, float step) {
+    private float quantizeUp(float value, float step) {
         if (step <= 0f) {
             return value;
         }
-        return Math.round(value / step) * step;
+        return (float) Math.ceil(value / step) * step;
     }
 
     private void addSkirts(Map<BatchKey, FloatBuilder> builders, int step, float texScale) {
