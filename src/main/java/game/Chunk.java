@@ -1151,17 +1151,35 @@ public class Chunk {
     }
 
     private void addSkirts(Map<BatchKey, FloatBuilder> builders, int step, float texScale) {
+        boolean drawWest = shouldDrawSkirtForNeighbor(cx - 1, cz);
+        boolean drawEast = shouldDrawSkirtForNeighbor(cx + 1, cz);
+        boolean drawNorth = shouldDrawSkirtForNeighbor(cx, cz - 1);
+        boolean drawSouth = shouldDrawSkirtForNeighbor(cx, cz + 1);
+
         for (int x = 0; x < SIZE; x += step) {
             int x2 = Math.min(x + step, SIZE);
-            addSkirtQuad(builders, x, 0, x2, 0, heights[x][0], heights[x2][0], texScale);
-            addSkirtQuad(builders, x, SIZE, x2, SIZE, heights[x][SIZE], heights[x2][SIZE], texScale);
+            if (drawNorth) {
+                addSkirtQuad(builders, x, 0, x2, 0, heights[x][0], heights[x2][0], texScale);
+            }
+            if (drawSouth) {
+                addSkirtQuad(builders, x, SIZE, x2, SIZE, heights[x][SIZE], heights[x2][SIZE], texScale);
+            }
         }
 
         for (int z = 0; z < SIZE; z += step) {
             int z2 = Math.min(z + step, SIZE);
-            addSkirtQuad(builders, 0, z, 0, z2, heights[0][z], heights[0][z2], texScale);
-            addSkirtQuad(builders, SIZE, z, SIZE, z2, heights[SIZE][z], heights[SIZE][z2], texScale);
+            if (drawWest) {
+                addSkirtQuad(builders, 0, z, 0, z2, heights[0][z], heights[0][z2], texScale);
+            }
+            if (drawEast) {
+                addSkirtQuad(builders, SIZE, z, SIZE, z2, heights[SIZE][z], heights[SIZE][z2], texScale);
+            }
         }
+    }
+
+    private boolean shouldDrawSkirtForNeighbor(int neighborCx, int neighborCz) {
+        Chunk neighbor = manager.getChunk(neighborCx, neighborCz);
+        return neighbor == null || neighbor.getLOD() != lod;
     }
 
     private void addSkirtQuad(Map<BatchKey, FloatBuilder> builders, int x1, int z1, int x2, int z2,
