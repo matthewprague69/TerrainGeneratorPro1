@@ -10,6 +10,7 @@ import spawners.FeatureSpawner;
 import spawners.LakeSpawner;
 import util.BoundingBox;
 import util.FeatureUtil;
+import util.MatrixUtils;
 import util.VertexBatchBuilder;
 import org.lwjgl.BufferUtils;
 
@@ -986,8 +987,9 @@ public class Chunk {
         }
         float[] modelView = new float[16];
         glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
-        float camX = -(modelView[0] * modelView[12] + modelView[1] * modelView[13] + modelView[2] * modelView[14]);
-        float camZ = -(modelView[8] * modelView[12] + modelView[9] * modelView[13] + modelView[10] * modelView[14]);
+        float[] invView = MatrixUtils.invert(modelView);
+        float camX = invView[12];
+        float camZ = invView[14];
         float dx = camX - feature.x;
         float dz = camZ - feature.z;
         double angle = Math.atan2(dz, dx);
