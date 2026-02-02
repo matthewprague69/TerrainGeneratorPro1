@@ -844,6 +844,14 @@ public class TerrainManager {
     public int getTexture(String name) {
         return textureMap.getOrDefault(name, 0);
     }
+
+    public float[] getLightDirection() {
+        return skyRenderer.getLightDirection();
+    }
+
+    public float[] getLightColor() {
+        return skyRenderer.getLightColor();
+    }
     public int getWaterBottomTexture() {
         return waterBottomTex;
     }

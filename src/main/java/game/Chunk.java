@@ -1104,14 +1104,25 @@ public class Chunk {
         glEnable(GL_LIGHT0);
         glEnable(GL_COLOR_MATERIAL);
         glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
-        FloatBuffer impostorLightPos = BufferUtils.createFloatBuffer(4).put(new float[] { -0.2f, 1f, 0.3f, 0f })
-                .flip();
+        float[] sunDir = manager.getLightDirection();
+        float[] sunColor = manager.getLightColor();
+        float lightY = Math.max(0.2f, sunDir[1]);
+        float lightZ = 1f;
+        float lightLen = (float) Math.sqrt(lightY * lightY + lightZ * lightZ);
+        float lightDirX = 0f;
+        float lightDirY = lightY / lightLen;
+        float lightDirZ = lightZ / lightLen;
+        FloatBuffer impostorLightPos = BufferUtils.createFloatBuffer(4).put(new float[] {
+                lightDirX, lightDirY, lightDirZ, 0f
+        }).flip();
         glLightfv(GL_LIGHT0, GL_POSITION, impostorLightPos);
-        FloatBuffer impostorDiffuse = BufferUtils.createFloatBuffer(4).put(new float[] { 0.9f, 0.9f, 0.9f, 1f })
-                .flip();
+        FloatBuffer impostorDiffuse = BufferUtils.createFloatBuffer(4).put(new float[] {
+                sunColor[0], sunColor[1], sunColor[2], 1f
+        }).flip();
         glLightfv(GL_LIGHT0, GL_DIFFUSE, impostorDiffuse);
-        FloatBuffer impostorAmbient = BufferUtils.createFloatBuffer(4).put(new float[] { 0.3f, 0.3f, 0.3f, 1f })
-                .flip();
+        FloatBuffer impostorAmbient = BufferUtils.createFloatBuffer(4).put(new float[] {
+                sunColor[0] * 0.35f, sunColor[1] * 0.35f, sunColor[2] * 0.35f, 1f
+        }).flip();
         glLightfv(GL_LIGHT0, GL_AMBIENT, impostorAmbient);
         glDisable(GL_CULL_FACE);
         glColor4f(1f, 1f, 1f, 1f);
