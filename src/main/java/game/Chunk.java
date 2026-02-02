@@ -1,12 +1,11 @@
 package game;
 import generators.LakeGenerator;
 import objects.BatchableFeature;
-import objects.Cactus;
 import objects.Feature;
 import objects.ColorBatchableFeature;
-import objects.Flower;
 import objects.Grass;
 import objects.Lake;
+import objects.Tree;
 import spawners.FeatureSpawner;
 import spawners.LakeSpawner;
 import util.BoundingBox;
@@ -14,16 +13,39 @@ import util.FeatureUtil;
 import util.VertexBatchBuilder;
 
 import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.opengl.GL14.*;
 import static org.lwjgl.opengl.GL15.*;
+import static org.lwjgl.opengl.GL30.*;
 import java.util.*;
 
 public class Chunk {
     public static final int SIZE = 30;
-    private static final float SKIRT_DEPTH = 6f;
+    private static final float SKIRT_DEPTH = 24f;
+    private static final float SKIRT_TOP_OFFSET = 0.02f;
+    private static final float DEFAULT_TEXTURE_LOD_BIAS = 1f;
+    private static final int IMPOSTOR_TEXTURE_SIZE = 128;
+    private static final float IMPOSTOR_PADDING = 1.05f;
+    private static final class ImpostorSize {
+        private final float width;
+        private final float height;
+
+        private ImpostorSize(float width, float height) {
+            this.width = width;
+            this.height = height;
+        }
+    }
+    private static final class ImpostorEntry {
+        private final int textureId;
+        private final ImpostorSize size;
+
+        private ImpostorEntry(int textureId, ImpostorSize size) {
+            this.textureId = textureId;
+            this.size = size;
+        }
+    }
     private enum FeatureLod {
         FULL,
-        SIMPLIFIED,
-        FAR,
+        IMPOSTOR,
         CULLED
     }
     public final int cx, cz;
@@ -65,6 +87,8 @@ public class Chunk {
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
     public static final float FEATURE_SLOPE_SPAWN_THRESHOLD = DIRT_SLOPE_START;
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
+
+    private static final Map<String, ImpostorEntry> IMPOSTOR_TEXTURES = new HashMap<>();
 
     public static class ChunkBuildData {
         public final int cx;
@@ -188,6 +212,10 @@ public class Chunk {
         final double PERSISTENCE = 0.35;
         final double macroFreq = 0.002;
         final double macroAmp = 2.0;
+        final int lodClamped = Math.max(0, lod);
+        final int baseOctaves = 2;
+        final int lodPenalty = Math.max(0, lodClamped - 1);
+        final int lodOctaves = Math.max(baseOctaves, OCTAVES - lodPenalty);
 
         float[][] heights = new float[SIZE + 1][SIZE + 1];
         float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
@@ -268,7 +296,7 @@ public class Chunk {
                     double amp = entryBiome.amplitude * 0.5;
                     double sum = 0;
 
-                    for (int o = 0; o < OCTAVES; o++) {
+                    for (int o = 0; o < lodOctaves; o++) {
                         double offset = o * 100.0;
                         double val = terrainNoise.eval((wx + offset) * freq, (wz - offset) * freq);
                         val = (val * val * val) * 1.2;
@@ -442,8 +470,8 @@ public class Chunk {
         }
     }
 
-    public void drawTerrainAndFeatures(int chunkDistance, int featureDetailDistance, int grassDetailDistance,
-                                       int featureRenderDist) {
+    public void drawTerrainAndFeatures(int chunkDistance, int featureImpostorDistance,
+                                       int grassDetailDistance, int featureRenderDist) {
         glEnable(GL_TEXTURE_2D);
         glColor3f(1f, 1f, 1f);
 
@@ -461,8 +489,7 @@ public class Chunk {
             return;
         }
 
-        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
-                featureDetailDistance + 3);
+        FeatureLod lod = getFeatureLod(chunkDistance, featureImpostorDistance, featureRenderDist);
         // Draw features if they are above water
         for (Feature f : features) {
             if (f instanceof Grass || f instanceof ColorBatchableFeature) {
@@ -639,8 +666,9 @@ public class Chunk {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glEnable(GL_ALPHA_TEST);
-        glAlphaFunc(GL_GREATER, 0.3f);
+        glAlphaFunc(GL_GREATER, 0.05f);
         glBindTexture(GL_TEXTURE_2D, grassBatchTexture);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, getTextureLodBias());
         glBindBuffer(GL_ARRAY_BUFFER, grassBatchVbo);
         glEnableClientState(GL_VERTEX_ARRAY);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -650,6 +678,7 @@ public class Chunk {
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, DEFAULT_TEXTURE_LOD_BIAS);
         glDisable(GL_ALPHA_TEST);
         glDisable(GL_BLEND);
     }
@@ -706,13 +735,17 @@ public class Chunk {
         glEnableClientState(GL_VERTEX_ARRAY);
         glEnableClientState(GL_NORMAL_ARRAY);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        float lodBias = getTextureLodBias();
 
         int strideBytes = STRIDE_FLOATS * Float.BYTES;
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(-0.5f, -0.5f);
         for (TerrainBatch batch : terrainBatches) {
             if (batch.alpha < 0.999f) {
                 continue;
             }
             glBindTexture(GL_TEXTURE_2D, batch.textureId);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, lodBias);
             glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
             glVertexPointer(3, GL_FLOAT, strideBytes, 0);
             glNormalPointer(GL_FLOAT, strideBytes, 3 * Float.BYTES);
@@ -724,7 +757,6 @@ public class Chunk {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(false);
         glDepthFunc(GL_LEQUAL);
-        glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(-1f, -1f);
         for (TerrainBatch batch : terrainBatches) {
             if (batch.alpha >= 0.999f) {
@@ -732,6 +764,7 @@ public class Chunk {
             }
             glColor4f(1f, 1f, 1f, batch.alpha);
             glBindTexture(GL_TEXTURE_2D, batch.textureId);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, lodBias);
             glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
             glVertexPointer(3, GL_FLOAT, strideBytes, 0);
             glNormalPointer(GL_FLOAT, strideBytes, 3 * Float.BYTES);
@@ -743,6 +776,7 @@ public class Chunk {
         glDepthMask(true);
         glDisable(GL_BLEND);
         glColor4f(1f, 1f, 1f, 1f);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, DEFAULT_TEXTURE_LOD_BIAS);
 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -750,8 +784,21 @@ public class Chunk {
         glDisableClientState(GL_VERTEX_ARRAY);
     }
 
-    public void renderDepth(int chunkDistance, int featureDetailDistance, int grassDetailDistance,
-                            int featureRenderDist) {
+    private float getTextureLodBias() {
+        if (lod >= 3) {
+            return 4f;
+        }
+        if (lod == 2) {
+            return 3f;
+        }
+        if (lod == 1) {
+            return 2f;
+        }
+        return DEFAULT_TEXTURE_LOD_BIAS;
+    }
+
+    public void renderDepth(int chunkDistance, int featureImpostorDistance,
+                            int grassDetailDistance, int featureRenderDist) {
         if (terrainBatches.isEmpty()) {
             return;
         }
@@ -779,8 +826,7 @@ public class Chunk {
             return;
         }
 
-        FeatureLod lod = getFeatureLod(chunkDistance, featureDetailDistance, featureDetailDistance + 1,
-                featureDetailDistance + 2);
+        FeatureLod lod = getFeatureLod(chunkDistance, featureImpostorDistance, featureRenderDist);
         for (Feature f : features) {
             if (f instanceof Grass || f instanceof ColorBatchableFeature) {
                 continue;
@@ -794,15 +840,13 @@ public class Chunk {
         }
     }
 
-    private FeatureLod getFeatureLod(int chunkDistance, int simplifiedDistance, int farDistance, int cullDistance) {
+    private FeatureLod getFeatureLod(int chunkDistance, int impostorDistance,
+                                     int cullDistance) {
         if (chunkDistance > cullDistance) {
             return FeatureLod.CULLED;
         }
-        if (chunkDistance > farDistance) {
-            return FeatureLod.FAR;
-        }
-        if (chunkDistance > simplifiedDistance) {
-            return FeatureLod.SIMPLIFIED;
+        if (chunkDistance > impostorDistance) {
+            return FeatureLod.IMPOSTOR;
         }
         return FeatureLod.FULL;
     }
@@ -811,29 +855,205 @@ public class Chunk {
         if (lod == FeatureLod.CULLED) {
             return false;
         }
-        if (lod == FeatureLod.FAR) {
+        if (lod == FeatureLod.IMPOSTOR) {
             return feature instanceof Tree || feature instanceof Lake;
-        }
-        if (lod == FeatureLod.SIMPLIFIED) {
-            return !(feature instanceof Flower) && !(feature instanceof Cactus);
         }
         return true;
     }
 
     private void drawFeatureForLod(Feature feature, FeatureLod lod) {
-        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.FAR) {
-            feature.drawSimplified();
+        if (lod == FeatureLod.IMPOSTOR) {
+            drawFeatureImpostor(feature);
         } else {
             feature.draw();
         }
     }
 
     private void drawFeatureDepthForLod(Feature feature, FeatureLod lod) {
-        if (lod == FeatureLod.SIMPLIFIED || lod == FeatureLod.FAR) {
-            feature.drawSimplified();
+        if (lod == FeatureLod.IMPOSTOR) {
+            drawFeatureImpostorDepth(feature);
         } else {
             feature.drawDepth();
         }
+    }
+
+    private void drawFeatureImpostor(Feature feature) {
+        ImpostorEntry entry = getImpostorEntry(feature);
+        int texture = entry.textureId;
+        ImpostorSize size = entry.size;
+
+        float[] modelView = new float[16];
+        glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
+        float rightX = modelView[0];
+        float rightY = modelView[4];
+        float rightZ = modelView[8];
+
+        float halfW = size.width * 0.5f;
+        float x1 = feature.x - rightX * halfW;
+        float y1 = feature.y;
+        float z1 = feature.z - rightZ * halfW;
+        float x2 = feature.x + rightX * halfW;
+        float y2 = feature.y;
+        float z2 = feature.z + rightZ * halfW;
+
+        glEnable(GL_TEXTURE_2D);
+        glDisable(GL_LIGHTING);
+        glDisable(GL_CULL_FACE);
+        glColor4f(1f, 1f, 1f, 1f);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glEnable(GL_ALPHA_TEST);
+        glAlphaFunc(GL_GREATER, 0.05f);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glBegin(GL_QUADS);
+        glTexCoord2f(0f, 0f);
+        glVertex3f(x1, y1, z1);
+        glTexCoord2f(1f, 0f);
+        glVertex3f(x2, y2, z2);
+        glTexCoord2f(1f, 1f);
+        glVertex3f(x2, y2 + size.height, z2);
+        glTexCoord2f(0f, 1f);
+        glVertex3f(x1, y1 + size.height, z1);
+        glEnd();
+        glDisable(GL_ALPHA_TEST);
+        glDisable(GL_BLEND);
+    }
+
+    private void drawFeatureImpostorDepth(Feature feature) {
+        ImpostorSize size = getImpostorEntry(feature).size;
+
+        float[] modelView = new float[16];
+        glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
+        float rightX = modelView[0];
+        float rightZ = modelView[8];
+
+        float halfW = size.width * 0.5f;
+        float x1 = feature.x - rightX * halfW;
+        float y1 = feature.y;
+        float z1 = feature.z - rightZ * halfW;
+        float x2 = feature.x + rightX * halfW;
+        float y2 = feature.y;
+        float z2 = feature.z + rightZ * halfW;
+
+        glBegin(GL_QUADS);
+        glVertex3f(x1, y1, z1);
+        glVertex3f(x2, y2, z2);
+        glVertex3f(x2, y2 + size.height, z2);
+        glVertex3f(x1, y1 + size.height, z1);
+        glEnd();
+    }
+
+    private ImpostorSize getImpostorSize(Feature feature, float heightBucket, float canopyBucket,
+                                         float lakeRadiusBucket) {
+        float width = 2.5f;
+        float height = 4.5f;
+        if (feature instanceof Tree) {
+            width = canopyBucket * 1.8f;
+            height = heightBucket;
+        } else if (feature instanceof Lake) {
+            width = lakeRadiusBucket * 2.2f;
+            height = 1.5f;
+        }
+        return new ImpostorSize(width * IMPOSTOR_PADDING, height * IMPOSTOR_PADDING);
+    }
+
+    private ImpostorEntry getImpostorEntry(Feature feature) {
+        String key = feature.getClass().getSimpleName();
+        float heightBucket = 0f;
+        float canopyBucket = 0f;
+        float lakeRadiusBucket = 0f;
+        if (feature instanceof Tree) {
+            Tree tree = (Tree) feature;
+            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
+            heightBucket = Math.max(0.25f, quantizeUp(tree.getVisualHeight(), 0.25f));
+            canopyBucket = Math.max(0.1f, quantizeUp(canopy, 0.1f));
+            key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves() + ":" + heightBucket + ":" + canopyBucket;
+        } else if (feature instanceof Lake) {
+            Lake lake = (Lake) feature;
+            float radius = Math.max(lake.getRadiusX(), lake.getRadiusZ());
+            lakeRadiusBucket = Math.max(0.5f, quantizeUp(radius, 0.5f));
+            key = "Lake:" + lakeRadiusBucket;
+        }
+        float finalHeightBucket = heightBucket;
+        float finalCanopyBucket = canopyBucket;
+        float finalLakeRadiusBucket = lakeRadiusBucket;
+        return IMPOSTOR_TEXTURES.computeIfAbsent(key, ignored -> {
+            ImpostorSize size = getImpostorSize(feature, finalHeightBucket, finalCanopyBucket, finalLakeRadiusBucket);
+            int textureId = renderImpostorTexture(feature, size);
+            return new ImpostorEntry(textureId, size);
+        });
+    }
+
+    private int renderImpostorTexture(Feature feature, ImpostorSize size) {
+        int textureId = glGenTextures();
+        glBindTexture(GL_TEXTURE_2D, textureId);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE,
+                0, GL_RGBA, GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        int fbo = glGenFramebuffers();
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureId, 0);
+
+        int depthBuffer = glGenRenderbuffers();
+        glBindRenderbuffer(GL_RENDERBUFFER, depthBuffer);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer);
+
+        int status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (status != GL_FRAMEBUFFER_COMPLETE) {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glDeleteRenderbuffers(depthBuffer);
+            glDeleteFramebuffers(fbo);
+            return manager.getTexture(biome.grassTex);
+        }
+
+        int[] viewport = new int[4];
+        glGetIntegerv(GL_VIEWPORT, viewport);
+        glViewport(0, 0, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE);
+        glDrawBuffer(GL_COLOR_ATTACHMENT0);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+
+        glClearColor(0f, 0f, 0f, 0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+        glDisable(GL_FOG);
+        glDisable(GL_LIGHTING);
+        glDisable(GL_CULL_FACE);
+        glColor4f(1f, 1f, 1f, 1f);
+
+        float halfWidth = size.width * 0.5f;
+
+        glMatrixMode(GL_PROJECTION);
+        glPushMatrix();
+        glLoadIdentity();
+        glOrtho(-halfWidth, halfWidth, 0f, size.height, -10f, 10f);
+
+        glMatrixMode(GL_MODELVIEW);
+        glPushMatrix();
+        glLoadIdentity();
+        glTranslatef(-feature.x, -feature.y, -feature.z);
+        feature.draw();
+        glPopMatrix();
+
+        glMatrixMode(GL_PROJECTION);
+        glPopMatrix();
+        glMatrixMode(GL_MODELVIEW);
+
+        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDeleteRenderbuffers(depthBuffer);
+        glDeleteFramebuffers(fbo);
+
+        return textureId;
+    }
+
+    private float quantizeUp(float value, float step) {
+        if (step <= 0f) {
+            return value;
+        }
+        return (float) Math.ceil(value / step) * step;
     }
 
     private void addSkirts(Map<BatchKey, FloatBuilder> builders, int step, float texScale) {
@@ -864,11 +1084,14 @@ public class Chunk {
         float y1b = y1 - SKIRT_DEPTH;
         float y2b = y2 - SKIRT_DEPTH;
 
-        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
-        builder.putVertex(wx2, y2, wz2, normal, x2 * texScale, z2 * texScale);
+        float y1Top = y1 - SKIRT_TOP_OFFSET;
+        float y2Top = y2 - SKIRT_TOP_OFFSET;
+
+        builder.putVertex(wx1, y1Top, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx2, y2Top, wz2, normal, x2 * texScale, z2 * texScale);
         builder.putVertex(wx2, y2b, wz2, normal, x2 * texScale, z2 * texScale);
 
-        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx1, y1Top, wz1, normal, x1 * texScale, z1 * texScale);
         builder.putVertex(wx2, y2b, wz2, normal, x2 * texScale, z2 * texScale);
         builder.putVertex(wx1, y1b, wz1, normal, x1 * texScale, z1 * texScale);
     }
