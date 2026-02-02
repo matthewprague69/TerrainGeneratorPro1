@@ -22,6 +22,7 @@ public class Tree extends Feature {
     private static final Map<TreeType, Integer> spruceTrunkDisplayLists = new HashMap<>();
     private static final Map<String, List<TreeVariant>> treeVariants = new HashMap<>();
     private static final int VARIANTS_PER_TYPE = 3;
+    private static boolean impostorRendering = false;
     private int displayList = -1; // Per-tree list (for normal trees)
     private int trunkDisplayList = -1;
     private boolean sharedDisplayList = false;
@@ -72,6 +73,26 @@ public class Tree extends Feature {
 
     public Tree(float x, float y, float z, TreeType type, long globalSeed) {
         this(x, y, z, type, true, globalSeed);
+    }
+
+    public TreeType getType() {
+        return type;
+    }
+
+    public boolean hasLeaves() {
+        return hasLeaves;
+    }
+
+    public float getHeight() {
+        return height;
+    }
+
+    public float getFullHeight() {
+        return height + type.leafSize;
+    }
+
+    public static void setImpostorRendering(boolean enabled) {
+        impostorRendering = enabled;
     }
 
     @Override
@@ -355,7 +376,7 @@ public class Tree extends Feature {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(true);
         glEnable(GL_ALPHA_TEST);
-        glAlphaFunc(GL_GREATER, 0.5f);
+        glAlphaFunc(GL_GREATER, impostorRendering ? 0.2f : 0.5f);
         glColor4f(1f, 1f, 1f, 1f);
 
         if (type.renderStyle == TreeRenderStyle.SPRUCE) {
@@ -383,7 +404,7 @@ public class Tree extends Feature {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(true);
         glEnable(GL_ALPHA_TEST);
-        glAlphaFunc(GL_GREATER, 0.5f);
+        glAlphaFunc(GL_GREATER, impostorRendering ? 0.2f : 0.5f);
         glColor4f(1f, 1f, 1f, 1f);
 
         if (type.renderStyle == TreeRenderStyle.SPRUCE) {
