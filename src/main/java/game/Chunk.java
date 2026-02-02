@@ -17,6 +17,7 @@ import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL14.*;
 import static org.lwjgl.opengl.GL15.*;
 import static org.lwjgl.opengl.GL30.*;
+import java.nio.FloatBuffer;
 import java.util.*;
 
 public class Chunk {
