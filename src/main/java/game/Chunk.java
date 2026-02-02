@@ -24,6 +24,16 @@ public class Chunk {
     private static final float SKIRT_TOP_OFFSET = 0.02f;
     private static final float DEFAULT_TEXTURE_LOD_BIAS = 1f;
     private static final int IMPOSTOR_TEXTURE_SIZE = 128;
+    private static final float IMPOSTOR_PADDING = 1.05f;
+    private static final class ImpostorSize {
+        private final float width;
+        private final float height;
+
+        private ImpostorSize(float width, float height) {
+            this.width = width;
+            this.height = height;
+        }
+    }
     private enum FeatureLod {
         FULL,
         IMPOSTOR,
@@ -860,15 +870,7 @@ public class Chunk {
 
     private void drawFeatureImpostor(Feature feature) {
         int texture = getImpostorTexture(feature);
-        float width = 2.5f;
-        float height = 4.5f;
-        if (feature instanceof Tree) {
-            width = 3.5f;
-            height = 6.5f;
-        } else if (feature instanceof Lake) {
-            width = 5.0f;
-            height = 1.5f;
-        }
+        ImpostorSize size = getImpostorSize(feature);
 
         float[] modelView = new float[16];
         glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
@@ -876,7 +878,7 @@ public class Chunk {
         float rightY = modelView[4];
         float rightZ = modelView[8];
 
-        float halfW = width * 0.5f;
+        float halfW = size.width * 0.5f;
         float x1 = feature.x - rightX * halfW;
         float y1 = feature.y;
         float z1 = feature.z - rightZ * halfW;
@@ -896,28 +898,23 @@ public class Chunk {
         glTexCoord2f(1f, 0f);
         glVertex3f(x2, y2, z2);
         glTexCoord2f(1f, 1f);
-        glVertex3f(x2, y2 + height, z2);
+        glVertex3f(x2, y2 + size.height, z2);
         glTexCoord2f(0f, 1f);
-        glVertex3f(x1, y1 + height, z1);
+        glVertex3f(x1, y1 + size.height, z1);
         glEnd();
         glDisable(GL_ALPHA_TEST);
         glDisable(GL_BLEND);
     }
 
     private void drawFeatureImpostorDepth(Feature feature) {
-        float width = feature instanceof Tree ? 3.5f : 2.5f;
-        float height = feature instanceof Tree ? 6.5f : 4.5f;
-        if (feature instanceof Lake) {
-            width = 5.0f;
-            height = 1.5f;
-        }
+        ImpostorSize size = getImpostorSize(feature);
 
         float[] modelView = new float[16];
         glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
         float rightX = modelView[0];
         float rightZ = modelView[8];
 
-        float halfW = width * 0.5f;
+        float halfW = size.width * 0.5f;
         float x1 = feature.x - rightX * halfW;
         float y1 = feature.y;
         float z1 = feature.z - rightZ * halfW;
@@ -928,9 +925,26 @@ public class Chunk {
         glBegin(GL_QUADS);
         glVertex3f(x1, y1, z1);
         glVertex3f(x2, y2, z2);
-        glVertex3f(x2, y2 + height, z2);
-        glVertex3f(x1, y1 + height, z1);
+        glVertex3f(x2, y2 + size.height, z2);
+        glVertex3f(x1, y1 + size.height, z1);
         glEnd();
+    }
+
+    private ImpostorSize getImpostorSize(Feature feature) {
+        float width = 2.5f;
+        float height = 4.5f;
+        if (feature instanceof Tree) {
+            Tree tree = (Tree) feature;
+            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
+            width = canopy * 1.8f;
+            height = tree.getHeight();
+        } else if (feature instanceof Lake) {
+            Lake lake = (Lake) feature;
+            float radius = Math.max(lake.getRadiusX(), lake.getRadiusZ());
+            width = radius * 2.2f;
+            height = 1.5f;
+        }
+        return new ImpostorSize(width * IMPOSTOR_PADDING, height * IMPOSTOR_PADDING);
     }
 
     private int getImpostorTexture(Feature feature) {
@@ -978,10 +992,13 @@ public class Chunk {
         glEnable(GL_DEPTH_TEST);
         glDisable(GL_FOG);
 
+        ImpostorSize size = getImpostorSize(feature);
+        float halfWidth = size.width * 0.5f;
+
         glMatrixMode(GL_PROJECTION);
         glPushMatrix();
         glLoadIdentity();
-        glOrtho(-4f, 4f, 0f, 8f, -10f, 10f);
+        glOrtho(-halfWidth, halfWidth, 0f, size.height, -10f, 10f);
 
         glMatrixMode(GL_MODELVIEW);
         glPushMatrix();
