@@ -897,6 +897,9 @@ public class Chunk {
         float z2 = feature.z + rightZ * halfW;
 
         glEnable(GL_TEXTURE_2D);
+        glDisable(GL_LIGHTING);
+        glDisable(GL_CULL_FACE);
+        glColor4f(1f, 1f, 1f, 1f);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glEnable(GL_ALPHA_TEST);
@@ -1014,6 +1017,9 @@ public class Chunk {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
         glDisable(GL_FOG);
+        glDisable(GL_LIGHTING);
+        glDisable(GL_CULL_FACE);
+        glColor4f(1f, 1f, 1f, 1f);
 
         float halfWidth = size.width * 0.5f;
 
