@@ -137,6 +137,7 @@ public class Tree extends Feature {
         this.leafTex = TextureLoader.getOrLoad(type.leafTex);
         this.height = height;
         this.root = root;
+        this.visualHeight = computeVisualHeight(root, hasLeaves, type.leafSize);
     }
 
     private static Branch getOrCreateSpruceTemplate(TreeType type, float height) {
