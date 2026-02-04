@@ -92,17 +92,6 @@ public class Chunk {
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
 
     private static final Map<String, ImpostorEntry> IMPOSTOR_TEXTURES = new HashMap<>();
-    private static final class CombinedBiomeParams {
-        private final double frequency;
-        private final double amplitude;
-        private final double baseHeight;
-
-        private CombinedBiomeParams(double frequency, double amplitude, double baseHeight) {
-            this.frequency = frequency;
-            this.amplitude = amplitude;
-            this.baseHeight = baseHeight;
-        }
-    }
 
     public static class ChunkBuildData {
         public final int cx;
@@ -254,8 +243,8 @@ public class Chunk {
         }
 
         Biome[] biomes = Biome.values();
+        int biomeCount = biomes.length;
         float[][][] weightGrid = manager.getBiomeWeightGridForChunk(cx, cz, weightStep);
-        CombinedBiomeParams[][] paramGrid = buildCombinedParamsGrid(weightGrid, biomes);
 
         for (int x = 0; x <= SIZE; x++) {
             for (int z = 0; z <= SIZE; z++) {
@@ -279,22 +268,35 @@ public class Chunk {
                 float w01 = sx * tz;
                 float w11 = tx * tz;
 
-                CombinedBiomeParams params = blendCombinedParams(paramGrid, gxIndex, gzIndex, w00, w10, w01, w11);
-                double freq = params.frequency;
-                double amp = params.amplitude * 0.5;
-                double sum = 0;
+                double blendedHeight = 0;
 
-                for (int o = 0; o < lodOctaves; o++) {
-                    double offset = o * 100.0;
-                    double val = terrainNoise.eval((wx + offset) * freq, (wz - offset) * freq);
-                    val = (val * val * val) * 1.2;
-                    sum += val * amp;
-                    freq *= 1.7;
-                    amp *= PERSISTENCE;
+                for (int i = 0; i < biomeCount; i++) {
+                    double weight =
+                            weightGrid[gxIndex][gzIndex][i] * w00
+                            + weightGrid[gxIndex + 1][gzIndex][i] * w10
+                            + weightGrid[gxIndex][gzIndex + 1][i] * w01
+                            + weightGrid[gxIndex + 1][gzIndex + 1][i] * w11;
+                    if (weight <= 0.00001) {
+                        continue;
+                    }
+                    Biome entryBiome = biomes[i];
+                    double freq = entryBiome.frequency;
+                    double amp = entryBiome.amplitude * 0.5;
+                    double sum = 0;
+
+                    for (int o = 0; o < lodOctaves; o++) {
+                        double offset = o * 100.0;
+                        double val = terrainNoise.eval((wx + offset) * freq, (wz - offset) * freq);
+                        val = (val * val * val) * 1.2;
+                        sum += val * amp;
+                        freq *= 1.7;
+                        amp *= PERSISTENCE;
+                    }
+
+                    double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
+                    double biomeHeight = entryBiome.baseHeight + sum + elevationOffset;
+                    blendedHeight += biomeHeight * weight;
                 }
-
-                double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
-                double blendedHeight = params.baseHeight + sum + elevationOffset;
 
                 heights[x][z] = (float) blendedHeight;
             }
@@ -333,8 +335,8 @@ public class Chunk {
         }
 
         Biome[] biomes = Biome.values();
+        int biomeCount = biomes.length;
         float[][][] weightGrid = manager.getBiomeWeightGridForChunk(cx, cz, weightStep);
-        CombinedBiomeParams[][] paramGrid = buildCombinedParamsGrid(weightGrid, biomes);
 
         for (int x = 0; x <= SIZE; x++) {
             for (int z = 0; z <= SIZE; z++) {
@@ -357,24 +359,38 @@ public class Chunk {
                 float w10 = tx * sz;
                 float w01 = sx * tz;
                 float w11 = tx * tz;
-                CombinedBiomeParams params = blendCombinedParams(paramGrid, gxIndex, gzIndex, w00, w10, w01, w11);
-                double freq = params.frequency;
-                double amp = params.amplitude * 0.5; // Reduce noise contribution
-                double sum = 0;
+                double blendedHeight = 0;
 
-                for (int o = 0; o < lodOctaves; o++) {
-                    double offset = o * 100.0;
-                    double val = terrainNoise.eval((wx + offset) * freq, (wz - offset) * freq);
-                    val = (val * val * val) * 1.2;
-                    sum += val * amp;
-                    freq *= 1.7;
-                    amp *= PERSISTENCE;
+                for (int i = 0; i < biomeCount; i++) {
+                    double weight =
+                            weightGrid[gxIndex][gzIndex][i] * w00
+                            + weightGrid[gxIndex + 1][gzIndex][i] * w10
+                            + weightGrid[gxIndex][gzIndex + 1][i] * w01
+                            + weightGrid[gxIndex + 1][gzIndex + 1][i] * w11;
+                    if (weight <= 0.00001) {
+                        continue;
+                    }
+                    Biome biome = biomes[i];
+
+                    double freq = biome.frequency;
+                    double amp = biome.amplitude * 0.5; // Reduce noise contribution
+                    double sum = 0;
+
+                    for (int o = 0; o < lodOctaves; o++) {
+                        double offset = o * 100.0;
+                        double val = terrainNoise.eval((wx + offset) * freq, (wz - offset) * freq);
+                        val = (val * val * val) * 1.2;
+                        sum += val * amp;
+                        freq *= 1.7;
+                        amp *= PERSISTENCE;
+                    }
+
+                    double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
+
+                    // Biome shaping: baseHeight is now the dominant vertical shift
+                    double biomeHeight = biome.baseHeight + sum + elevationOffset;
+                    blendedHeight += biomeHeight * weight;
                 }
-
-                double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
-
-                // Biome shaping: baseHeight is now the dominant vertical shift
-                double blendedHeight = params.baseHeight + sum + elevationOffset;
 
                 heights[x][z] = (float) blendedHeight;
             }
@@ -1149,53 +1165,6 @@ public class Chunk {
         glDeleteFramebuffers(fbo);
 
         return textureId;
-    }
-
-    private static CombinedBiomeParams[][] buildCombinedParamsGrid(float[][][] weightGrid, Biome[] biomes) {
-        int gridX = weightGrid.length;
-        int gridZ = weightGrid[0].length;
-        int biomeCount = biomes.length;
-        CombinedBiomeParams[][] combined = new CombinedBiomeParams[gridX][gridZ];
-        Biome fallback = Biome.PLAINS;
-        for (int gx = 0; gx < gridX; gx++) {
-            for (int gz = 0; gz < gridZ; gz++) {
-                double totalWeight = 0.0;
-                double frequency = 0.0;
-                double amplitude = 0.0;
-                double baseHeight = 0.0;
-                for (int i = 0; i < biomeCount; i++) {
-                    double weight = weightGrid[gx][gz][i];
-                    if (weight <= 0.00001) {
-                        continue;
-                    }
-                    totalWeight += weight;
-                    Biome biome = biomes[i];
-                    frequency += biome.frequency * weight;
-                    amplitude += biome.amplitude * weight;
-                    baseHeight += biome.baseHeight * weight;
-                }
-                if (totalWeight <= 0.00001) {
-                    combined[gx][gz] = new CombinedBiomeParams(fallback.frequency, fallback.amplitude,
-                            fallback.baseHeight);
-                } else {
-                    double inv = 1.0 / totalWeight;
-                    combined[gx][gz] = new CombinedBiomeParams(frequency * inv, amplitude * inv, baseHeight * inv);
-                }
-            }
-        }
-        return combined;
-    }
-
-    private static CombinedBiomeParams blendCombinedParams(CombinedBiomeParams[][] grid, int gx, int gz,
-                                                           float w00, float w10, float w01, float w11) {
-        CombinedBiomeParams p00 = grid[gx][gz];
-        CombinedBiomeParams p10 = grid[gx + 1][gz];
-        CombinedBiomeParams p01 = grid[gx][gz + 1];
-        CombinedBiomeParams p11 = grid[gx + 1][gz + 1];
-        double frequency = p00.frequency * w00 + p10.frequency * w10 + p01.frequency * w01 + p11.frequency * w11;
-        double amplitude = p00.amplitude * w00 + p10.amplitude * w10 + p01.amplitude * w01 + p11.amplitude * w11;
-        double baseHeight = p00.baseHeight * w00 + p10.baseHeight * w10 + p01.baseHeight * w01 + p11.baseHeight * w11;
-        return new CombinedBiomeParams(frequency, amplitude, baseHeight);
     }
 
     private float quantizeUp(float value, float step) {
