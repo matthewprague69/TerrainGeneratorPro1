@@ -390,8 +390,8 @@ public class TerrainManager {
         float minZ = cz * Chunk.SIZE * scale;
         float maxX = (cx + 1) * Chunk.SIZE * scale;
         float maxZ = (cz + 1) * Chunk.SIZE * scale;
-        float minY = -50f;
-        float maxY = 250f;
+        float minY = -200f;
+        float maxY = 1000f;
         return frustum.isBoxVisible(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
@@ -412,6 +412,7 @@ public class TerrainManager {
             }
         }
         if (visibleKeys.isEmpty()) {
+            processPendingChunkGenerationsWithoutFrustum(budget, start);
             return;
         }
         List<Long> upgradeKeys = new ArrayList<>();
