@@ -143,8 +143,8 @@ public class TerrainManager {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         drainCompletedChunkBuilds(pcx, pcz);
-        drainCompletedFeatureGenerations(pcx, pcz);
         processPendingRenderBuilds(pcx, pcz);
+        drainCompletedFeatureGenerations(pcx, pcz);
         if (renderDistanceDirty) {
             rebuildNeededChunks(pcx, pcz);
             refreshChunkLods(pcx, pcz);
@@ -158,8 +158,8 @@ public class TerrainManager {
             refreshChunkLods(pcx, pcz);
             reprioritizePendingQueues(pcx, pcz, frustum);
             processPendingChunkGenerations(pcx, pcz, frustum);
-            processPendingFeatureGenerations(pcx, pcz);
             processPendingRenderBuilds(pcx, pcz);
+            processPendingFeatureGenerations(pcx, pcz);
             return;
         }
         int prevChunkX = lastUpdateChunkX;
@@ -195,8 +195,8 @@ public class TerrainManager {
         }
 
         processPendingChunkGenerations(pcx, pcz, frustum);
-        processPendingFeatureGenerations(pcx, pcz);
         processPendingRenderBuilds(pcx, pcz);
+        processPendingFeatureGenerations(pcx, pcz);
     }
 
     private void updateNeededChunks(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
@@ -527,6 +527,10 @@ public class TerrainManager {
         if (pendingFeatureKeys.contains(key) || inflightFeatureKeys.contains(key)) {
             return;
         }
+        Integer pendingLod = pendingChunkLods.get(key);
+        if (pendingLod != null && pendingLod != chunk.getLOD()) {
+            return;
+        }
         if (chunk.needsRenderResources()) {
             return;
         }
@@ -558,6 +562,10 @@ public class TerrainManager {
                 continue;
             }
             if (inflightFeatureKeys.contains(key)) {
+                continue;
+            }
+            Integer pendingLod = pendingChunkLods.get(key);
+            if (pendingLod != null && pendingLod != chunk.getLOD()) {
                 continue;
             }
             if (!chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
