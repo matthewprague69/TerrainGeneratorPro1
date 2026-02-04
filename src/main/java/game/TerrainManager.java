@@ -14,9 +14,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class TerrainManager {
-    private static final int MAX_CHUNKS_PER_FRAME = 20;
+    private static final int MAX_CHUNKS_PER_FRAME = 10;
     private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 4;
-    private static final long CHUNK_BUDGET_NS = 10_000_000L;
+    private static final long CHUNK_BUDGET_NS = 5_000_000L;
     private static final long FEATURE_BUDGET_NS = 3_000_000L;
     private static final int MAX_APPLIED_CHUNKS_PER_FRAME = 8;
     private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;

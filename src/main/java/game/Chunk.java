@@ -22,7 +22,7 @@ import java.nio.FloatBuffer;
 import java.util.*;
 
 public class Chunk {
-    public static final int SIZE = 30;
+    public static final int SIZE = 10;
     private static final float SKIRT_DEPTH = 24f;
     private static final float SKIRT_TOP_OFFSET = 0.02f;
     private static final float DEFAULT_TEXTURE_LOD_BIAS = 1f;
@@ -78,7 +78,7 @@ public class Chunk {
 
     private static final float DIRT_SLOPE_START = 0.65f;
     private static final float ROCK_SLOPE_START = 1.0f;
-    private static final int BLEND_STEPS = 4;
+    private static final int BLEND_STEPS = 8;
     private static final float BLEND_EDGE_START = 0.4f;
     private static final float BLEND_EDGE_END = 0.6f;
 
@@ -981,25 +981,39 @@ public class Chunk {
     }
 
     private int pickImpostorTexture(ImpostorEntry entry, Feature feature) {
-        int angleCount = entry.textureIds.length;
-        if (angleCount <= 1) {
-            return entry.textureIds[0];
-        }
-        float[] modelView = new float[16];
-        glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
-        float[] invView = MatrixUtils.invert(modelView);
+        int n = entry.textureIds.length;
+        if (n <= 1) return entry.textureIds[0];
+
+        float[] mv = new float[16];
+        glGetFloatv(GL_MODELVIEW_MATRIX, mv);
+
+        float[] invView = MatrixUtils.invert(mv);
+
+        // camera world position (assuming MatrixUtils + OpenGL column-major are consistent)
         float camX = invView[12];
         float camZ = invView[14];
+
         float dx = camX - feature.x;
         float dz = camZ - feature.z;
-        double angle = Math.atan2(dz, dx);
-        if (angle < 0) {
-            angle += Math.PI * 2.0;
-        }
-        double sector = (Math.PI * 2.0) / angleCount;
-        int index = (int) Math.floor((angle + sector * 0.5) / sector) % angleCount;
+
+        // 0 angle = +Z (matches most impostor sets)
+        // Negating dx fixes the left/right flip
+        double angle = Math.atan2(-dx, dz);
+        if (angle < 0) angle += Math.PI * 2.0;
+
+        double sector = (Math.PI * 2.0) / n;
+
+        int index = (int) Math.floor((angle + sector * 0.5) / sector) % n;
+
+        // ✅ YOUR TESTED OFFSET (0..7)
+        final int OFFSET = 0;
+
+        index = (index + OFFSET) % n;
+
         return entry.textureIds[index];
     }
+
+
 
     private void drawFeatureImpostorDepth(Feature feature) {
         ImpostorSize size = getActualImpostorSize(feature);
