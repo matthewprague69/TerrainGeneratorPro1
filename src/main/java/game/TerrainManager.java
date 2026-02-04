@@ -22,9 +22,9 @@ public class TerrainManager {
     private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
     private static final int MAX_RENDER_BUILDS_PER_FRAME = 2;
     private static final long RENDER_BUILD_BUDGET_NS = 3_000_000L;
-    private static final int LOD_NEAR_THRESHOLD = 10;
-    private static final int LOD_MID_THRESHOLD = 15;
-    private static final int LOD_FAR_THRESHOLD = 20;
+    private static final int LOD_NEAR_THRESHOLD = 16;
+    private static final int LOD_MID_THRESHOLD = 24;
+    private static final int LOD_FAR_THRESHOLD = 32;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -40,6 +40,7 @@ public class TerrainManager {
     private final ArrayDeque<Chunk> pendingRenderBuilds = new ArrayDeque<>();
     private final Set<Long> pendingRenderBuildKeys = new HashSet<>();
     private final Map<Long, Chunk> pendingChunkReplacements = new HashMap<>();
+    private final Map<Long, float[][][]> biomeWeightCache = new HashMap<>();
     private final ExecutorService chunkGenerator = Executors.newFixedThreadPool(2, r -> {
         Thread t = new Thread(r, "chunk-generator");
         t.setDaemon(true);
@@ -64,10 +65,12 @@ public class TerrainManager {
     private int cacheFeatureRenderDist;
     private int featureImpostorDistance;
     private int grassDetailDistance;
+    private int impostorAngleCount = 1;
     private boolean renderDistanceDirty = true;
     private int lastUpdateChunkX = Integer.MIN_VALUE;
     private int lastUpdateChunkZ = Integer.MIN_VALUE;
     private final long seed;
+    private static final int BIOME_WEIGHT_REGION_SIZE = 4;
 
     private final Map<String, Integer> textureMap = new HashMap<>();
     private final int snowTex;
@@ -265,13 +268,17 @@ public class TerrainManager {
     }
 
     private int computeTargetLod(int dist) {
+        int nearThreshold = Math.max(LOD_NEAR_THRESHOLD, featureRenderDist);
+        if (dist <= nearThreshold) {
+            return 0;
+        }
         if (dist > LOD_FAR_THRESHOLD) {
             return 3;
         }
         if (dist > LOD_MID_THRESHOLD) {
             return 2;
         }
-        if (dist > LOD_NEAR_THRESHOLD) {
+        if (dist > nearThreshold) {
             return 1;
         }
         return 0;
@@ -586,7 +593,7 @@ public class TerrainManager {
                 continue;
             }
             Chunk existing = chunks.get(key);
-            if (existing != null && data.lod >= existing.getLOD()) {
+            if (existing != null && data.lod == existing.getLOD()) {
                 continue;
             }
             Chunk built = new Chunk(data.cx, data.cz, terrainNoise, scale, data.biome, this, data.lod, data);
@@ -831,6 +838,49 @@ public class TerrainManager {
         return regionGenerator.getBiomeWeights(wx, wz);
     }
 
+    public float[][][] getBiomeWeightGridForChunk(int cx, int cz, int weightStep) {
+        int regionCx = Math.floorDiv(cx, BIOME_WEIGHT_REGION_SIZE) * BIOME_WEIGHT_REGION_SIZE;
+        int regionCz = Math.floorDiv(cz, BIOME_WEIGHT_REGION_SIZE) * BIOME_WEIGHT_REGION_SIZE;
+        long key = key(regionCx, regionCz);
+        float[][][] regionGrid = biomeWeightCache.get(key);
+        int regionCells = BIOME_WEIGHT_REGION_SIZE * Chunk.SIZE;
+        int gridSize = regionCells / weightStep + 1;
+        if (regionGrid == null || regionGrid.length != gridSize) {
+            Biome[] biomes = Biome.values();
+            int biomeCount = biomes.length;
+            regionGrid = new float[gridSize][gridSize][biomeCount];
+            for (int gx = 0; gx < gridSize; gx++) {
+                int lx = gx * weightStep;
+                double wx = (regionCx * Chunk.SIZE + lx) * scale;
+                for (int gz = 0; gz < gridSize; gz++) {
+                    int lz = gz * weightStep;
+                    double wz = (regionCz * Chunk.SIZE + lz) * scale;
+                    Map<Biome, Float> weights = regionGenerator.getBiomeWeights(wx, wz);
+                    for (int i = 0; i < biomeCount; i++) {
+                        Float value = weights.get(biomes[i]);
+                        regionGrid[gx][gz][i] = value == null ? 0f : value;
+                    }
+                }
+            }
+            biomeWeightCache.put(key, regionGrid);
+        }
+
+        int chunkSize = Chunk.SIZE;
+        int chunkGridSize = chunkSize / weightStep + 1;
+        float[][][] chunkGrid = new float[chunkGridSize][chunkGridSize][regionGrid[0][0].length];
+        int offsetX = (cx - regionCx) * Chunk.SIZE;
+        int offsetZ = (cz - regionCz) * Chunk.SIZE;
+        for (int gx = 0; gx < chunkGridSize; gx++) {
+            int regionX = (offsetX + gx * weightStep) / weightStep;
+            for (int gz = 0; gz < chunkGridSize; gz++) {
+                int regionZ = (offsetZ + gz * weightStep) / weightStep;
+                System.arraycopy(regionGrid[regionX][regionZ], 0, chunkGrid[gx][gz], 0,
+                        regionGrid[regionX][regionZ].length);
+            }
+        }
+        return chunkGrid;
+    }
+
     public Biome getDominantBiome(double wx, double wz) {
         return getBiomeWeights(wx, wz).entrySet().stream()
                 .max(Map.Entry.comparingByValue())
@@ -839,6 +889,14 @@ public class TerrainManager {
 
     public int getTexture(String name) {
         return textureMap.getOrDefault(name, 0);
+    }
+
+    public float[] getLightDirection() {
+        return skyRenderer.getLightDirection();
+    }
+
+    public float[] getLightColor() {
+        return skyRenderer.getLightColor();
     }
     public int getWaterBottomTexture() {
         return waterBottomTex;
@@ -887,6 +945,20 @@ public class TerrainManager {
 
     public int getFeatureImpostorDistance() {
         return featureImpostorDistance;
+    }
+
+    public void setImpostorAngleCount(int count) {
+        if (count >= 8) {
+            impostorAngleCount = 8;
+        } else if (count >= 4) {
+            impostorAngleCount = 4;
+        } else {
+            impostorAngleCount = 1;
+        }
+    }
+
+    public int getImpostorAngleCount() {
+        return impostorAngleCount;
     }
 
     public void setGrassDetailDistance(int r) {

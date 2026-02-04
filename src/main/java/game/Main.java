@@ -136,7 +136,7 @@ public class Main {
     private void drawMenuOverlay(int width, int height, double mouseX, double mouseY) {
         UIRenderer.begin2D(width, height);
         float panelWidth = 520f;
-        float panelHeight = 360f;
+        float panelHeight = 400f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
 
@@ -156,6 +156,9 @@ public class Main {
                 mouseX, mouseY);
         rowY -= 40;
         drawMenuRow("Impostor feature distance", terrain.getFeatureImpostorDistance(), panelX + 20, rowY,
+                mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRow("Impostor angles", terrain.getImpostorAngleCount(), panelX + 20, rowY,
                 mouseX, mouseY);
         rowY -= 40;
         drawMenuRow("Grass detail distance", terrain.getGrassDetailDistance(), panelX + 20, rowY,
@@ -205,7 +208,7 @@ public class Main {
 
     private void handleMenuClick(double mouseX, double mouseY, int width, int height) {
         float panelWidth = 520f;
-        float panelHeight = 360f;
+        float panelHeight = 400f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
         float rowY = panelY + panelHeight - 80;
@@ -226,7 +229,11 @@ public class Main {
             return;
         }
         rowY -= 40;
-        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 4);
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 4)) {
+            return;
+        }
+        rowY -= 40;
+        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 5);
     }
 
     private boolean handleRowClick(double mouseX, double mouseY, float x, float y, int rowIndex) {
@@ -256,14 +263,30 @@ public class Main {
                 terrain.setFeatureImpostorDistance(terrain.getFeatureImpostorDistance() + delta);
                 break;
             case 3:
-                terrain.setGrassDetailDistance(terrain.getGrassDetailDistance() + delta);
+                terrain.setImpostorAngleCount(adjustImpostorAngleCount(terrain.getImpostorAngleCount(), delta));
                 break;
             case 4:
+                terrain.setGrassDetailDistance(terrain.getGrassDetailDistance() + delta);
+                break;
+            case 5:
                 terrain.setShadowRenderDistance(terrain.getShadowRenderDistance() + delta);
                 break;
             default:
                 break;
         }
+    }
+
+    private int adjustImpostorAngleCount(int current, int delta) {
+        int[] options = new int[] { 1, 4, 8 };
+        int index = 0;
+        for (int i = 0; i < options.length; i++) {
+            if (options[i] == current) {
+                index = i;
+                break;
+            }
+        }
+        int next = Math.max(0, Math.min(options.length - 1, index + delta));
+        return options[next];
     }
 
     private void loop() {
