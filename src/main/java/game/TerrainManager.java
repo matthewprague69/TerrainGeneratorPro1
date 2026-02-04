@@ -14,17 +14,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class TerrainManager {
-    private static final int MAX_CHUNKS_PER_FRAME = 20;
+    private static final int MAX_CHUNKS_PER_FRAME = 10;
     private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 4;
-    private static final long CHUNK_BUDGET_NS = 10_000_000L;
+    private static final long CHUNK_BUDGET_NS = 5_000_000L;
     private static final long FEATURE_BUDGET_NS = 3_000_000L;
     private static final int MAX_APPLIED_CHUNKS_PER_FRAME = 8;
     private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
     private static final int MAX_RENDER_BUILDS_PER_FRAME = 2;
     private static final long RENDER_BUILD_BUDGET_NS = 3_000_000L;
-    private static final int LOD_NEAR_THRESHOLD = 10;
-    private static final int LOD_MID_THRESHOLD = 15;
-    private static final int LOD_FAR_THRESHOLD = 20;
+    private static final int LOD_NEAR_THRESHOLD = 16;
+    private static final int LOD_MID_THRESHOLD = 24;
+    private static final int LOD_FAR_THRESHOLD = 32;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -64,6 +64,7 @@ public class TerrainManager {
     private int cacheFeatureRenderDist;
     private int featureImpostorDistance;
     private int grassDetailDistance;
+    private int impostorAngleCount = 1;
     private boolean renderDistanceDirty = true;
     private int lastUpdateChunkX = Integer.MIN_VALUE;
     private int lastUpdateChunkZ = Integer.MIN_VALUE;
@@ -265,13 +266,17 @@ public class TerrainManager {
     }
 
     private int computeTargetLod(int dist) {
+        int nearThreshold = Math.max(LOD_NEAR_THRESHOLD, featureRenderDist);
+        if (dist <= nearThreshold) {
+            return 0;
+        }
         if (dist > LOD_FAR_THRESHOLD) {
             return 3;
         }
         if (dist > LOD_MID_THRESHOLD) {
             return 2;
         }
-        if (dist > LOD_NEAR_THRESHOLD) {
+        if (dist > nearThreshold) {
             return 1;
         }
         return 0;
@@ -840,6 +845,14 @@ public class TerrainManager {
     public int getTexture(String name) {
         return textureMap.getOrDefault(name, 0);
     }
+
+    public float[] getLightDirection() {
+        return skyRenderer.getLightDirection();
+    }
+
+    public float[] getLightColor() {
+        return skyRenderer.getLightColor();
+    }
     public int getWaterBottomTexture() {
         return waterBottomTex;
     }
@@ -887,6 +900,20 @@ public class TerrainManager {
 
     public int getFeatureImpostorDistance() {
         return featureImpostorDistance;
+    }
+
+    public void setImpostorAngleCount(int count) {
+        if (count >= 8) {
+            impostorAngleCount = 8;
+        } else if (count >= 4) {
+            impostorAngleCount = 4;
+        } else {
+            impostorAngleCount = 1;
+        }
+    }
+
+    public int getImpostorAngleCount() {
+        return impostorAngleCount;
     }
 
     public void setGrassDetailDistance(int r) {
