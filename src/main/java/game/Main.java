@@ -40,6 +40,7 @@ public class Main {
             { 3840, 2160 }
     };
     private int resolutionIndex = 2;
+    private boolean vsyncEnabled = false;
     private boolean menuOpen = false;
     private boolean prevMouseDown = false;
 
@@ -55,8 +56,8 @@ public class Main {
             throw new RuntimeException("Failed to create window");
 
         glfwMakeContextCurrent(window);
-        glfwSwapInterval(1);
         GL.createCapabilities();
+        applyVSync();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer w = stack.mallocInt(1), h = stack.mallocInt(1);
@@ -112,6 +113,10 @@ public class Main {
                 0, 0, -(2 * near * far) / (far - near), 0
         }).flip();
         glLoadMatrixf(proj);
+    }
+
+    private void applyVSync() {
+        glfwSwapInterval(vsyncEnabled ? 1 : 0);
     }
 
     private void toggleFullscreen() {
@@ -171,6 +176,10 @@ public class Main {
         }
     }
 
+    private String getVsyncLabel() {
+        return vsyncEnabled ? "ON" : "OFF";
+    }
+
     private String getResolutionLabel() {
         int[] resolution = RESOLUTION_OPTIONS[resolutionIndex];
         int w = resolution[0];
@@ -214,7 +223,7 @@ public class Main {
     private void drawMenuOverlay(int width, int height, double mouseX, double mouseY) {
         UIRenderer.begin2D(width, height);
         float panelWidth = 520f;
-        float panelHeight = 500f;
+        float panelHeight = 540f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
 
@@ -248,6 +257,8 @@ public class Main {
         drawMenuRowText("Fullscreen", fullscreen ? "ON" : "OFF", panelX + 20, rowY, mouseX, mouseY);
         rowY -= 40;
         drawMenuRowText("Resolution", getResolutionLabel(), panelX + 20, rowY, mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("VSync", getVsyncLabel(), panelX + 20, rowY, mouseX, mouseY);
 
         PixelTextRenderer.drawText("Time: " + String.format("%.2f", sky.getTimeOfDay()),
                 panelX + 20, panelY + 30, 1.0f);
@@ -300,7 +311,7 @@ public class Main {
 
     private void handleMenuClick(double mouseX, double mouseY, int width, int height) {
         float panelWidth = 520f;
-        float panelHeight = 500f;
+        float panelHeight = 540f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
         float rowY = panelY + panelHeight - 80;
@@ -333,7 +344,11 @@ public class Main {
             return;
         }
         rowY -= 40;
-        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 7);
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 7)) {
+            return;
+        }
+        rowY -= 40;
+        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 8);
     }
 
     private boolean handleRowClick(double mouseX, double mouseY, float x, float y, int rowIndex) {
@@ -376,6 +391,10 @@ public class Main {
                 break;
             case 7:
                 changeResolution(delta);
+                break;
+            case 8:
+                vsyncEnabled = !vsyncEnabled;
+                applyVSync();
                 break;
             default:
                 break;
