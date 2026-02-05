@@ -269,6 +269,7 @@ public class Chunk {
                 float w11 = tx * tz;
 
                 double blendedHeight = 0;
+                double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
 
                 for (int i = 0; i < biomeCount; i++) {
                     double weight =
@@ -293,7 +294,6 @@ public class Chunk {
                         amp *= PERSISTENCE;
                     }
 
-                    double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
                     double biomeHeight = entryBiome.baseHeight + sum + elevationOffset;
                     blendedHeight += biomeHeight * weight;
                 }
@@ -360,6 +360,7 @@ public class Chunk {
                 float w01 = sx * tz;
                 float w11 = tx * tz;
                 double blendedHeight = 0;
+                double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
 
                 for (int i = 0; i < biomeCount; i++) {
                     double weight =
@@ -384,8 +385,6 @@ public class Chunk {
                         freq *= 1.7;
                         amp *= PERSISTENCE;
                     }
-
-                    double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
 
                     // Biome shaping: baseHeight is now the dominant vertical shift
                     double biomeHeight = biome.baseHeight + sum + elevationOffset;
