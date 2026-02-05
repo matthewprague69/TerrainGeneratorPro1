@@ -420,22 +420,50 @@ public class TerrainManager {
             return 0;
         };
 
-        List<Long> priorityKeys = new ArrayList<>();
+        List<Long> nearVisible = new ArrayList<>();
+        List<Long> nearHidden = new ArrayList<>();
+        List<Long> farVisible = new ArrayList<>();
+        List<Long> farHidden = new ArrayList<>();
+
         for (long key : pendingChunks) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
             int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            boolean visible = frustum == null || isChunkVisible(frustum, cx, cz);
             if (dist <= LOD_PRIORITY_RADIUS) {
-                priorityKeys.add(key);
+                if (visible) {
+                    nearVisible.add(key);
+                } else {
+                    nearHidden.add(key);
+                }
+            } else {
+                if (visible) {
+                    farVisible.add(key);
+                } else {
+                    farHidden.add(key);
+                }
             }
         }
-        priorityKeys.sort(priorityComparator);
-        Set<Long> prioritySet = new HashSet<>(priorityKeys);
+
+        nearVisible.sort(priorityComparator);
+        nearHidden.sort(priorityComparator);
+        farVisible.sort(priorityComparator);
+        farHidden.sort(priorityComparator);
 
         int processed = 0;
-        int priorityBudget = Math.min(budget, Math.max(LOD_PRIORITY_MIN_BUDGET, budget / 2));
-        for (long key : priorityKeys) {
-            if (processed >= priorityBudget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+        int nearBudget = Math.min(budget, Math.max(LOD_PRIORITY_MIN_BUDGET, budget / 2));
+
+        for (long key : nearVisible) {
+            if (processed >= nearBudget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                break;
+            }
+            if (tryDispatchChunkGeneration(key, true)) {
+                processed++;
+            }
+        }
+
+        for (long key : nearHidden) {
+            if (processed >= nearBudget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
                 break;
             }
             if (tryDispatchChunkGeneration(key, true)) {
@@ -447,35 +475,20 @@ public class TerrainManager {
             return;
         }
 
-        List<Long> candidates = new ArrayList<>();
-        if (frustum == null) {
-            for (long key : pendingChunks) {
-                if (!prioritySet.contains(key)) {
-                    candidates.add(key);
-                }
+        for (long key : farVisible) {
+            if (processed >= budget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                break;
             }
-        } else {
-            for (long key : pendingChunks) {
-                if (prioritySet.contains(key)) {
-                    continue;
-                }
-                int cx = (int) (key >> 32);
-                int cz = (int) key;
-                if (isChunkVisible(frustum, cx, cz)) {
-                    candidates.add(key);
-                }
-            }
-            if (candidates.isEmpty()) {
-                for (long key : pendingChunks) {
-                    if (!prioritySet.contains(key)) {
-                        candidates.add(key);
-                    }
-                }
+            if (tryDispatchChunkGeneration(key, false)) {
+                processed++;
             }
         }
 
-        candidates.sort(priorityComparator);
-        for (long key : candidates) {
+        if (processed >= budget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+            return;
+        }
+
+        for (long key : farHidden) {
             if (processed >= budget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
                 break;
             }
