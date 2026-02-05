@@ -875,16 +875,35 @@ public class TerrainManager {
         }
 
         int chunkSize = Chunk.SIZE;
-        int chunkGridSize = chunkSize / weightStep + 1;
+        int chunkGridSize = (chunkSize + weightStep - 1) / weightStep + 1;
         float[][][] chunkGrid = new float[chunkGridSize][chunkGridSize][regionGrid[0][0].length];
         int offsetX = (cx - regionCx) * Chunk.SIZE;
         int offsetZ = (cz - regionCz) * Chunk.SIZE;
         for (int gx = 0; gx < chunkGridSize; gx++) {
-            int regionX = (offsetX + gx * weightStep) / weightStep;
+            int chunkLx = Math.min(gx * weightStep, chunkSize);
+            int worldLx = offsetX + chunkLx;
+            int regionX = worldLx / weightStep;
+            boolean sampleXOnGrid = (worldLx % weightStep) == 0;
             for (int gz = 0; gz < chunkGridSize; gz++) {
-                int regionZ = (offsetZ + gz * weightStep) / weightStep;
-                System.arraycopy(regionGrid[regionX][regionZ], 0, chunkGrid[gx][gz], 0,
-                        regionGrid[regionX][regionZ].length);
+                int chunkLz = Math.min(gz * weightStep, chunkSize);
+                int worldLz = offsetZ + chunkLz;
+                int regionZ = worldLz / weightStep;
+                boolean sampleZOnGrid = (worldLz % weightStep) == 0;
+                if (sampleXOnGrid && sampleZOnGrid
+                        && regionX >= 0 && regionX < regionGrid.length
+                        && regionZ >= 0 && regionZ < regionGrid[regionX].length) {
+                    System.arraycopy(regionGrid[regionX][regionZ], 0, chunkGrid[gx][gz], 0,
+                            regionGrid[regionX][regionZ].length);
+                } else {
+                    double wx = (cx * Chunk.SIZE + chunkLx) * scale;
+                    double wz = (cz * Chunk.SIZE + chunkLz) * scale;
+                    Map<Biome, Float> weights = regionGenerator.getBiomeWeights(wx, wz);
+                    Biome[] biomes = Biome.values();
+                    for (int i = 0; i < biomes.length; i++) {
+                        Float value = weights.get(biomes[i]);
+                        chunkGrid[gx][gz][i] = value == null ? 0f : value;
+                    }
+                }
             }
         }
         return chunkGrid;
