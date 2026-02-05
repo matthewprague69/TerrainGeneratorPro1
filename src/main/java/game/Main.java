@@ -534,7 +534,13 @@ public class Main {
             if (!menuOpen) {
                 player.update(window, dt);
             }
+
+            setupProjection();
+            glMatrixMode(GL_MODELVIEW);
+            glLoadIdentity();
+            player.applyView();
             Frustum frustum = Frustum.fromOpenGL();
+
             terrain.update(player.getX(), player.getZ(), frustum);
             sky.update(dt);
 
