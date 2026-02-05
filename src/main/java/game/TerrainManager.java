@@ -25,6 +25,8 @@ public class TerrainManager {
     private static final int LOD_NEAR_THRESHOLD = 16;
     private static final int LOD_MID_THRESHOLD = 24;
     private static final int LOD_FAR_THRESHOLD = 32;
+    private static final int LOD_PRIORITY_RADIUS = 2;
+    private static final int LOD_PRIORITY_MIN_BUDGET = 6;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -295,21 +297,17 @@ public class TerrainManager {
     private void queueChunkGeneration(long key, int cx, int cz, int targetLOD, int dist) {
         Integer existing = pendingChunkLods.get(key);
         if (existing != null) {
-            pendingChunkLods.put(key, Math.min(existing, targetLOD));
-            if (dist == 0) {
-                pendingChunks.remove(key);
+            pendingChunkLods.put(key, targetLOD);
+            pendingChunks.remove(key);
+            if (dist <= LOD_PRIORITY_RADIUS) {
                 pendingChunks.addFirst(key);
-            } else if (!pendingChunks.contains(key)) {
-                if (dist <= 2) {
-                    pendingChunks.addFirst(key);
-                } else {
-                    pendingChunks.addLast(key);
-                }
+            } else {
+                pendingChunks.addLast(key);
             }
             return;
         }
         pendingChunkLods.put(key, targetLOD);
-        if (dist <= 2) {
+        if (dist <= LOD_PRIORITY_RADIUS) {
             pendingChunks.addFirst(key);
         } else {
             pendingChunks.addLast(key);
@@ -399,128 +397,126 @@ public class TerrainManager {
         int backlog = pendingChunks.size();
         int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
         long start = System.nanoTime();
-        if (frustum == null) {
-            processPendingChunkGenerationsWithoutFrustum(budget, start);
-            return;
-        }
-        List<Long> visibleKeys = new ArrayList<>();
-        for (long key : pendingChunks) {
-            int cx = (int) (key >> 32);
-            int cz = (int) key;
-            if (isChunkVisible(frustum, cx, cz)) {
-                visibleKeys.add(key);
-            }
-        }
-        if (visibleKeys.isEmpty()) {
-            processPendingChunkGenerationsWithoutFrustum(budget, start);
-            return;
-        }
-        List<Long> upgradeKeys = new ArrayList<>();
-        List<Long> newKeys = new ArrayList<>();
-        for (long key : visibleKeys) {
-            Integer pendingLod = pendingChunkLods.get(key);
-            Chunk existing = chunks.get(key);
-            if (pendingLod != null && existing != null && pendingLod < existing.getLOD()) {
-                upgradeKeys.add(key);
-            } else {
-                newKeys.add(key);
-            }
-        }
-        Comparator<Long> distanceComparator = (a, b) -> {
+
+        Comparator<Long> priorityComparator = (a, b) -> {
             int cxA = (int) (a >> 32);
             int czA = (int) (long) a;
             int cxB = (int) (b >> 32);
             int czB = (int) (long) b;
             int distA = Math.max(Math.abs(cxA - pcx), Math.abs(czA - pcz));
             int distB = Math.max(Math.abs(cxB - pcx), Math.abs(czB - pcz));
-            return Integer.compare(distA, distB);
+            if (distA != distB) {
+                return Integer.compare(distA, distB);
+            }
+            Chunk existingA = chunks.get(a);
+            Chunk existingB = chunks.get(b);
+            Integer pendingA = pendingChunkLods.get(a);
+            Integer pendingB = pendingChunkLods.get(b);
+            boolean upgradeA = existingA != null && pendingA != null && pendingA < existingA.getLOD();
+            boolean upgradeB = existingB != null && pendingB != null && pendingB < existingB.getLOD();
+            if (upgradeA != upgradeB) {
+                return upgradeA ? -1 : 1;
+            }
+            return 0;
         };
-        upgradeKeys.sort(distanceComparator);
-        newKeys.sort(distanceComparator);
-        visibleKeys = new ArrayList<>(Math.min(budget, visibleKeys.size()));
-        for (long key : upgradeKeys) {
-            if (visibleKeys.size() >= budget) {
-                break;
-            }
-            visibleKeys.add(key);
-        }
-        for (long key : newKeys) {
-            if (visibleKeys.size() >= budget) {
-                break;
-            }
-            visibleKeys.add(key);
-        }
-        pendingChunks.removeAll(new HashSet<>(visibleKeys));
-        int count = 0;
-        for (long key : visibleKeys) {
-            if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
-                pendingChunks.addFirst(key);
-                continue;
-            }
-            Integer pendingLod = pendingChunkLods.remove(key);
-            if (pendingLod == null) {
-                continue;
-            }
-            if (inflightChunkKeys.contains(key)) {
-                pendingChunkLods.put(key, pendingLod);
-                pendingChunks.addFirst(key);
-                continue;
-            }
+
+        List<Long> priorityKeys = new ArrayList<>();
+        for (long key : pendingChunks) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            int targetLOD = pendingLod;
-            Biome b = pickBiome(cx, cz);
-            Chunk existing = chunks.get(key);
-            if (existing != null && targetLOD >= existing.getLOD()) {
-                continue;
+            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            if (dist <= LOD_PRIORITY_RADIUS) {
+                priorityKeys.add(key);
             }
-            inflightChunkKeys.add(key);
-            chunkGenerator.submit(() -> {
-                Chunk.ChunkBuildData data =
-                        Chunk.generateChunkData(cx, cz, terrainNoise, scale, b, this, targetLOD);
-                completedChunkBuilds.add(data);
-            });
-            count++;
-            if (count >= budget) {
+        }
+        priorityKeys.sort(priorityComparator);
+        Set<Long> prioritySet = new HashSet<>(priorityKeys);
+
+        int processed = 0;
+        int priorityBudget = Math.min(budget, Math.max(LOD_PRIORITY_MIN_BUDGET, budget / 2));
+        for (long key : priorityKeys) {
+            if (processed >= priorityBudget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
                 break;
+            }
+            if (tryDispatchChunkGeneration(key, true)) {
+                processed++;
+            }
+        }
+
+        if (processed >= budget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+            return;
+        }
+
+        List<Long> candidates = new ArrayList<>();
+        if (frustum == null) {
+            for (long key : pendingChunks) {
+                if (!prioritySet.contains(key)) {
+                    candidates.add(key);
+                }
+            }
+        } else {
+            for (long key : pendingChunks) {
+                if (prioritySet.contains(key)) {
+                    continue;
+                }
+                int cx = (int) (key >> 32);
+                int cz = (int) key;
+                if (isChunkVisible(frustum, cx, cz)) {
+                    candidates.add(key);
+                }
+            }
+            if (candidates.isEmpty()) {
+                for (long key : pendingChunks) {
+                    if (!prioritySet.contains(key)) {
+                        candidates.add(key);
+                    }
+                }
+            }
+        }
+
+        candidates.sort(priorityComparator);
+        for (long key : candidates) {
+            if (processed >= budget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                break;
+            }
+            if (tryDispatchChunkGeneration(key, false)) {
+                processed++;
             }
         }
     }
 
-    private void processPendingChunkGenerationsWithoutFrustum(int budget, long start) {
-        int count = 0;
-        while (count < budget && !pendingChunks.isEmpty()) {
-            if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
-                break;
-            }
-            long key = pendingChunks.pollFirst();
-            Integer pendingLod = pendingChunkLods.remove(key);
-            if (pendingLod == null) {
-                continue;
-            }
-            if (inflightChunkKeys.contains(key)) {
-                pendingChunkLods.put(key, pendingLod);
-                if (!pendingChunks.contains(key)) {
-                    pendingChunks.addFirst(key);
-                }
-                continue;
-            }
-            int cx = (int) (key >> 32);
-            int cz = (int) key;
-            int targetLOD = pendingLod;
-            Biome b = pickBiome(cx, cz);
-            Chunk existing = chunks.get(key);
-            if (existing != null && targetLOD >= existing.getLOD()) {
-                continue;
-            }
-            inflightChunkKeys.add(key);
-            chunkGenerator.submit(() -> {
-                Chunk.ChunkBuildData data =
-                        Chunk.generateChunkData(cx, cz, terrainNoise, scale, b, this, targetLOD);
-                completedChunkBuilds.add(data);
-            });
-            count++;
+    private boolean tryDispatchChunkGeneration(long key, boolean prioritizeRequeue) {
+        if (!pendingChunks.remove(key)) {
+            return false;
         }
+        Integer pendingLod = pendingChunkLods.remove(key);
+        if (pendingLod == null) {
+            return false;
+        }
+        if (inflightChunkKeys.contains(key)) {
+            pendingChunkLods.put(key, pendingLod);
+            if (prioritizeRequeue) {
+                pendingChunks.addFirst(key);
+            } else {
+                pendingChunks.addLast(key);
+            }
+            return false;
+        }
+        int cx = (int) (key >> 32);
+        int cz = (int) key;
+        Chunk existing = chunks.get(key);
+        if (existing != null && pendingLod >= existing.getLOD()) {
+            return false;
+        }
+        Biome b = pickBiome(cx, cz);
+        int targetLOD = pendingLod;
+        inflightChunkKeys.add(key);
+        chunkGenerator.submit(() -> {
+            Chunk.ChunkBuildData data =
+                    Chunk.generateChunkData(cx, cz, terrainNoise, scale, b, this, targetLOD);
+            completedChunkBuilds.add(data);
+        });
+        return true;
     }
 
     private void queueFeatureGeneration(Chunk chunk, int pcx, int pcz) {
