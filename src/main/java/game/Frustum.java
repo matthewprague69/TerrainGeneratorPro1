@@ -57,12 +57,21 @@ public class Frustum {
     }
 
     public boolean isBoxVisible(float minX, float minY, float minZ, float maxX, float maxY, float maxZ) {
+        final float epsilon = 0.05f;
         for (int i = 0; i < 6; i++) {
             float[] p = planes[i];
-            if (p[0] * ((p[0] < 0) ? minX : maxX) +
-                    p[1] * ((p[1] < 0) ? minY : maxY) +
-                    p[2] * ((p[2] < 0) ? minZ : maxZ) +
-                    p[3] <= 0) {
+            int outside = 0;
+
+            outside += p[0] * minX + p[1] * minY + p[2] * minZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * maxX + p[1] * minY + p[2] * minZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * minX + p[1] * maxY + p[2] * minZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * maxX + p[1] * maxY + p[2] * minZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * minX + p[1] * minY + p[2] * maxZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * maxX + p[1] * minY + p[2] * maxZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * minX + p[1] * maxY + p[2] * maxZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * maxX + p[1] * maxY + p[2] * maxZ + p[3] <= -epsilon ? 1 : 0;
+
+            if (outside == 8) {
                 return false;
             }
         }
