@@ -397,6 +397,9 @@ public class TerrainManager {
         if (frustum == null) {
             return;
         }
+
+        seedVisibleLodMismatches(pcx, pcz, frustum);
+
         int backlog = pendingChunks.size();
         int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
         long start = System.nanoTime();
@@ -465,6 +468,22 @@ public class TerrainManager {
             }
             if (tryDispatchChunkGeneration(key, false)) {
                 processed++;
+            }
+        }
+    }
+
+    private void seedVisibleLodMismatches(int pcx, int pcz, Frustum frustum) {
+        for (long key : neededKeys) {
+            int cx = (int) (key >> 32);
+            int cz = (int) key;
+            if (!isChunkVisible(frustum, cx, cz)) {
+                continue;
+            }
+            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            int targetLOD = computeTargetLod(dist);
+            Chunk existing = chunks.get(key);
+            if (existing == null || existing.getLOD() != targetLOD) {
+                queueChunkGeneration(key, cx, cz, targetLOD, dist);
             }
         }
     }
