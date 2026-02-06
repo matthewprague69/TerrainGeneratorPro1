@@ -522,9 +522,10 @@ public class Chunk {
             return;
         }
 
-        FeatureLod lod = getFeatureLod(chunkDistance, featureImpostorDistance, featureRenderDist);
         // Draw features if they are above water
         for (Feature f : features) {
+            FeatureLod lod = getFeatureLodForFeature(f, chunkDistance, featureImpostorDistance,
+                    featureRenderDist, grassDetailDistance);
             if (lod == FeatureLod.FULL && (f instanceof Grass || f instanceof ColorBatchableFeature)) {
                 continue;
             }
@@ -859,8 +860,9 @@ public class Chunk {
             return;
         }
 
-        FeatureLod lod = getFeatureLod(chunkDistance, featureImpostorDistance, featureRenderDist);
         for (Feature f : features) {
+            FeatureLod lod = getFeatureLodForFeature(f, chunkDistance, featureImpostorDistance,
+                    featureRenderDist, grassDetailDistance);
             if (lod == FeatureLod.FULL && (f instanceof Grass || f instanceof ColorBatchableFeature)) {
                 continue;
             }
@@ -873,12 +875,16 @@ public class Chunk {
         }
     }
 
-    private FeatureLod getFeatureLod(int chunkDistance, int impostorDistance,
-                                     int cullDistance) {
+    private FeatureLod getFeatureLodForFeature(Feature feature, int chunkDistance, int impostorDistance,
+                                               int cullDistance, int detailDistance) {
         if (chunkDistance > cullDistance) {
             return FeatureLod.CULLED;
         }
-        if (chunkDistance > impostorDistance) {
+        int impostorStart = impostorDistance;
+        if (feature instanceof Grass || feature instanceof ColorBatchableFeature) {
+            impostorStart = detailDistance;
+        }
+        if (chunkDistance >= impostorStart) {
             return FeatureLod.IMPOSTOR;
         }
         return FeatureLod.FULL;
