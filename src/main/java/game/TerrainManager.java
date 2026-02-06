@@ -1025,9 +1025,9 @@ public class TerrainManager {
         boolean highQuality = chunkDistance <= impostorHighQualityDistance;
         switch (impostorQualityPreset) {
             case 2:
-                return highQuality ? 256 : 128;
+                return highQuality ? 512 : 256;
             case 1:
-                return highQuality ? 192 : 96;
+                return highQuality ? 256 : 128;
             default:
                 return highQuality ? 128 : 64;
         }
