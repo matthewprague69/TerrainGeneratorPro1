@@ -208,24 +208,37 @@ public class TerrainManager {
             return;
         }
 
+        int expectedKeyCount = (renderDist * 2 + 1) * (renderDist * 2 + 1);
+        if (neededKeys.size() != expectedKeyCount) {
+            rebuildNeededChunks(pcx, pcz);
+            refreshChunkLods(pcx, pcz);
+            return;
+        }
+
         int dx = pcx - prevChunkX;
         int dz = pcz - prevChunkZ;
         if (dx != 0) {
-            int newCol = pcx + renderDist * Integer.signum(dx);
-            int oldCol = pcx - renderDist - Integer.signum(dx);
+            int sign = Integer.signum(dx);
+            int newCol = pcx + renderDist * sign;
+            int oldCol = prevChunkX - renderDist * sign;
             for (int offset = -renderDist; offset <= renderDist; offset++) {
                 addNeededChunk(newCol, pcz + offset, pcx, pcz);
-                removeNeededChunk(oldCol, pcz + offset);
+                removeNeededChunk(oldCol, prevChunkZ + offset);
             }
         }
 
         if (dz != 0) {
-            int newRow = pcz + renderDist * Integer.signum(dz);
-            int oldRow = pcz - renderDist - Integer.signum(dz);
+            int sign = Integer.signum(dz);
+            int newRow = pcz + renderDist * sign;
+            int oldRow = prevChunkZ - renderDist * sign;
             for (int offset = -renderDist; offset <= renderDist; offset++) {
                 addNeededChunk(pcx + offset, newRow, pcx, pcz);
-                removeNeededChunk(pcx + offset, oldRow);
+                removeNeededChunk(prevChunkX + offset, oldRow);
             }
+        }
+
+        if (neededKeys.size() != expectedKeyCount) {
+            rebuildNeededChunks(pcx, pcz);
         }
 
         refreshChunkLods(pcx, pcz);
