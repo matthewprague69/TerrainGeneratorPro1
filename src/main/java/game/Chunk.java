@@ -936,15 +936,15 @@ public class Chunk {
         glDisable(GL_LIGHTING);
         glDisable(GL_CULL_FACE);
         glColor4f(1f, 1f, 1f, 1f);
-        if (feature instanceof Tree) {
-            glDisable(GL_BLEND);
-            glEnable(GL_ALPHA_TEST);
-            glAlphaFunc(GL_GREATER, 0.5f);
-        } else {
+        if (feature instanceof Lake) {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glEnable(GL_ALPHA_TEST);
             glAlphaFunc(GL_GREATER, 0.05f);
+        } else {
+            glDisable(GL_BLEND);
+            glEnable(GL_ALPHA_TEST);
+            glAlphaFunc(GL_GREATER, 0.45f);
         }
         glBindTexture(GL_TEXTURE_2D, texture);
         glBegin(GL_QUADS);

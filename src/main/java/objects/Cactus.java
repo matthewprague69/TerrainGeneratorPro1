@@ -47,10 +47,14 @@ public class Cactus extends Feature {
         }
         this.maxHeight = maxSegmentHeight;
         float maxSegmentRadius = 0f;
+        float maxLeanExtent = 0f;
         for (Segment segment : segments) {
             maxSegmentRadius = Math.max(maxSegmentRadius, segment.radius);
+            if (segment.angle != 0f) {
+                maxLeanExtent = Math.max(maxLeanExtent, segment.height * 0.70710677f);
+            }
         }
-        this.maxRadius = maxSegmentRadius;
+        this.maxRadius = maxSegmentRadius + maxLeanExtent;
     }
 
     @Override
