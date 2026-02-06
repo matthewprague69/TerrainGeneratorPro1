@@ -223,7 +223,7 @@ public class Main {
     private void drawMenuOverlay(int width, int height, double mouseX, double mouseY) {
         UIRenderer.begin2D(width, height);
         float panelWidth = 520f;
-        float panelHeight = 540f;
+        float panelHeight = 620f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
 
@@ -246,6 +246,12 @@ public class Main {
                 mouseX, mouseY);
         rowY -= 40;
         drawMenuRow("Impostor angles", terrain.getImpostorAngleCount(), panelX + 20, rowY,
+                mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("Impostor quality", getImpostorQualityLabel(), panelX + 20, rowY,
+                mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRow("HQ impostor distance", terrain.getImpostorHighQualityDistance(), panelX + 20, rowY,
                 mouseX, mouseY);
         rowY -= 40;
         drawMenuRow("Grass detail distance", terrain.getGrassDetailDistance(), panelX + 20, rowY,
@@ -311,7 +317,7 @@ public class Main {
 
     private void handleMenuClick(double mouseX, double mouseY, int width, int height) {
         float panelWidth = 520f;
-        float panelHeight = 540f;
+        float panelHeight = 620f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
         float rowY = panelY + panelHeight - 80;
@@ -348,7 +354,15 @@ public class Main {
             return;
         }
         rowY -= 40;
-        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 8);
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 8)) {
+            return;
+        }
+        rowY -= 40;
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 9)) {
+            return;
+        }
+        rowY -= 40;
+        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 10);
     }
 
     private boolean handleRowClick(double mouseX, double mouseY, float x, float y, int rowIndex) {
@@ -381,18 +395,24 @@ public class Main {
                 terrain.setImpostorAngleCount(adjustImpostorAngleCount(terrain.getImpostorAngleCount(), delta));
                 break;
             case 4:
-                terrain.setGrassDetailDistance(terrain.getGrassDetailDistance() + delta);
+                terrain.setImpostorQualityPreset(adjustImpostorQualityPreset(terrain.getImpostorQualityPreset(), delta));
                 break;
             case 5:
-                terrain.setShadowRenderDistance(terrain.getShadowRenderDistance() + delta);
+                terrain.setImpostorHighQualityDistance(terrain.getImpostorHighQualityDistance() + delta);
                 break;
             case 6:
-                toggleFullscreen();
+                terrain.setGrassDetailDistance(terrain.getGrassDetailDistance() + delta);
                 break;
             case 7:
-                changeResolution(delta);
+                terrain.setShadowRenderDistance(terrain.getShadowRenderDistance() + delta);
                 break;
             case 8:
+                toggleFullscreen();
+                break;
+            case 9:
+                changeResolution(delta);
+                break;
+            case 10:
                 vsyncEnabled = !vsyncEnabled;
                 applyVSync();
                 break;
@@ -412,6 +432,21 @@ public class Main {
         }
         int next = Math.max(0, Math.min(options.length - 1, index + delta));
         return options[next];
+    }
+
+    private int adjustImpostorQualityPreset(int current, int delta) {
+        return Math.max(0, Math.min(2, current + delta));
+    }
+
+    private String getImpostorQualityLabel() {
+        switch (terrain.getImpostorQualityPreset()) {
+            case 2:
+                return "High";
+            case 1:
+                return "Medium";
+            default:
+                return "Low";
+        }
     }
 
     private void loop() {

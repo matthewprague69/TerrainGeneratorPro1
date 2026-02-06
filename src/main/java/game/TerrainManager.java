@@ -68,6 +68,8 @@ public class TerrainManager {
     private int featureImpostorDistance;
     private int grassDetailDistance;
     private int impostorAngleCount = 1;
+    private int impostorQualityPreset = 1;
+    private int impostorHighQualityDistance = 10;
     private boolean renderDistanceDirty = true;
     private int lastUpdateChunkX = Integer.MIN_VALUE;
     private int lastUpdateChunkZ = Integer.MIN_VALUE;
@@ -94,6 +96,7 @@ public class TerrainManager {
         this.cacheFeatureRenderDist = featureRenderDist + 4;
         this.featureImpostorDistance = Math.max(1, featureRenderDist);
         this.grassDetailDistance = Math.max(1, featureRenderDist - 2);
+        this.impostorHighQualityDistance = Math.min(10, this.featureRenderDist);
         this.regionGenerator = new BiomeRegionGenerator(seed);
 
 
@@ -972,6 +975,7 @@ public class TerrainManager {
         shadowRenderDist = Math.max(shadowRenderDist, renderDist + 12);
         featureImpostorDistance = Math.min(featureImpostorDistance, featureRenderDist);
         grassDetailDistance = Math.min(grassDetailDistance, featureRenderDist);
+        impostorHighQualityDistance = Math.min(impostorHighQualityDistance, featureRenderDist);
         renderDistanceDirty = true;
     }
 
@@ -999,6 +1003,34 @@ public class TerrainManager {
 
     public int getImpostorAngleCount() {
         return impostorAngleCount;
+    }
+
+    public void setImpostorQualityPreset(int preset) {
+        impostorQualityPreset = Math.max(0, Math.min(2, preset));
+    }
+
+    public int getImpostorQualityPreset() {
+        return impostorQualityPreset;
+    }
+
+    public void setImpostorHighQualityDistance(int distance) {
+        impostorHighQualityDistance = Math.max(0, Math.min(distance, featureRenderDist));
+    }
+
+    public int getImpostorHighQualityDistance() {
+        return impostorHighQualityDistance;
+    }
+
+    public int getImpostorTextureSize(int chunkDistance) {
+        boolean highQuality = chunkDistance <= impostorHighQualityDistance;
+        switch (impostorQualityPreset) {
+            case 2:
+                return highQuality ? 256 : 128;
+            case 1:
+                return highQuality ? 192 : 96;
+            default:
+                return highQuality ? 128 : 64;
+        }
     }
 
     public void setGrassDetailDistance(int r) {

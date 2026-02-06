@@ -26,7 +26,6 @@ public class Chunk {
     private static final float SKIRT_DEPTH = 24f;
     private static final float SKIRT_TOP_OFFSET = 0.02f;
     private static final float DEFAULT_TEXTURE_LOD_BIAS = 1f;
-    private static final int IMPOSTOR_TEXTURE_SIZE = 128;
     private static final float IMPOSTOR_PADDING = 1.05f;
     private static final class ImpostorSize {
         private final float width;
@@ -531,7 +530,7 @@ public class Chunk {
                 continue;
             }
             if (f.y >= WATER_LEVEL) {
-                drawFeatureForLod(f, lod);
+                drawFeatureForLod(f, lod, chunkDistance);
             }
         }
     }
@@ -893,9 +892,9 @@ public class Chunk {
         return true;
     }
 
-    private void drawFeatureForLod(Feature feature, FeatureLod lod) {
+    private void drawFeatureForLod(Feature feature, FeatureLod lod, int chunkDistance) {
         if (lod == FeatureLod.IMPOSTOR) {
-            drawFeatureImpostor(feature);
+            drawFeatureImpostor(feature, chunkDistance);
         } else {
             feature.draw();
         }
@@ -909,8 +908,8 @@ public class Chunk {
         }
     }
 
-    private void drawFeatureImpostor(Feature feature) {
-        ImpostorEntry entry = getImpostorEntry(feature);
+    private void drawFeatureImpostor(Feature feature, int chunkDistance) {
+        ImpostorEntry entry = getImpostorEntry(feature, chunkDistance);
         int texture = pickImpostorTexture(entry, feature);
         ImpostorSize size = getActualImpostorSize(feature);
 
@@ -1033,49 +1032,50 @@ public class Chunk {
         return new ImpostorSize(width * IMPOSTOR_PADDING, height * IMPOSTOR_PADDING);
     }
 
-    private ImpostorEntry getImpostorEntry(Feature feature) {
+    private ImpostorEntry getImpostorEntry(Feature feature, int chunkDistance) {
         String key = feature.getClass().getSimpleName();
         float heightBucket = 0f;
         float canopyBucket = 0f;
         float lakeRadiusBucket = 0f;
         int angleCount = manager.getImpostorAngleCount();
+        int textureSize = manager.getImpostorTextureSize(chunkDistance);
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
             float canopy = Math.max(tree.getCanopyRadius(), tree.getType().baseThickness * 2f);
             heightBucket = Math.max(0.25f, quantizeUp(tree.getHeight(), 0.25f));
             canopyBucket = Math.max(0.1f, quantizeUp(canopy, 0.1f));
             key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves() + ":" + heightBucket + ":" + canopyBucket
-                    + ":" + angleCount;
+                    + ":" + angleCount + ":" + textureSize;
         } else if (feature instanceof Lake) {
             Lake lake = (Lake) feature;
             float radius = Math.max(lake.getRadiusX(), lake.getRadiusZ());
             lakeRadiusBucket = Math.max(0.5f, quantizeUp(radius, 0.5f));
-            key = "Lake:" + lakeRadiusBucket + ":" + angleCount;
+            key = "Lake:" + lakeRadiusBucket + ":" + angleCount + ":" + textureSize;
         }
         float finalHeightBucket = heightBucket;
         float finalCanopyBucket = canopyBucket;
         float finalLakeRadiusBucket = lakeRadiusBucket;
         return IMPOSTOR_TEXTURES.computeIfAbsent(key, ignored -> {
             ImpostorSize size = getImpostorSize(feature, finalHeightBucket, finalCanopyBucket, finalLakeRadiusBucket);
-            int[] textureIds = renderImpostorTextures(feature, size, angleCount);
+            int[] textureIds = renderImpostorTextures(feature, size, angleCount, textureSize);
             return new ImpostorEntry(textureIds, size);
         });
     }
 
-    private int[] renderImpostorTextures(Feature feature, ImpostorSize size, int angleCount) {
+    private int[] renderImpostorTextures(Feature feature, ImpostorSize size, int angleCount, int textureSize) {
         int count = Math.max(1, angleCount);
         int[] textureIds = new int[count];
         for (int i = 0; i < count; i++) {
             float angle = (360f / count) * i;
-            textureIds[i] = renderImpostorTexture(feature, size, angle);
+            textureIds[i] = renderImpostorTexture(feature, size, angle, textureSize);
         }
         return textureIds;
     }
 
-    private int renderImpostorTexture(Feature feature, ImpostorSize size, float angleDegrees) {
+    private int renderImpostorTexture(Feature feature, ImpostorSize size, float angleDegrees, int textureSize) {
         int textureId = glGenTextures();
         glBindTexture(GL_TEXTURE_2D, textureId);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE,
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, textureSize, textureSize,
                 0, GL_RGBA, GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -1088,7 +1088,7 @@ public class Chunk {
 
         int depthBuffer = glGenRenderbuffers();
         glBindRenderbuffer(GL_RENDERBUFFER, depthBuffer);
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, textureSize, textureSize);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer);
 
         int status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -1104,7 +1104,7 @@ public class Chunk {
 
         int[] viewport = new int[4];
         glGetIntegerv(GL_VIEWPORT, viewport);
-        glViewport(0, 0, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE);
+        glViewport(0, 0, textureSize, textureSize);
 
         glClearColor(0f, 0f, 0f, 0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
