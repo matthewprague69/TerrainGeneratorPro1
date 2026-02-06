@@ -11,6 +11,7 @@ public class Cactus extends Feature {
     private final int texture;
     private final Random rand;
     private final float maxHeight;
+    private final float maxRadius;
 
     private static final int SEGMENTS = 16; // More sides for rounder cactus
 
@@ -45,6 +46,11 @@ public class Cactus extends Feature {
             maxSegmentHeight = Math.max(maxSegmentHeight, segment.offsetY + segment.height);
         }
         this.maxHeight = maxSegmentHeight;
+        float maxSegmentRadius = 0f;
+        for (Segment segment : segments) {
+            maxSegmentRadius = Math.max(maxSegmentRadius, segment.radius);
+        }
+        this.maxRadius = maxSegmentRadius;
     }
 
     @Override
@@ -124,6 +130,14 @@ public class Cactus extends Feature {
     @Override
     public void dispose() {
         // Nothing to dispose yet
+    }
+
+    public float getMaxHeight() {
+        return maxHeight;
+    }
+
+    public float getMaxRadius() {
+        return maxRadius;
     }
 
     private static class Segment {

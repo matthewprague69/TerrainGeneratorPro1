@@ -3,6 +3,8 @@ import generators.LakeGenerator;
 import objects.BatchableFeature;
 import objects.Feature;
 import objects.ColorBatchableFeature;
+import objects.Cactus;
+import objects.Flower;
 import objects.Grass;
 import objects.Lake;
 import objects.Tree;
@@ -523,7 +525,7 @@ public class Chunk {
         FeatureLod lod = getFeatureLod(chunkDistance, featureImpostorDistance, featureRenderDist);
         // Draw features if they are above water
         for (Feature f : features) {
-            if (f instanceof Grass || f instanceof ColorBatchableFeature) {
+            if (lod == FeatureLod.FULL && (f instanceof Grass || f instanceof ColorBatchableFeature)) {
                 continue;
             }
             if (!shouldDrawFeatureForLod(f, lod)) {
@@ -859,7 +861,7 @@ public class Chunk {
 
         FeatureLod lod = getFeatureLod(chunkDistance, featureImpostorDistance, featureRenderDist);
         for (Feature f : features) {
-            if (f instanceof Grass || f instanceof ColorBatchableFeature) {
+            if (lod == FeatureLod.FULL && (f instanceof Grass || f instanceof ColorBatchableFeature)) {
                 continue;
             }
             if (!shouldDrawFeatureForLod(f, lod)) {
@@ -886,10 +888,7 @@ public class Chunk {
         if (lod == FeatureLod.CULLED) {
             return false;
         }
-        if (lod == FeatureLod.IMPOSTOR) {
-            return feature instanceof Tree || feature instanceof Lake;
-        }
-        return true;
+        return lod != FeatureLod.CULLED;
     }
 
     private void drawFeatureForLod(Feature feature, FeatureLod lod, int chunkDistance) {
@@ -1002,7 +1001,7 @@ public class Chunk {
     }
 
     private ImpostorSize getImpostorSize(Feature feature, float heightBucket, float canopyBucket,
-                                         float lakeRadiusBucket) {
+                                         float lakeRadiusBucket, float widthBucket) {
         float width = 2.5f;
         float height = 4.5f;
         if (feature instanceof Tree) {
@@ -1011,6 +1010,9 @@ public class Chunk {
         } else if (feature instanceof Lake) {
             width = lakeRadiusBucket * 2.2f;
             height = 1.5f;
+        } else if (widthBucket > 0f || heightBucket > 0f) {
+            width = widthBucket;
+            height = heightBucket;
         }
         return new ImpostorSize(width * IMPOSTOR_PADDING, height * IMPOSTOR_PADDING);
     }
@@ -1028,6 +1030,18 @@ public class Chunk {
             float radius = Math.max(lake.getRadiusX(), lake.getRadiusZ());
             width = radius * 2.2f;
             height = 1.5f;
+        } else if (feature instanceof Cactus) {
+            Cactus cactus = (Cactus) feature;
+            width = cactus.getMaxRadius() * 2.4f;
+            height = cactus.getMaxHeight();
+        } else if (feature instanceof Grass) {
+            Grass grass = (Grass) feature;
+            width = grass.getImpostorWidth();
+            height = grass.getImpostorHeight();
+        } else if (feature instanceof Flower) {
+            Flower flower = (Flower) feature;
+            width = flower.getImpostorWidth();
+            height = flower.getImpostorHeight();
         }
         return new ImpostorSize(width * IMPOSTOR_PADDING, height * IMPOSTOR_PADDING);
     }
@@ -1037,6 +1051,7 @@ public class Chunk {
         float heightBucket = 0f;
         float canopyBucket = 0f;
         float lakeRadiusBucket = 0f;
+        float widthBucket = 0f;
         int angleCount = manager.getImpostorAngleCount();
         int textureSize = manager.getImpostorTextureSize(chunkDistance);
         if (feature instanceof Tree) {
@@ -1051,12 +1066,31 @@ public class Chunk {
             float radius = Math.max(lake.getRadiusX(), lake.getRadiusZ());
             lakeRadiusBucket = Math.max(0.5f, quantizeUp(radius, 0.5f));
             key = "Lake:" + lakeRadiusBucket + ":" + angleCount + ":" + textureSize;
+        } else if (feature instanceof Cactus) {
+            Cactus cactus = (Cactus) feature;
+            heightBucket = Math.max(0.25f, quantizeUp(cactus.getMaxHeight(), 0.25f));
+            widthBucket = Math.max(0.1f, quantizeUp(cactus.getMaxRadius() * 2.4f, 0.1f));
+            key = "Cactus:" + heightBucket + ":" + widthBucket + ":" + angleCount + ":" + textureSize;
+        } else if (feature instanceof Grass) {
+            Grass grass = (Grass) feature;
+            heightBucket = Math.max(0.1f, quantizeUp(grass.getImpostorHeight(), 0.1f));
+            widthBucket = Math.max(0.1f, quantizeUp(grass.getImpostorWidth(), 0.1f));
+            key = "Grass:" + grass.getBatchTextureId() + ":" + heightBucket + ":" + widthBucket + ":" + angleCount
+                    + ":" + textureSize;
+        } else if (feature instanceof Flower) {
+            Flower flower = (Flower) feature;
+            heightBucket = Math.max(0.1f, quantizeUp(flower.getImpostorHeight(), 0.1f));
+            widthBucket = Math.max(0.1f, quantizeUp(flower.getImpostorWidth(), 0.1f));
+            key = "Flower:" + flower.getType().name() + ":" + heightBucket + ":" + widthBucket + ":" + angleCount
+                    + ":" + textureSize;
         }
         float finalHeightBucket = heightBucket;
         float finalCanopyBucket = canopyBucket;
         float finalLakeRadiusBucket = lakeRadiusBucket;
+        float finalWidthBucket = widthBucket;
         return IMPOSTOR_TEXTURES.computeIfAbsent(key, ignored -> {
-            ImpostorSize size = getImpostorSize(feature, finalHeightBucket, finalCanopyBucket, finalLakeRadiusBucket);
+            ImpostorSize size = getImpostorSize(feature, finalHeightBucket, finalCanopyBucket, finalLakeRadiusBucket,
+                    finalWidthBucket);
             int[] textureIds = renderImpostorTextures(feature, size, angleCount, textureSize);
             return new ImpostorEntry(textureIds, size);
         });

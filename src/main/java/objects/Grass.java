@@ -19,6 +19,8 @@ public class Grass extends Feature implements BatchableFeature {
     private static final float BLADE_BASE_HEIGHT = 1.2f;
     private static final float BLADE_HEIGHT_VARIATION = 0.6f;
     private static final float SPREAD = 1f; // Controls how wide blades spread out
+    private static final float IMPOSTOR_WIDTH = 1.2f;
+    private static final float IMPOSTOR_HEIGHT = BLADE_BASE_HEIGHT + BLADE_HEIGHT_VARIATION;
 
     private final int textureId; // <--- INSTANCE, not static!
     private final Random rand;
@@ -178,5 +180,13 @@ public class Grass extends Feature implements BatchableFeature {
     @Override
     public int getBatchTextureId() {
         return textureId;
+    }
+
+    public float getImpostorWidth() {
+        return IMPOSTOR_WIDTH;
+    }
+
+    public float getImpostorHeight() {
+        return IMPOSTOR_HEIGHT;
     }
 }
