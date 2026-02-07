@@ -44,10 +44,10 @@ public class Grass extends Feature implements BatchableFeature {
         this.bladeHeightScale = 1f;
         this.bladeWidthScale = 1f;
         this.bladeColorScale = 1f;
-        float tint = 0.9f + rand.nextFloat() * 0.2f;
-        this.r = tint * (0.9f + rand.nextFloat() * 0.2f);
-        this.g = tint * (0.95f + rand.nextFloat() * 0.2f);
-        this.b = tint * (0.85f + rand.nextFloat() * 0.2f);
+        float tint = 0.95f + rand.nextFloat() * 0.2f;
+        this.r = clamp01(tint * (0.95f + rand.nextFloat() * 0.2f));
+        this.g = clamp01(tint * (0.98f + rand.nextFloat() * 0.2f));
+        this.b = clamp01(tint * (0.9f + rand.nextFloat() * 0.2f));
 
         this.textureId = TextureLoader.getOrLoad(textureName); // always per-instance load
 
@@ -66,10 +66,10 @@ public class Grass extends Feature implements BatchableFeature {
         this.bladeHeightScale = heightScale;
         this.bladeWidthScale = widthScale;
         this.bladeColorScale = colorScale;
-        float tint = 0.9f + rand.nextFloat() * 0.2f;
-        this.r = tint * (0.9f + rand.nextFloat() * 0.2f);
-        this.g = tint * (0.95f + rand.nextFloat() * 0.2f);
-        this.b = tint * (0.85f + rand.nextFloat() * 0.2f);
+        float tint = 0.95f + rand.nextFloat() * 0.2f;
+        this.r = clamp01(tint * (0.95f + rand.nextFloat() * 0.2f));
+        this.g = clamp01(tint * (0.98f + rand.nextFloat() * 0.2f));
+        this.b = clamp01(tint * (0.9f + rand.nextFloat() * 0.2f));
 
         this.textureId = TextureLoader.getOrLoad(textureName);
 
@@ -122,7 +122,7 @@ public class Grass extends Feature implements BatchableFeature {
             float widthScale = (0.7f + rand.nextFloat() * 0.6f) * bladeWidthScale;
             float angle = rand.nextFloat() * 360f;
             float lean = (rand.nextFloat() - 0.5f) * 0.45f;
-            float bladeTint = (0.85f + rand.nextFloat() * 0.25f) * bladeColorScale;
+            float bladeTint = (0.95f + rand.nextFloat() * 0.3f) * bladeColorScale;
             float bladeR = clamp01(r * bladeTint);
             float bladeG = clamp01(g * bladeTint);
             float bladeB = clamp01(b * bladeTint);
