@@ -9,6 +9,7 @@ import objects.Grass;
 import objects.Lake;
 import objects.Tree;
 import spawners.FeatureSpawner;
+import spawners.GrassSpawner;
 import spawners.LakeSpawner;
 import util.BoundingBox;
 import util.FeatureUtil;
