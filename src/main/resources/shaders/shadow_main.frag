@@ -53,8 +53,14 @@ void main() {
     float minShadow = mix(0.75, 0.55, uLightStrength);
     shadowed = max(shadowed, minShadow);
     vec3 litColor = baseColor.rgb * lighting * shadowed * uLightColor;
-    float fogT = clamp((vViewDepth - uFogStart) / max(0.001, uFogEnd - uFogStart), 0.0, 1.0);
-    float fogFactor = pow(1.0 - fogT, 2.2);
+    float fogRange = max(0.001, uFogEnd - uFogStart);
+    float fogT = clamp((vViewDepth - uFogStart) / fogRange, 0.0, 1.0);
+    float farStart = uFogStart + fogRange * 0.6;
+    float farRange = max(0.001, uFogEnd - farStart);
+    float farT = clamp((vViewDepth - farStart) / farRange, 0.0, 1.0);
+    float layeredFog = 1.0 - (fogT * 0.6 + farT * 0.4);
+    float expFog = exp(-fogT * fogT * 3.0);
+    float fogFactor = pow(clamp(min(layeredFog, expFog), 0.0, 1.0), 1.6);
     vec3 fogged = mix(uFogColor, litColor, fogFactor);
     gl_FragColor = vec4(fogged, baseColor.a);
 }
