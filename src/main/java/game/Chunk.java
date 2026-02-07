@@ -1189,11 +1189,14 @@ public class Chunk {
         }).flip();
         glLightfv(GL_LIGHT0, GL_POSITION, impostorLightPos);
         FloatBuffer impostorDiffuse = BufferUtils.createFloatBuffer(4).put(new float[] {
-                sunColor[0], sunColor[1], sunColor[2], 1f
+                Math.min(1f, sunColor[0] * 1.15f),
+                Math.min(1f, sunColor[1] * 1.15f),
+                Math.min(1f, sunColor[2] * 1.15f),
+                1f
         }).flip();
         glLightfv(GL_LIGHT0, GL_DIFFUSE, impostorDiffuse);
         FloatBuffer impostorAmbient = BufferUtils.createFloatBuffer(4).put(new float[] {
-                sunColor[0] * 0.35f, sunColor[1] * 0.35f, sunColor[2] * 0.35f, 1f
+                sunColor[0] * 0.55f, sunColor[1] * 0.55f, sunColor[2] * 0.55f, 1f
         }).flip();
         glLightfv(GL_LIGHT0, GL_AMBIENT, impostorAmbient);
         glDisable(GL_CULL_FACE);
