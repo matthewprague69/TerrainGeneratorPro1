@@ -1857,14 +1857,21 @@ public class Chunk {
                 long seed = FeatureUtil.hashSeed(ix, iy, iz, input.seed);
 
                 if (spawner instanceof GrassSpawner) {
-                    int patchCount = 1 + rand.nextInt(15);
-                    float patchRadius = 0.8f + rand.nextFloat() * 2.2f;
+                    int clusterCount = 9 + rand.nextInt(7);
+                    int clusterRadius = 2 + rand.nextInt(2);
                     float jitter = 0.6f * input.scale;
-                    for (int p = 0; p < patchCount; p++) {
-                        float offRadius = p == 0 ? 0f : (float) Math.sqrt(rand.nextFloat()) * patchRadius;
-                        float theta = rand.nextFloat() * (float) (Math.PI * 2.0);
-                        int px = x + Math.round((float) Math.cos(theta) * offRadius);
-                        int pz = z + Math.round((float) Math.sin(theta) * offRadius);
+                    for (int p = 0; p < clusterCount; p++) {
+                        int px;
+                        int pz;
+                        if (p == 0) {
+                            px = x;
+                            pz = z;
+                        } else {
+                            int dx = rand.nextInt(clusterRadius * 2 + 1) - clusterRadius;
+                            int dz = rand.nextInt(clusterRadius * 2 + 1) - clusterRadius;
+                            px = x + dx;
+                            pz = z + dz;
+                        }
                         if (px < 0 || pz < 0 || px >= SIZE || pz >= SIZE) {
                             continue;
                         }
@@ -1883,7 +1890,8 @@ public class Chunk {
                         if (patchSlope > FEATURE_SLOPE_SPAWN_THRESHOLD) {
                             continue;
                         }
-                        float t = patchRadius <= 0.001f ? 0f : Math.min(1f, offRadius / patchRadius);
+                        float dist = (float) Math.sqrt((px - x) * (px - x) + (pz - z) * (pz - z));
+                        float t = clusterRadius <= 0 ? 0f : Math.min(1f, dist / (float) clusterRadius);
                         float heightScale = lerp(1.1f, 0.55f, t);
                         float widthScale = lerp(1.05f, 0.7f, t);
                         float colorScale = lerp(1.05f, 0.85f, t);
