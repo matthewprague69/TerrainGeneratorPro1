@@ -1597,6 +1597,9 @@ public class Chunk {
             grassWeight *= inv;
         }
 
+        int grassTex = manager.getTexture(targetBiome.grassTex);
+        addTriangleToBuilder(builders, grassTex, biomeAlpha, x1, z1, x2, z2, x3, z3, y1, y2, y3, texScale);
+
         if (snowWeight > 0.001f) {
             int tex = manager.getSnowTexture();
             addTriangleToBuilder(builders, tex, snowWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
@@ -1610,11 +1613,6 @@ public class Chunk {
         if (dirtWeight > 0.001f) {
             int tex = manager.getTexture(targetBiome.dirtTex);
             addTriangleToBuilder(builders, tex, dirtWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
-                    y1, y2, y3, texScale);
-        }
-        if (grassWeight > 0.001f) {
-            int tex = manager.getTexture(targetBiome.grassTex);
-            addTriangleToBuilder(builders, tex, grassWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
                     y1, y2, y3, texScale);
         }
     }
