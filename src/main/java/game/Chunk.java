@@ -706,9 +706,13 @@ public class Chunk {
         glBindBuffer(GL_ARRAY_BUFFER, grassBatchVbo);
         glEnableClientState(GL_VERTEX_ARRAY);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-        glVertexPointer(3, GL_FLOAT, 5 * Float.BYTES, 0);
-        glTexCoordPointer(2, GL_FLOAT, 5 * Float.BYTES, 3 * Float.BYTES);
+        int stride = 8 * Float.BYTES;
+        glEnableClientState(GL_COLOR_ARRAY);
+        glVertexPointer(3, GL_FLOAT, stride, 0);
+        glTexCoordPointer(2, GL_FLOAT, stride, 3 * Float.BYTES);
+        glColorPointer(3, GL_FLOAT, stride, 5 * Float.BYTES);
         glDrawArrays(GL_QUADS, 0, grassBatchVertexCount);
+        glDisableClientState(GL_COLOR_ARRAY);
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -741,7 +745,7 @@ public class Chunk {
 
         glBindBuffer(GL_ARRAY_BUFFER, grassBatchVbo);
         glEnableClientState(GL_VERTEX_ARRAY);
-        glVertexPointer(3, GL_FLOAT, 5 * Float.BYTES, 0);
+        glVertexPointer(3, GL_FLOAT, 8 * Float.BYTES, 0);
         glDrawArrays(GL_QUADS, 0, grassBatchVertexCount);
         glDisableClientState(GL_VERTEX_ARRAY);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
