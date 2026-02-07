@@ -906,6 +906,12 @@ public class Chunk {
         int impostorStart = impostorDistance;
         if (feature instanceof Grass || feature instanceof ColorBatchableFeature) {
             impostorStart = detailDistance;
+            if (feature instanceof Grass && chunkDistance >= impostorStart) {
+                Grass grass = (Grass) feature;
+                if (grass.getImpostorHeight() < 1.35f) {
+                    return FeatureLod.CULLED;
+                }
+            }
         }
         if (chunkDistance >= impostorStart) {
             return FeatureLod.IMPOSTOR;
@@ -1063,7 +1069,7 @@ public class Chunk {
             height = cactus.getMaxHeight();
         } else if (feature instanceof Grass) {
             Grass grass = (Grass) feature;
-            width = grass.getImpostorWidth();
+            width = grass.getImpostorWidth() * 1.6f;
             height = grass.getImpostorHeight();
         } else if (feature instanceof Flower) {
             Flower flower = (Flower) feature;
@@ -1101,7 +1107,7 @@ public class Chunk {
         } else if (feature instanceof Grass) {
             Grass grass = (Grass) feature;
             heightBucket = Math.max(0.1f, quantizeUp(grass.getImpostorHeight(), 0.1f));
-            widthBucket = Math.max(0.1f, quantizeUp(grass.getImpostorWidth(), 0.1f));
+            widthBucket = Math.max(0.1f, quantizeUp(grass.getImpostorWidth() * 1.6f, 0.1f));
             key = "Grass:" + grass.getBatchTextureId() + ":" + heightBucket + ":" + widthBucket + ":" + angleCount
                     + ":" + textureSize;
         } else if (feature instanceof Flower) {
