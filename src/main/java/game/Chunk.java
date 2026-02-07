@@ -1327,14 +1327,11 @@ public class Chunk {
         float wx = (cx * SIZE + (x1 + x2 + x3) / 3f) * scale;
         float wz = (cz * SIZE + (z1 + z2 + z3) / 3f) * scale;
         BiomeBlend blend = getBiomeBlend(wx, wz, manager);
-        int primaryTex = pickTextureForBiome(blend.primary, height, slope, manager);
-        addTriangleToBuilder(builders, primaryTex, 1f, x1, z1, x2, z2, x3, z3, y1, y2, y3, texScale);
+        addBiomeTextureLayers(builders, blend.primary, 1f, height, slope, x1, z1, x2, z2, x3, z3,
+                y1, y2, y3, texScale);
         if (blend.blend > 0.0f && blend.secondary != null) {
-            int secondaryTex = pickTextureForBiome(blend.secondary, height, slope, manager);
-            if (secondaryTex != primaryTex) {
-                addTriangleToBuilder(builders, secondaryTex, blend.blend, x1, z1, x2, z2, x3, z3, y1, y2, y3,
-                        texScale);
-            }
+            addBiomeTextureLayers(builders, blend.secondary, blend.blend, height, slope, x1, z1, x2, z2, x3, z3,
+                    y1, y2, y3, texScale);
         }
     }
 
@@ -1573,6 +1570,44 @@ public class Chunk {
     private static double smoothstep(double edge0, double edge1, double x) {
         double t = Math.max(0.0, Math.min(1.0, (x - edge0) / (edge1 - edge0)));
         return t * t * (3.0 - 2.0 * t);
+    }
+
+    private void addBiomeTextureLayers(Map<BatchKey, FloatBuilder> builders, Biome targetBiome, float biomeAlpha,
+                                       float height, float slope,
+                                       int x1, int z1, int x2, int z2, int x3, int z3,
+                                       float y1, float y2, float y3, float texScale) {
+        float snowWeight = smoothstepf(SNOW_HEIGHT_START - 1.5f, SNOW_HEIGHT_FULL, height);
+        float baseWeight = 1f - snowWeight;
+        float rockWeight = smoothstepf(ROCK_SLOPE_START - 0.1f, ROCK_SLOPE_START + 0.05f, slope) * baseWeight;
+        float dirtWeight = smoothstepf(DIRT_SLOPE_START - 0.1f, DIRT_SLOPE_START + 0.05f, slope)
+                * baseWeight * (1f - rockWeight);
+        float grassWeight = Math.max(0f, baseWeight - rockWeight - dirtWeight);
+
+        if (snowWeight > 0.001f) {
+            int tex = manager.getSnowTexture();
+            addTriangleToBuilder(builders, tex, snowWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
+                    y1, y2, y3, texScale);
+        }
+        if (rockWeight > 0.001f) {
+            int tex = manager.getTexture(targetBiome.rockTex);
+            addTriangleToBuilder(builders, tex, rockWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
+                    y1, y2, y3, texScale);
+        }
+        if (dirtWeight > 0.001f) {
+            int tex = manager.getTexture(targetBiome.dirtTex);
+            addTriangleToBuilder(builders, tex, dirtWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
+                    y1, y2, y3, texScale);
+        }
+        if (grassWeight > 0.001f) {
+            int tex = manager.getTexture(targetBiome.grassTex);
+            addTriangleToBuilder(builders, tex, grassWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
+                    y1, y2, y3, texScale);
+        }
+    }
+
+    private static float smoothstepf(float edge0, float edge1, float x) {
+        float t = Math.max(0f, Math.min(1f, (x - edge0) / (edge1 - edge0)));
+        return t * t * (3f - 2f * t);
     }
 
     private static float lerp(float a, float b, float t) {
