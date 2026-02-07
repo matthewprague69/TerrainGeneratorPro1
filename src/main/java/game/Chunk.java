@@ -67,6 +67,10 @@ public class Chunk {
     private final boolean[][] lakeMask = new boolean[SIZE][SIZE];
     private boolean featuresGenerated = false;
     private final List<TerrainBatch> terrainBatches = new ArrayList<>();
+    private final int[] primaryLayerTextures = new int[3];
+    private final float[] primaryLayerAlphas = new float[3];
+    private final int[] secondaryLayerTextures = new int[3];
+    private final float[] secondaryLayerAlphas = new float[3];
     private int waterDisplayList = -1;
     private int grassBatchVbo = -1;
     private int grassBatchVertexCount = 0;
@@ -80,6 +84,8 @@ public class Chunk {
 
     private static final float DIRT_SLOPE_START = 0.65f;
     private static final float ROCK_SLOPE_START = 1.0f;
+    private static final float DIRT_BLEND_RANGE = 0.12f;
+    private static final float ROCK_BLEND_RANGE = 0.15f;
     private static final int BLEND_STEPS = 8;
     private static final float BLEND_EDGE_START = 0.4f;
     private static final float BLEND_EDGE_END = 0.6f;
@@ -1327,15 +1333,86 @@ public class Chunk {
         float wx = (cx * SIZE + (x1 + x2 + x3) / 3f) * scale;
         float wz = (cz * SIZE + (z1 + z2 + z3) / 3f) * scale;
         BiomeBlend blend = getBiomeBlend(wx, wz, manager);
-        int primaryTex = pickTextureForBiome(blend.primary, height, slope, manager);
-        addTriangleToBuilder(builders, primaryTex, 1f, x1, z1, x2, z2, x3, z3, y1, y2, y3, texScale);
+        int primaryCount = buildTerrainLayers(blend.primary, height, slope, manager,
+                primaryLayerTextures, primaryLayerAlphas);
+        for (int i = 0; i < primaryCount; i++) {
+            addTriangleToBuilder(builders, primaryLayerTextures[i], primaryLayerAlphas[i], x1, z1, x2, z2, x3, z3, y1,
+                    y2, y3, texScale);
+        }
         if (blend.blend > 0.0f && blend.secondary != null) {
-            int secondaryTex = pickTextureForBiome(blend.secondary, height, slope, manager);
-            if (secondaryTex != primaryTex) {
-                addTriangleToBuilder(builders, secondaryTex, blend.blend, x1, z1, x2, z2, x3, z3, y1, y2, y3,
+            int secondaryCount = buildTerrainLayers(blend.secondary, height, slope, manager,
+                    secondaryLayerTextures, secondaryLayerAlphas);
+            for (int i = 0; i < secondaryCount; i++) {
+                float alpha = secondaryLayerAlphas[i] * blend.blend;
+                if (alpha <= 0f) {
+                    continue;
+                }
+                addTriangleToBuilder(builders, secondaryLayerTextures[i], alpha, x1, z1, x2, z2, x3, z3, y1, y2, y3,
                         texScale);
             }
         }
+    }
+
+    private int buildTerrainLayers(Biome targetBiome, float height, float slope, TerrainManager manager,
+                                   int[] textures, float[] alphas) {
+        if (height <= ABSOLUTE_WATER_BOTTOM_HEIGHT) {
+            textures[0] = manager.getWaterBottomAbsTexture();
+            alphas[0] = 1f;
+            return 1;
+        }
+        if (height <= WATER_SURROUNDING_LEVEL) {
+            textures[0] = manager.getWaterBottomTexture();
+            alphas[0] = 1f;
+            return 1;
+        }
+
+        int grassTex = manager.getTexture(targetBiome.grassTex);
+        int dirtTex = manager.getTexture(targetBiome.dirtTex);
+        int rockTex = manager.getTexture(targetBiome.rockTex);
+
+        int baseTex;
+        int blendTex = -1;
+        float blendAlpha = 0f;
+
+        if (slope <= DIRT_SLOPE_START - DIRT_BLEND_RANGE) {
+            baseTex = grassTex;
+        } else if (slope < DIRT_SLOPE_START + DIRT_BLEND_RANGE) {
+            baseTex = grassTex;
+            blendTex = dirtTex;
+            blendAlpha = (float) smoothstep(DIRT_SLOPE_START - DIRT_BLEND_RANGE,
+                    DIRT_SLOPE_START + DIRT_BLEND_RANGE, slope);
+        } else if (slope <= ROCK_SLOPE_START - ROCK_BLEND_RANGE) {
+            baseTex = dirtTex;
+        } else if (slope < ROCK_SLOPE_START + ROCK_BLEND_RANGE) {
+            baseTex = dirtTex;
+            blendTex = rockTex;
+            blendAlpha = (float) smoothstep(ROCK_SLOPE_START - ROCK_BLEND_RANGE,
+                    ROCK_SLOPE_START + ROCK_BLEND_RANGE, slope);
+        } else {
+            baseTex = rockTex;
+        }
+
+        int count = 0;
+        textures[count] = baseTex;
+        alphas[count] = 1f;
+        count++;
+
+        if (blendTex != -1 && blendTex != baseTex && blendAlpha > 0.001f) {
+            textures[count] = blendTex;
+            alphas[count] = blendAlpha;
+            count++;
+        }
+
+        if (height >= SNOW_HEIGHT_START) {
+            float snowBlend = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
+            if (snowBlend > 0.001f) {
+                textures[count] = manager.getSnowTexture();
+                alphas[count] = snowBlend;
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private void drawTriangle(int x1, int z1, int x2, int z2, int x3, int z3, float y1, float y2, float y3,
@@ -1604,33 +1681,24 @@ public class Chunk {
     }
 
     private static int pickTextureForBiome(Biome targetBiome, float height, float slope, TerrainManager manager) {
-        Random rand = new Random((int)(height * 1000 + slope * 1000));
-
-
-        // --- Absolute bottom zone ---
         if (height <= ABSOLUTE_WATER_BOTTOM_HEIGHT) {
             return manager.getWaterBottomAbsTexture();
         }
-        // --- Water surrounding zone ---
-        else if (height <= WATER_SURROUNDING_LEVEL) {
+        if (height <= WATER_SURROUNDING_LEVEL) {
             return manager.getWaterBottomTexture();
         }
 
-        // --- Snow zone ---
         if (height >= SNOW_HEIGHT_START) {
-            float snowChance = (height - SNOW_HEIGHT_START) / (SNOW_HEIGHT_FULL - SNOW_HEIGHT_START);
-            snowChance = Math.min(Math.max(snowChance, 0f), 1f);
-
-            if (rand.nextFloat() < snowChance) {
+            float snowBlend = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
+            if (snowBlend >= 0.5f) {
                 return manager.getSnowTexture();
             }
         }
 
-        // --- Slope-based textures ---
-        if (slope > ROCK_SLOPE_START) {
+        if (slope >= ROCK_SLOPE_START) {
             return manager.getTexture(targetBiome.rockTex);
         }
-        if (slope > DIRT_SLOPE_START) {
+        if (slope >= DIRT_SLOPE_START) {
             return manager.getTexture(targetBiome.dirtTex);
         }
 
