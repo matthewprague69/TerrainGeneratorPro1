@@ -1327,7 +1327,8 @@ public class Chunk {
         float wx = (cx * SIZE + (x1 + x2 + x3) / 3f) * scale;
         float wz = (cz * SIZE + (z1 + z2 + z3) / 3f) * scale;
         BiomeBlend blend = getBiomeBlend(wx, wz, manager);
-        addBiomeTextureLayers(builders, blend.primary, 1f, height, slope, x1, z1, x2, z2, x3, z3,
+        float primaryAlpha = blend.secondary == null ? 1f : (1f - blend.blend);
+        addBiomeTextureLayers(builders, blend.primary, primaryAlpha, height, slope, x1, z1, x2, z2, x3, z3,
                 y1, y2, y3, texScale);
         if (blend.blend > 0.0f && blend.secondary != null) {
             addBiomeTextureLayers(builders, blend.secondary, blend.blend, height, slope, x1, z1, x2, z2, x3, z3,
@@ -1582,6 +1583,19 @@ public class Chunk {
         float dirtWeight = smoothstepf(DIRT_SLOPE_START - 0.1f, DIRT_SLOPE_START + 0.05f, slope)
                 * baseWeight * (1f - rockWeight);
         float grassWeight = Math.max(0f, baseWeight - rockWeight - dirtWeight);
+
+        float total = snowWeight + rockWeight + dirtWeight + grassWeight;
+        if (total < 0.001f) {
+            grassWeight = 1f;
+            total = 1f;
+        }
+        if (total > 1f) {
+            float inv = 1f / total;
+            snowWeight *= inv;
+            rockWeight *= inv;
+            dirtWeight *= inv;
+            grassWeight *= inv;
+        }
 
         if (snowWeight > 0.001f) {
             int tex = manager.getSnowTexture();
