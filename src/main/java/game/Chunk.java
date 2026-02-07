@@ -1179,7 +1179,7 @@ public class Chunk {
         float[] sunDir = manager.getLightDirection();
         float[] sunColor = manager.getLightColor();
         float lightY = Math.max(0.2f, sunDir[1]);
-        float lightZ = 1f;
+        float lightZ = -1f;
         float lightLen = (float) Math.sqrt(lightY * lightY + lightZ * lightZ);
         float lightDirX = 0f;
         float lightDirY = lightY / lightLen;
