@@ -22,9 +22,11 @@ public class TerrainManager {
     private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
     private static final int MAX_RENDER_BUILDS_PER_FRAME = 2;
     private static final long RENDER_BUILD_BUDGET_NS = 3_000_000L;
-    private static final int LOD_NEAR_THRESHOLD = 10;
-    private static final int LOD_MID_THRESHOLD = 15;
-    private static final int LOD_FAR_THRESHOLD = 20;
+    private static final int LOD_NEAR_THRESHOLD = 16;
+    private static final int LOD_MID_THRESHOLD = 24;
+    private static final int LOD_FAR_THRESHOLD = 32;
+    private static final int LOD_PRIORITY_RADIUS = 2;
+    private static final int LOD_PRIORITY_MIN_BUDGET = 6;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -40,6 +42,7 @@ public class TerrainManager {
     private final ArrayDeque<Chunk> pendingRenderBuilds = new ArrayDeque<>();
     private final Set<Long> pendingRenderBuildKeys = new HashSet<>();
     private final Map<Long, Chunk> pendingChunkReplacements = new HashMap<>();
+    private final Map<Long, float[][][]> biomeWeightCache = new HashMap<>();
     private final ExecutorService chunkGenerator = Executors.newFixedThreadPool(2, r -> {
         Thread t = new Thread(r, "chunk-generator");
         t.setDaemon(true);
@@ -64,10 +67,14 @@ public class TerrainManager {
     private int cacheFeatureRenderDist;
     private int featureImpostorDistance;
     private int grassDetailDistance;
+    private int impostorAngleCount = 1;
+    private int impostorQualityPreset = 1;
+    private int impostorHighQualityDistance = 10;
     private boolean renderDistanceDirty = true;
     private int lastUpdateChunkX = Integer.MIN_VALUE;
     private int lastUpdateChunkZ = Integer.MIN_VALUE;
     private final long seed;
+    private static final int BIOME_WEIGHT_REGION_SIZE = 4;
 
     private final Map<String, Integer> textureMap = new HashMap<>();
     private final int snowTex;
@@ -89,6 +96,7 @@ public class TerrainManager {
         this.cacheFeatureRenderDist = featureRenderDist + 4;
         this.featureImpostorDistance = Math.max(1, featureRenderDist);
         this.grassDetailDistance = Math.max(1, featureRenderDist - 2);
+        this.impostorHighQualityDistance = Math.min(10, this.featureRenderDist);
         this.regionGenerator = new BiomeRegionGenerator(seed);
 
 
@@ -140,8 +148,8 @@ public class TerrainManager {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         drainCompletedChunkBuilds(pcx, pcz);
-        drainCompletedFeatureGenerations(pcx, pcz);
         processPendingRenderBuilds(pcx, pcz);
+        drainCompletedFeatureGenerations(pcx, pcz);
         if (renderDistanceDirty) {
             rebuildNeededChunks(pcx, pcz);
             refreshChunkLods(pcx, pcz);
@@ -155,8 +163,8 @@ public class TerrainManager {
             refreshChunkLods(pcx, pcz);
             reprioritizePendingQueues(pcx, pcz, frustum);
             processPendingChunkGenerations(pcx, pcz, frustum);
-            processPendingFeatureGenerations(pcx, pcz);
             processPendingRenderBuilds(pcx, pcz);
+            processPendingFeatureGenerations(pcx, pcz);
             return;
         }
         int prevChunkX = lastUpdateChunkX;
@@ -192,8 +200,8 @@ public class TerrainManager {
         }
 
         processPendingChunkGenerations(pcx, pcz, frustum);
-        processPendingFeatureGenerations(pcx, pcz);
         processPendingRenderBuilds(pcx, pcz);
+        processPendingFeatureGenerations(pcx, pcz);
     }
 
     private void updateNeededChunks(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
@@ -203,24 +211,37 @@ public class TerrainManager {
             return;
         }
 
+        int expectedKeyCount = (renderDist * 2 + 1) * (renderDist * 2 + 1);
+        if (neededKeys.size() != expectedKeyCount) {
+            rebuildNeededChunks(pcx, pcz);
+            refreshChunkLods(pcx, pcz);
+            return;
+        }
+
         int dx = pcx - prevChunkX;
         int dz = pcz - prevChunkZ;
         if (dx != 0) {
-            int newCol = pcx + renderDist * Integer.signum(dx);
-            int oldCol = pcx - renderDist - Integer.signum(dx);
+            int sign = Integer.signum(dx);
+            int newCol = pcx + renderDist * sign;
+            int oldCol = prevChunkX - renderDist * sign;
             for (int offset = -renderDist; offset <= renderDist; offset++) {
                 addNeededChunk(newCol, pcz + offset, pcx, pcz);
-                removeNeededChunk(oldCol, pcz + offset);
+                removeNeededChunk(oldCol, prevChunkZ + offset);
             }
         }
 
         if (dz != 0) {
-            int newRow = pcz + renderDist * Integer.signum(dz);
-            int oldRow = pcz - renderDist - Integer.signum(dz);
+            int sign = Integer.signum(dz);
+            int newRow = pcz + renderDist * sign;
+            int oldRow = prevChunkZ - renderDist * sign;
             for (int offset = -renderDist; offset <= renderDist; offset++) {
                 addNeededChunk(pcx + offset, newRow, pcx, pcz);
-                removeNeededChunk(pcx + offset, oldRow);
+                removeNeededChunk(prevChunkX + offset, oldRow);
             }
+        }
+
+        if (neededKeys.size() != expectedKeyCount) {
+            rebuildNeededChunks(pcx, pcz);
         }
 
         refreshChunkLods(pcx, pcz);
@@ -265,13 +286,17 @@ public class TerrainManager {
     }
 
     private int computeTargetLod(int dist) {
+        int nearThreshold = Math.max(LOD_NEAR_THRESHOLD, featureRenderDist);
+        if (dist <= nearThreshold) {
+            return 0;
+        }
         if (dist > LOD_FAR_THRESHOLD) {
             return 3;
         }
         if (dist > LOD_MID_THRESHOLD) {
             return 2;
         }
-        if (dist > LOD_NEAR_THRESHOLD) {
+        if (dist > nearThreshold) {
             return 1;
         }
         return 0;
@@ -288,21 +313,17 @@ public class TerrainManager {
     private void queueChunkGeneration(long key, int cx, int cz, int targetLOD, int dist) {
         Integer existing = pendingChunkLods.get(key);
         if (existing != null) {
-            pendingChunkLods.put(key, Math.min(existing, targetLOD));
-            if (dist == 0) {
-                pendingChunks.remove(key);
+            pendingChunkLods.put(key, targetLOD);
+            pendingChunks.remove(key);
+            if (dist <= LOD_PRIORITY_RADIUS) {
                 pendingChunks.addFirst(key);
-            } else if (!pendingChunks.contains(key)) {
-                if (dist <= 2) {
-                    pendingChunks.addFirst(key);
-                } else {
-                    pendingChunks.addLast(key);
-                }
+            } else {
+                pendingChunks.addLast(key);
             }
             return;
         }
         pendingChunkLods.put(key, targetLOD);
-        if (dist <= 2) {
+        if (dist <= LOD_PRIORITY_RADIUS) {
             pendingChunks.addFirst(key);
         } else {
             pendingChunks.addLast(key);
@@ -383,141 +404,147 @@ public class TerrainManager {
         float minZ = cz * Chunk.SIZE * scale;
         float maxX = (cx + 1) * Chunk.SIZE * scale;
         float maxZ = (cz + 1) * Chunk.SIZE * scale;
-        float minY = -50f;
-        float maxY = 250f;
+        float minY = -200f;
+        float maxY = 1000f;
         return frustum.isBoxVisible(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
     private void processPendingChunkGenerations(int pcx, int pcz, Frustum frustum) {
+        if (frustum == null) {
+            return;
+        }
+
+        seedVisibleLodMismatches(pcx, pcz, frustum);
+
         int backlog = pendingChunks.size();
         int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
         long start = System.nanoTime();
-        if (frustum == null) {
-            processPendingChunkGenerationsWithoutFrustum(budget, start);
-            return;
-        }
-        List<Long> visibleKeys = new ArrayList<>();
-        for (long key : pendingChunks) {
-            int cx = (int) (key >> 32);
-            int cz = (int) key;
-            if (isChunkVisible(frustum, cx, cz)) {
-                visibleKeys.add(key);
-            }
-        }
-        if (visibleKeys.isEmpty()) {
-            return;
-        }
-        List<Long> upgradeKeys = new ArrayList<>();
-        List<Long> newKeys = new ArrayList<>();
-        for (long key : visibleKeys) {
-            Integer pendingLod = pendingChunkLods.get(key);
-            Chunk existing = chunks.get(key);
-            if (pendingLod != null && existing != null && pendingLod < existing.getLOD()) {
-                upgradeKeys.add(key);
-            } else {
-                newKeys.add(key);
-            }
-        }
-        Comparator<Long> distanceComparator = (a, b) -> {
+
+        Comparator<Long> priorityComparator = (a, b) -> {
             int cxA = (int) (a >> 32);
             int czA = (int) (long) a;
             int cxB = (int) (b >> 32);
             int czB = (int) (long) b;
             int distA = Math.max(Math.abs(cxA - pcx), Math.abs(czA - pcz));
             int distB = Math.max(Math.abs(cxB - pcx), Math.abs(czB - pcz));
-            return Integer.compare(distA, distB);
+            if (distA != distB) {
+                return Integer.compare(distA, distB);
+            }
+            Chunk existingA = chunks.get(a);
+            Chunk existingB = chunks.get(b);
+            Integer pendingA = pendingChunkLods.get(a);
+            Integer pendingB = pendingChunkLods.get(b);
+            boolean upgradeA = existingA != null && pendingA != null && pendingA < existingA.getLOD();
+            boolean upgradeB = existingB != null && pendingB != null && pendingB < existingB.getLOD();
+            if (upgradeA != upgradeB) {
+                return upgradeA ? -1 : 1;
+            }
+            return 0;
         };
-        upgradeKeys.sort(distanceComparator);
-        newKeys.sort(distanceComparator);
-        visibleKeys = new ArrayList<>(Math.min(budget, visibleKeys.size()));
-        for (long key : upgradeKeys) {
-            if (visibleKeys.size() >= budget) {
-                break;
-            }
-            visibleKeys.add(key);
-        }
-        for (long key : newKeys) {
-            if (visibleKeys.size() >= budget) {
-                break;
-            }
-            visibleKeys.add(key);
-        }
-        pendingChunks.removeAll(new HashSet<>(visibleKeys));
-        int count = 0;
-        for (long key : visibleKeys) {
-            if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
-                pendingChunks.addFirst(key);
-                continue;
-            }
-            Integer pendingLod = pendingChunkLods.remove(key);
-            if (pendingLod == null) {
-                continue;
-            }
-            if (inflightChunkKeys.contains(key)) {
-                pendingChunkLods.put(key, pendingLod);
-                pendingChunks.addFirst(key);
-                continue;
-            }
+
+        List<Long> nearVisible = new ArrayList<>();
+        List<Long> farVisible = new ArrayList<>();
+
+        for (long key : pendingChunks) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            int targetLOD = pendingLod;
-            Biome b = pickBiome(cx, cz);
-            Chunk existing = chunks.get(key);
-            if (existing != null && targetLOD >= existing.getLOD()) {
+            if (!isChunkVisible(frustum, cx, cz)) {
                 continue;
             }
-            inflightChunkKeys.add(key);
-            chunkGenerator.submit(() -> {
-                Chunk.ChunkBuildData data =
-                        Chunk.generateChunkData(cx, cz, terrainNoise, scale, b, this, targetLOD);
-                completedChunkBuilds.add(data);
-            });
-            count++;
-            if (count >= budget) {
+            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            if (dist <= LOD_PRIORITY_RADIUS) {
+                nearVisible.add(key);
+            } else {
+                farVisible.add(key);
+            }
+        }
+
+        nearVisible.sort(priorityComparator);
+        farVisible.sort(priorityComparator);
+
+        int processed = 0;
+        int nearBudget = Math.min(budget, Math.max(LOD_PRIORITY_MIN_BUDGET, budget / 2));
+
+        for (long key : nearVisible) {
+            if (processed >= nearBudget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
                 break;
+            }
+            if (tryDispatchChunkGeneration(key, true)) {
+                processed++;
+            }
+        }
+
+        if (processed >= budget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+            return;
+        }
+
+        for (long key : farVisible) {
+            if (processed >= budget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                break;
+            }
+            if (tryDispatchChunkGeneration(key, false)) {
+                processed++;
             }
         }
     }
 
-    private void processPendingChunkGenerationsWithoutFrustum(int budget, long start) {
-        int count = 0;
-        while (count < budget && !pendingChunks.isEmpty()) {
-            if (System.nanoTime() - start > CHUNK_BUDGET_NS) {
-                break;
-            }
-            long key = pendingChunks.pollFirst();
-            Integer pendingLod = pendingChunkLods.remove(key);
-            if (pendingLod == null) {
-                continue;
-            }
-            if (inflightChunkKeys.contains(key)) {
-                pendingChunkLods.put(key, pendingLod);
-                if (!pendingChunks.contains(key)) {
-                    pendingChunks.addFirst(key);
-                }
-                continue;
-            }
+    private void seedVisibleLodMismatches(int pcx, int pcz, Frustum frustum) {
+        for (long key : neededKeys) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            int targetLOD = pendingLod;
-            Biome b = pickBiome(cx, cz);
-            Chunk existing = chunks.get(key);
-            if (existing != null && targetLOD >= existing.getLOD()) {
+            if (!isChunkVisible(frustum, cx, cz)) {
                 continue;
             }
-            inflightChunkKeys.add(key);
-            chunkGenerator.submit(() -> {
-                Chunk.ChunkBuildData data =
-                        Chunk.generateChunkData(cx, cz, terrainNoise, scale, b, this, targetLOD);
-                completedChunkBuilds.add(data);
-            });
-            count++;
+            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            int targetLOD = computeTargetLod(dist);
+            Chunk existing = chunks.get(key);
+            if (existing == null || existing.getLOD() != targetLOD) {
+                queueChunkGeneration(key, cx, cz, targetLOD, dist);
+            }
         }
+    }
+
+    private boolean tryDispatchChunkGeneration(long key, boolean prioritizeRequeue) {
+        if (!pendingChunks.remove(key)) {
+            return false;
+        }
+        Integer pendingLod = pendingChunkLods.remove(key);
+        if (pendingLod == null) {
+            return false;
+        }
+        if (inflightChunkKeys.contains(key)) {
+            pendingChunkLods.put(key, pendingLod);
+            if (prioritizeRequeue) {
+                pendingChunks.addFirst(key);
+            } else {
+                pendingChunks.addLast(key);
+            }
+            return false;
+        }
+        int cx = (int) (key >> 32);
+        int cz = (int) key;
+        Chunk existing = chunks.get(key);
+        if (existing != null && pendingLod >= existing.getLOD()) {
+            return false;
+        }
+        Biome b = pickBiome(cx, cz);
+        int targetLOD = pendingLod;
+        inflightChunkKeys.add(key);
+        chunkGenerator.submit(() -> {
+            Chunk.ChunkBuildData data =
+                    Chunk.generateChunkData(cx, cz, terrainNoise, scale, b, this, targetLOD);
+            completedChunkBuilds.add(data);
+        });
+        return true;
     }
 
     private void queueFeatureGeneration(Chunk chunk, int pcx, int pcz) {
         long key = key(chunk.cx, chunk.cz);
         if (pendingFeatureKeys.contains(key) || inflightFeatureKeys.contains(key)) {
+            return;
+        }
+        Integer pendingLod = pendingChunkLods.get(key);
+        if (pendingLod != null && pendingLod != chunk.getLOD()) {
             return;
         }
         if (chunk.needsRenderResources()) {
@@ -553,6 +580,10 @@ public class TerrainManager {
             if (inflightFeatureKeys.contains(key)) {
                 continue;
             }
+            Integer pendingLod = pendingChunkLods.get(key);
+            if (pendingLod != null && pendingLod != chunk.getLOD()) {
+                continue;
+            }
             if (!chunk.needsFeatureGeneration(pcx, pcz, featureRenderDist)) {
                 continue;
             }
@@ -586,7 +617,7 @@ public class TerrainManager {
                 continue;
             }
             Chunk existing = chunks.get(key);
-            if (existing != null && data.lod >= existing.getLOD()) {
+            if (existing != null && data.lod == existing.getLOD()) {
                 continue;
             }
             Chunk built = new Chunk(data.cx, data.cz, terrainNoise, scale, data.biome, this, data.lod, data);
@@ -772,7 +803,7 @@ public class TerrainManager {
         float brightness = getFogBrightness(time);
 
         float fogEnd = Math.max(0f, renderDist * Chunk.SIZE * scale);
-        float fogStart = Math.max(0f, (renderDist - 1f) * Chunk.SIZE * scale);
+        float fogStart = Math.max(0f, fogEnd * 0.35f);
         glFogf(GL_FOG_START, fogStart);
         glFogf(GL_FOG_END, fogEnd);
 
@@ -792,7 +823,7 @@ public class TerrainManager {
         float time = skyRenderer.getTimeOfDay();
         float brightness = getFogBrightness(time);
         float fogEnd = Math.max(0f, renderDist * Chunk.SIZE * scale);
-        float fogStart = Math.max(0f, (renderDist - 1f) * Chunk.SIZE * scale);
+        float fogStart = Math.max(0f, fogEnd * 0.35f);
         float r = 0.6f * brightness;
         float g = 0.75f * brightness;
         float b = 1.0f * brightness;
@@ -831,6 +862,68 @@ public class TerrainManager {
         return regionGenerator.getBiomeWeights(wx, wz);
     }
 
+    public float[][][] getBiomeWeightGridForChunk(int cx, int cz, int weightStep) {
+        int regionCx = Math.floorDiv(cx, BIOME_WEIGHT_REGION_SIZE) * BIOME_WEIGHT_REGION_SIZE;
+        int regionCz = Math.floorDiv(cz, BIOME_WEIGHT_REGION_SIZE) * BIOME_WEIGHT_REGION_SIZE;
+        long key = key(regionCx, regionCz);
+        float[][][] regionGrid = biomeWeightCache.get(key);
+        int regionCells = BIOME_WEIGHT_REGION_SIZE * Chunk.SIZE;
+        int gridSize = regionCells / weightStep + 1;
+        if (regionGrid == null || regionGrid.length != gridSize) {
+            Biome[] biomes = Biome.values();
+            int biomeCount = biomes.length;
+            regionGrid = new float[gridSize][gridSize][biomeCount];
+            for (int gx = 0; gx < gridSize; gx++) {
+                int lx = gx * weightStep;
+                double wx = (regionCx * Chunk.SIZE + lx) * scale;
+                for (int gz = 0; gz < gridSize; gz++) {
+                    int lz = gz * weightStep;
+                    double wz = (regionCz * Chunk.SIZE + lz) * scale;
+                    Map<Biome, Float> weights = regionGenerator.getBiomeWeights(wx, wz);
+                    for (int i = 0; i < biomeCount; i++) {
+                        Float value = weights.get(biomes[i]);
+                        regionGrid[gx][gz][i] = value == null ? 0f : value;
+                    }
+                }
+            }
+            biomeWeightCache.put(key, regionGrid);
+        }
+
+        int chunkSize = Chunk.SIZE;
+        int chunkGridSize = (chunkSize + weightStep - 1) / weightStep + 1;
+        float[][][] chunkGrid = new float[chunkGridSize][chunkGridSize][regionGrid[0][0].length];
+        int offsetX = (cx - regionCx) * Chunk.SIZE;
+        int offsetZ = (cz - regionCz) * Chunk.SIZE;
+        for (int gx = 0; gx < chunkGridSize; gx++) {
+            int chunkLx = Math.min(gx * weightStep, chunkSize);
+            int worldLx = offsetX + chunkLx;
+            int regionX = worldLx / weightStep;
+            boolean sampleXOnGrid = (worldLx % weightStep) == 0;
+            for (int gz = 0; gz < chunkGridSize; gz++) {
+                int chunkLz = Math.min(gz * weightStep, chunkSize);
+                int worldLz = offsetZ + chunkLz;
+                int regionZ = worldLz / weightStep;
+                boolean sampleZOnGrid = (worldLz % weightStep) == 0;
+                if (sampleXOnGrid && sampleZOnGrid
+                        && regionX >= 0 && regionX < regionGrid.length
+                        && regionZ >= 0 && regionZ < regionGrid[regionX].length) {
+                    System.arraycopy(regionGrid[regionX][regionZ], 0, chunkGrid[gx][gz], 0,
+                            regionGrid[regionX][regionZ].length);
+                } else {
+                    double wx = (cx * Chunk.SIZE + chunkLx) * scale;
+                    double wz = (cz * Chunk.SIZE + chunkLz) * scale;
+                    Map<Biome, Float> weights = regionGenerator.getBiomeWeights(wx, wz);
+                    Biome[] biomes = Biome.values();
+                    for (int i = 0; i < biomes.length; i++) {
+                        Float value = weights.get(biomes[i]);
+                        chunkGrid[gx][gz][i] = value == null ? 0f : value;
+                    }
+                }
+            }
+        }
+        return chunkGrid;
+    }
+
     public Biome getDominantBiome(double wx, double wz) {
         return getBiomeWeights(wx, wz).entrySet().stream()
                 .max(Map.Entry.comparingByValue())
@@ -839,6 +932,14 @@ public class TerrainManager {
 
     public int getTexture(String name) {
         return textureMap.getOrDefault(name, 0);
+    }
+
+    public float[] getLightDirection() {
+        return skyRenderer.getLightDirection();
+    }
+
+    public float[] getLightColor() {
+        return skyRenderer.getLightColor();
     }
     public int getWaterBottomTexture() {
         return waterBottomTex;
@@ -874,6 +975,7 @@ public class TerrainManager {
         shadowRenderDist = Math.max(shadowRenderDist, renderDist + 12);
         featureImpostorDistance = Math.min(featureImpostorDistance, featureRenderDist);
         grassDetailDistance = Math.min(grassDetailDistance, featureRenderDist);
+        impostorHighQualityDistance = Math.min(impostorHighQualityDistance, featureRenderDist);
         renderDistanceDirty = true;
     }
 
@@ -887,6 +989,48 @@ public class TerrainManager {
 
     public int getFeatureImpostorDistance() {
         return featureImpostorDistance;
+    }
+
+    public void setImpostorAngleCount(int count) {
+        if (count >= 8) {
+            impostorAngleCount = 8;
+        } else if (count >= 4) {
+            impostorAngleCount = 4;
+        } else {
+            impostorAngleCount = 1;
+        }
+    }
+
+    public int getImpostorAngleCount() {
+        return impostorAngleCount;
+    }
+
+    public void setImpostorQualityPreset(int preset) {
+        impostorQualityPreset = Math.max(0, Math.min(2, preset));
+    }
+
+    public int getImpostorQualityPreset() {
+        return impostorQualityPreset;
+    }
+
+    public void setImpostorHighQualityDistance(int distance) {
+        impostorHighQualityDistance = Math.max(0, Math.min(distance, featureRenderDist));
+    }
+
+    public int getImpostorHighQualityDistance() {
+        return impostorHighQualityDistance;
+    }
+
+    public int getImpostorTextureSize(int chunkDistance) {
+        boolean highQuality = chunkDistance <= impostorHighQualityDistance;
+        switch (impostorQualityPreset) {
+            case 2:
+                return highQuality ? 512 : 256;
+            case 1:
+                return highQuality ? 256 : 128;
+            default:
+                return highQuality ? 128 : 64;
+        }
     }
 
     public void setGrassDetailDistance(int r) {

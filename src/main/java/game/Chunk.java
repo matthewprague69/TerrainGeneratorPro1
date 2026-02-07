@@ -3,27 +3,32 @@ import generators.LakeGenerator;
 import objects.BatchableFeature;
 import objects.Feature;
 import objects.ColorBatchableFeature;
+import objects.Cactus;
+import objects.Flower;
 import objects.Grass;
 import objects.Lake;
 import objects.Tree;
 import spawners.FeatureSpawner;
+import spawners.GrassSpawner;
 import spawners.LakeSpawner;
 import util.BoundingBox;
 import util.FeatureUtil;
+import util.MatrixUtils;
 import util.VertexBatchBuilder;
+import org.lwjgl.BufferUtils;
 
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL14.*;
 import static org.lwjgl.opengl.GL15.*;
 import static org.lwjgl.opengl.GL30.*;
+import java.nio.FloatBuffer;
 import java.util.*;
 
 public class Chunk {
-    public static final int SIZE = 30;
+    public static final int SIZE = 10;
     private static final float SKIRT_DEPTH = 24f;
     private static final float SKIRT_TOP_OFFSET = 0.02f;
     private static final float DEFAULT_TEXTURE_LOD_BIAS = 1f;
-    private static final int IMPOSTOR_TEXTURE_SIZE = 128;
     private static final float IMPOSTOR_PADDING = 1.05f;
     private static final class ImpostorSize {
         private final float width;
@@ -35,11 +40,11 @@ public class Chunk {
         }
     }
     private static final class ImpostorEntry {
-        private final int textureId;
+        private final int[] textureIds;
         private final ImpostorSize size;
 
-        private ImpostorEntry(int textureId, ImpostorSize size) {
-            this.textureId = textureId;
+        private ImpostorEntry(int[] textureIds, ImpostorSize size) {
+            this.textureIds = textureIds;
             this.size = size;
         }
     }
@@ -75,7 +80,7 @@ public class Chunk {
 
     private static final float DIRT_SLOPE_START = 0.65f;
     private static final float ROCK_SLOPE_START = 1.0f;
-    private static final int BLEND_STEPS = 4;
+    private static final int BLEND_STEPS = 8;
     private static final float BLEND_EDGE_START = 0.4f;
     private static final float BLEND_EDGE_END = 0.6f;
 
@@ -121,13 +126,24 @@ public class Chunk {
         public final float y;
         public final float z;
         public final long seed;
+        public final float grassHeightScale;
+        public final float grassWidthScale;
+        public final float grassColorScale;
 
         public FeatureSpawn(FeatureSpawner spawner, float x, float y, float z, long seed) {
+            this(spawner, x, y, z, seed, 1f, 1f, 1f);
+        }
+
+        public FeatureSpawn(FeatureSpawner spawner, float x, float y, float z, long seed,
+                            float grassHeightScale, float grassWidthScale, float grassColorScale) {
             this.spawner = spawner;
             this.x = x;
             this.y = y;
             this.z = z;
             this.seed = seed;
+            this.grassHeightScale = grassHeightScale;
+            this.grassWidthScale = grassWidthScale;
+            this.grassColorScale = grassColorScale;
         }
     }
 
@@ -239,17 +255,9 @@ public class Chunk {
             weightZs.add(SIZE);
         }
 
-        @SuppressWarnings("unchecked")
-        Map<Biome, Float>[][] weightGrid = new Map[weightXs.size()][weightZs.size()];
-        for (int gx = 0; gx < weightXs.size(); gx++) {
-            int lx = weightXs.get(gx);
-            double wx = (cx * SIZE + lx) * scale;
-            for (int gz = 0; gz < weightZs.size(); gz++) {
-                int lz = weightZs.get(gz);
-                double wz = (cz * SIZE + lz) * scale;
-                weightGrid[gx][gz] = manager.getBiomeWeights(wx, wz);
-            }
-        }
+        Biome[] biomes = Biome.values();
+        int biomeCount = biomes.length;
+        float[][][] weightGrid = manager.getBiomeWeightGridForChunk(cx, cz, weightStep);
 
         for (int x = 0; x <= SIZE; x++) {
             for (int z = 0; z <= SIZE; z++) {
@@ -273,25 +281,19 @@ public class Chunk {
                 float w01 = sx * tz;
                 float w11 = tx * tz;
 
-                Map<Biome, Double> weights = new HashMap<>();
-                for (Map.Entry<Biome, Float> entry : weightGrid[gxIndex][gzIndex].entrySet()) {
-                    weights.merge(entry.getKey(), entry.getValue() * (double) w00, Double::sum);
-                }
-                for (Map.Entry<Biome, Float> entry : weightGrid[gxIndex + 1][gzIndex].entrySet()) {
-                    weights.merge(entry.getKey(), entry.getValue() * (double) w10, Double::sum);
-                }
-                for (Map.Entry<Biome, Float> entry : weightGrid[gxIndex][gzIndex + 1].entrySet()) {
-                    weights.merge(entry.getKey(), entry.getValue() * (double) w01, Double::sum);
-                }
-                for (Map.Entry<Biome, Float> entry : weightGrid[gxIndex + 1][gzIndex + 1].entrySet()) {
-                    weights.merge(entry.getKey(), entry.getValue() * (double) w11, Double::sum);
-                }
                 double blendedHeight = 0;
+                double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
 
-                for (Map.Entry<Biome, Double> entry : weights.entrySet()) {
-                    Biome entryBiome = entry.getKey();
-                    double weight = entry.getValue();
-
+                for (int i = 0; i < biomeCount; i++) {
+                    double weight =
+                            weightGrid[gxIndex][gzIndex][i] * w00
+                            + weightGrid[gxIndex + 1][gzIndex][i] * w10
+                            + weightGrid[gxIndex][gzIndex + 1][i] * w01
+                            + weightGrid[gxIndex + 1][gzIndex + 1][i] * w11;
+                    if (weight <= 0.00001) {
+                        continue;
+                    }
+                    Biome entryBiome = biomes[i];
                     double freq = entryBiome.frequency;
                     double amp = entryBiome.amplitude * 0.5;
                     double sum = 0;
@@ -305,7 +307,6 @@ public class Chunk {
                         amp *= PERSISTENCE;
                     }
 
-                    double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
                     double biomeHeight = entryBiome.baseHeight + sum + elevationOffset;
                     blendedHeight += biomeHeight * weight;
                 }
@@ -326,24 +327,70 @@ public class Chunk {
         final double PERSISTENCE = 0.35;
         final double macroFreq = 0.002;
         final double macroAmp = 2.0; // Lower to reduce elevation distortion
+        final int lodClamped = Math.max(0, lod);
+        final int baseOctaves = 2;
+        final int lodPenalty = Math.max(0, lodClamped - 1);
+        final int lodOctaves = Math.max(baseOctaves, OCTAVES - lodPenalty);
+        final int weightStep = 4;
+        List<Integer> weightXs = new ArrayList<>();
+        List<Integer> weightZs = new ArrayList<>();
+        for (int x = 0; x <= SIZE; x += weightStep) {
+            weightXs.add(x);
+        }
+        if (weightXs.get(weightXs.size() - 1) != SIZE) {
+            weightXs.add(SIZE);
+        }
+        for (int z = 0; z <= SIZE; z += weightStep) {
+            weightZs.add(z);
+        }
+        if (weightZs.get(weightZs.size() - 1) != SIZE) {
+            weightZs.add(SIZE);
+        }
+
+        Biome[] biomes = Biome.values();
+        int biomeCount = biomes.length;
+        float[][][] weightGrid = manager.getBiomeWeightGridForChunk(cx, cz, weightStep);
 
         for (int x = 0; x <= SIZE; x++) {
             for (int z = 0; z <= SIZE; z++) {
                 double wx = (cx * SIZE + x) * scale;
                 double wz = (cz * SIZE + z) * scale;
 
-                Map<Biome, Float> weights = manager.getBiomeWeights(wx, wz);
-                double blendedHeight = 0;
+                int gxIndex = Math.min(x / weightStep, weightXs.size() - 2);
+                int gzIndex = Math.min(z / weightStep, weightZs.size() - 2);
+                int x0 = weightXs.get(gxIndex);
+                int x1 = weightXs.get(gxIndex + 1);
+                int z0 = weightZs.get(gzIndex);
+                int z1 = weightZs.get(gzIndex + 1);
 
-                for (Map.Entry<Biome, Float> entry : weights.entrySet()) {
-                    Biome biome = entry.getKey();
-                    float weight = entry.getValue();
+                float tx = x1 == x0 ? 0f : (float) (x - x0) / (float) (x1 - x0);
+                float tz = z1 == z0 ? 0f : (float) (z - z0) / (float) (z1 - z0);
+                float sx = 1f - tx;
+                float sz = 1f - tz;
+
+                float w00 = sx * sz;
+                float w10 = tx * sz;
+                float w01 = sx * tz;
+                float w11 = tx * tz;
+                double blendedHeight = 0;
+                double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
+
+                for (int i = 0; i < biomeCount; i++) {
+                    double weight =
+                            weightGrid[gxIndex][gzIndex][i] * w00
+                            + weightGrid[gxIndex + 1][gzIndex][i] * w10
+                            + weightGrid[gxIndex][gzIndex + 1][i] * w01
+                            + weightGrid[gxIndex + 1][gzIndex + 1][i] * w11;
+                    if (weight <= 0.00001) {
+                        continue;
+                    }
+                    Biome biome = biomes[i];
 
                     double freq = biome.frequency;
                     double amp = biome.amplitude * 0.5; // Reduce noise contribution
                     double sum = 0;
 
-                    for (int o = 0; o < OCTAVES; o++) {
+                    for (int o = 0; o < lodOctaves; o++) {
                         double offset = o * 100.0;
                         double val = terrainNoise.eval((wx + offset) * freq, (wz - offset) * freq);
                         val = (val * val * val) * 1.2;
@@ -351,8 +398,6 @@ public class Chunk {
                         freq *= 1.7;
                         amp *= PERSISTENCE;
                     }
-
-                    double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
 
                     // Biome shaping: baseHeight is now the dominant vertical shift
                     double biomeHeight = biome.baseHeight + sum + elevationOffset;
@@ -438,7 +483,14 @@ public class Chunk {
         }
         copyMaskInto(result.featureMask, featureMask);
         for (FeatureSpawn spawn : result.spawns) {
-            Feature f = spawn.spawner.spawn(spawn.x, spawn.y, spawn.z, spawn.seed);
+            Feature f;
+            if (spawn.spawner instanceof GrassSpawner) {
+                GrassSpawner grassSpawner = (GrassSpawner) spawn.spawner;
+                f = new Grass(spawn.x, spawn.y, spawn.z, grassSpawner.getTextureName(), spawn.seed,
+                        spawn.grassHeightScale, spawn.grassWidthScale, spawn.grassColorScale);
+            } else {
+                f = spawn.spawner.spawn(spawn.x, spawn.y, spawn.z, spawn.seed);
+            }
             features.add(f);
         }
         featuresGenerated = true;
@@ -489,17 +541,18 @@ public class Chunk {
             return;
         }
 
-        FeatureLod lod = getFeatureLod(chunkDistance, featureImpostorDistance, featureRenderDist);
         // Draw features if they are above water
         for (Feature f : features) {
-            if (f instanceof Grass || f instanceof ColorBatchableFeature) {
+            FeatureLod lod = getFeatureLodForFeature(f, chunkDistance, featureImpostorDistance,
+                    featureRenderDist, grassDetailDistance);
+            if (lod == FeatureLod.FULL && (f instanceof Grass || f instanceof ColorBatchableFeature)) {
                 continue;
             }
             if (!shouldDrawFeatureForLod(f, lod)) {
                 continue;
             }
             if (f.y >= WATER_LEVEL) {
-                drawFeatureForLod(f, lod);
+                drawFeatureForLod(f, lod, chunkDistance);
             }
         }
     }
@@ -672,9 +725,13 @@ public class Chunk {
         glBindBuffer(GL_ARRAY_BUFFER, grassBatchVbo);
         glEnableClientState(GL_VERTEX_ARRAY);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-        glVertexPointer(3, GL_FLOAT, 5 * Float.BYTES, 0);
-        glTexCoordPointer(2, GL_FLOAT, 5 * Float.BYTES, 3 * Float.BYTES);
+        int stride = 8 * Float.BYTES;
+        glEnableClientState(GL_COLOR_ARRAY);
+        glVertexPointer(3, GL_FLOAT, stride, 0);
+        glTexCoordPointer(2, GL_FLOAT, stride, 3 * Float.BYTES);
+        glColorPointer(3, GL_FLOAT, stride, 5 * Float.BYTES);
         glDrawArrays(GL_QUADS, 0, grassBatchVertexCount);
+        glDisableClientState(GL_COLOR_ARRAY);
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -707,7 +764,7 @@ public class Chunk {
 
         glBindBuffer(GL_ARRAY_BUFFER, grassBatchVbo);
         glEnableClientState(GL_VERTEX_ARRAY);
-        glVertexPointer(3, GL_FLOAT, 5 * Float.BYTES, 0);
+        glVertexPointer(3, GL_FLOAT, 8 * Float.BYTES, 0);
         glDrawArrays(GL_QUADS, 0, grassBatchVertexCount);
         glDisableClientState(GL_VERTEX_ARRAY);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -826,9 +883,10 @@ public class Chunk {
             return;
         }
 
-        FeatureLod lod = getFeatureLod(chunkDistance, featureImpostorDistance, featureRenderDist);
         for (Feature f : features) {
-            if (f instanceof Grass || f instanceof ColorBatchableFeature) {
+            FeatureLod lod = getFeatureLodForFeature(f, chunkDistance, featureImpostorDistance,
+                    featureRenderDist, grassDetailDistance);
+            if (lod == FeatureLod.FULL && (f instanceof Grass || f instanceof ColorBatchableFeature)) {
                 continue;
             }
             if (!shouldDrawFeatureForLod(f, lod)) {
@@ -840,12 +898,22 @@ public class Chunk {
         }
     }
 
-    private FeatureLod getFeatureLod(int chunkDistance, int impostorDistance,
-                                     int cullDistance) {
+    private FeatureLod getFeatureLodForFeature(Feature feature, int chunkDistance, int impostorDistance,
+                                               int cullDistance, int detailDistance) {
         if (chunkDistance > cullDistance) {
             return FeatureLod.CULLED;
         }
-        if (chunkDistance > impostorDistance) {
+        int impostorStart = impostorDistance;
+        if (feature instanceof Grass || feature instanceof ColorBatchableFeature) {
+            impostorStart = detailDistance;
+            if (feature instanceof Grass && chunkDistance >= impostorStart) {
+                Grass grass = (Grass) feature;
+                if (grass.getImpostorHeight() < 1.35f) {
+                    return FeatureLod.CULLED;
+                }
+            }
+        }
+        if (chunkDistance >= impostorStart) {
             return FeatureLod.IMPOSTOR;
         }
         return FeatureLod.FULL;
@@ -855,31 +923,26 @@ public class Chunk {
         if (lod == FeatureLod.CULLED) {
             return false;
         }
-        if (lod == FeatureLod.IMPOSTOR) {
-            return feature instanceof Tree || feature instanceof Lake;
-        }
-        return true;
+        return lod != FeatureLod.CULLED;
     }
 
-    private void drawFeatureForLod(Feature feature, FeatureLod lod) {
+    private void drawFeatureForLod(Feature feature, FeatureLod lod, int chunkDistance) {
         if (lod == FeatureLod.IMPOSTOR) {
-            drawFeatureImpostor(feature);
+            drawFeatureImpostor(feature, chunkDistance);
         } else {
             feature.draw();
         }
     }
 
     private void drawFeatureDepthForLod(Feature feature, FeatureLod lod) {
-        if (lod == FeatureLod.IMPOSTOR) {
-            drawFeatureImpostorDepth(feature);
-        } else {
+        if (lod != FeatureLod.IMPOSTOR) {
             feature.drawDepth();
         }
     }
 
-    private void drawFeatureImpostor(Feature feature) {
-        ImpostorEntry entry = getImpostorEntry(feature);
-        int texture = entry.textureId;
+    private void drawFeatureImpostor(Feature feature, int chunkDistance) {
+        ImpostorEntry entry = getImpostorEntry(feature, chunkDistance);
+        int texture = pickImpostorTexture(entry, feature);
         ImpostorSize size = getActualImpostorSize(feature);
 
         float[] modelView = new float[16];
@@ -900,10 +963,16 @@ public class Chunk {
         glDisable(GL_LIGHTING);
         glDisable(GL_CULL_FACE);
         glColor4f(1f, 1f, 1f, 1f);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glEnable(GL_ALPHA_TEST);
-        glAlphaFunc(GL_GREATER, 0.05f);
+        if (feature instanceof Lake) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glEnable(GL_ALPHA_TEST);
+            glAlphaFunc(GL_GREATER, 0.05f);
+        } else {
+            glDisable(GL_BLEND);
+            glEnable(GL_ALPHA_TEST);
+            glAlphaFunc(GL_GREATER, 0.45f);
+        }
         glBindTexture(GL_TEXTURE_2D, texture);
         glBegin(GL_QUADS);
         glTexCoord2f(0f, 0f);
@@ -917,6 +986,27 @@ public class Chunk {
         glEnd();
         glDisable(GL_ALPHA_TEST);
         glDisable(GL_BLEND);
+    }
+
+    private int pickImpostorTexture(ImpostorEntry entry, Feature feature) {
+        int angleCount = entry.textureIds.length;
+        if (angleCount <= 1) {
+            return entry.textureIds[0];
+        }
+        float[] modelView = new float[16];
+        glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
+        float[] invView = MatrixUtils.invert(modelView);
+        float camX = invView[12];
+        float camZ = invView[14];
+        float dx = camX - feature.x;
+        float dz = camZ - feature.z;
+        double angle = Math.atan2(-dx, dz);
+        if (angle < 0) {
+            angle += Math.PI * 2.0;
+        }
+        double sector = (Math.PI * 2.0) / angleCount;
+        int index = (int) Math.floor((angle + sector * 0.5) / sector) % angleCount;
+        return entry.textureIds[index];
     }
 
     private void drawFeatureImpostorDepth(Feature feature) {
@@ -944,7 +1034,7 @@ public class Chunk {
     }
 
     private ImpostorSize getImpostorSize(Feature feature, float heightBucket, float canopyBucket,
-                                         float lakeRadiusBucket) {
+                                         float lakeRadiusBucket, float widthBucket) {
         float width = 2.5f;
         float height = 4.5f;
         if (feature instanceof Tree) {
@@ -953,6 +1043,9 @@ public class Chunk {
         } else if (feature instanceof Lake) {
             width = lakeRadiusBucket * 2.2f;
             height = 1.5f;
+        } else if (widthBucket > 0f || heightBucket > 0f) {
+            width = widthBucket;
+            height = heightBucket;
         }
         return new ImpostorSize(width * IMPOSTOR_PADDING, height * IMPOSTOR_PADDING);
     }
@@ -962,7 +1055,7 @@ public class Chunk {
         float height = 4.5f;
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
-            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
+            float canopy = Math.max(tree.getCanopyRadius(), tree.getType().baseThickness * 2f);
             width = canopy * 1.8f;
             height = tree.getHeight();
         } else if (feature instanceof Lake) {
@@ -970,44 +1063,91 @@ public class Chunk {
             float radius = Math.max(lake.getRadiusX(), lake.getRadiusZ());
             width = radius * 2.2f;
             height = 1.5f;
+        } else if (feature instanceof Cactus) {
+            Cactus cactus = (Cactus) feature;
+            width = cactus.getMaxRadius() * 2.4f;
+            height = cactus.getMaxHeight();
+        } else if (feature instanceof Grass) {
+            Grass grass = (Grass) feature;
+            width = grass.getImpostorWidth() * 1.6f;
+            height = grass.getImpostorHeight();
+        } else if (feature instanceof Flower) {
+            Flower flower = (Flower) feature;
+            width = flower.getImpostorWidth();
+            height = flower.getImpostorHeight();
         }
         return new ImpostorSize(width * IMPOSTOR_PADDING, height * IMPOSTOR_PADDING);
     }
 
-    private ImpostorEntry getImpostorEntry(Feature feature) {
+    private ImpostorEntry getImpostorEntry(Feature feature, int chunkDistance) {
         String key = feature.getClass().getSimpleName();
         float heightBucket = 0f;
         float canopyBucket = 0f;
         float lakeRadiusBucket = 0f;
+        float widthBucket = 0f;
+        int angleCount = manager.getImpostorAngleCount();
+        int textureSize = manager.getImpostorTextureSize(chunkDistance);
         if (feature instanceof Tree) {
             Tree tree = (Tree) feature;
-            float canopy = Math.max(tree.getType().leafSize, tree.getType().baseThickness * 2f);
+            float canopy = Math.max(tree.getCanopyRadius(), tree.getType().baseThickness * 2f);
             heightBucket = Math.max(0.25f, quantizeUp(tree.getHeight(), 0.25f));
             canopyBucket = Math.max(0.1f, quantizeUp(canopy, 0.1f));
-            key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves() + ":" + heightBucket + ":" + canopyBucket;
+            key = "Tree:" + tree.getType().name() + ":" + tree.hasLeaves() + ":" + heightBucket + ":" + canopyBucket
+                    + ":" + angleCount + ":" + textureSize;
         } else if (feature instanceof Lake) {
             Lake lake = (Lake) feature;
             float radius = Math.max(lake.getRadiusX(), lake.getRadiusZ());
             lakeRadiusBucket = Math.max(0.5f, quantizeUp(radius, 0.5f));
-            key = "Lake:" + lakeRadiusBucket;
+            key = "Lake:" + lakeRadiusBucket + ":" + angleCount + ":" + textureSize;
+        } else if (feature instanceof Cactus) {
+            Cactus cactus = (Cactus) feature;
+            heightBucket = Math.max(0.25f, quantizeUp(cactus.getMaxHeight(), 0.25f));
+            widthBucket = Math.max(0.1f, quantizeUp(cactus.getMaxRadius() * 2.4f, 0.1f));
+            key = "Cactus:" + heightBucket + ":" + widthBucket + ":" + angleCount + ":" + textureSize;
+        } else if (feature instanceof Grass) {
+            Grass grass = (Grass) feature;
+            heightBucket = Math.max(0.1f, quantizeUp(grass.getImpostorHeight(), 0.1f));
+            widthBucket = Math.max(0.1f, quantizeUp(grass.getImpostorWidth() * 1.6f, 0.1f));
+            key = "Grass:" + grass.getBatchTextureId() + ":" + heightBucket + ":" + widthBucket + ":" + angleCount
+                    + ":" + textureSize;
+        } else if (feature instanceof Flower) {
+            Flower flower = (Flower) feature;
+            heightBucket = Math.max(0.1f, quantizeUp(flower.getImpostorHeight(), 0.1f));
+            widthBucket = Math.max(0.1f, quantizeUp(flower.getImpostorWidth(), 0.1f));
+            key = "Flower:" + flower.getType().name() + ":" + heightBucket + ":" + widthBucket + ":" + angleCount
+                    + ":" + textureSize;
         }
         float finalHeightBucket = heightBucket;
         float finalCanopyBucket = canopyBucket;
         float finalLakeRadiusBucket = lakeRadiusBucket;
+        float finalWidthBucket = widthBucket;
         return IMPOSTOR_TEXTURES.computeIfAbsent(key, ignored -> {
-            ImpostorSize size = getImpostorSize(feature, finalHeightBucket, finalCanopyBucket, finalLakeRadiusBucket);
-            int textureId = renderImpostorTexture(feature, size);
-            return new ImpostorEntry(textureId, size);
+            ImpostorSize size = getImpostorSize(feature, finalHeightBucket, finalCanopyBucket, finalLakeRadiusBucket,
+                    finalWidthBucket);
+            int[] textureIds = renderImpostorTextures(feature, size, angleCount, textureSize);
+            return new ImpostorEntry(textureIds, size);
         });
     }
 
-    private int renderImpostorTexture(Feature feature, ImpostorSize size) {
+    private int[] renderImpostorTextures(Feature feature, ImpostorSize size, int angleCount, int textureSize) {
+        int count = Math.max(1, angleCount);
+        int[] textureIds = new int[count];
+        for (int i = 0; i < count; i++) {
+            float angle = (360f / count) * i;
+            textureIds[i] = renderImpostorTexture(feature, size, angle, textureSize);
+        }
+        return textureIds;
+    }
+
+    private int renderImpostorTexture(Feature feature, ImpostorSize size, float angleDegrees, int textureSize) {
         int textureId = glGenTextures();
         glBindTexture(GL_TEXTURE_2D, textureId);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE,
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, textureSize, textureSize,
                 0, GL_RGBA, GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
         int fbo = glGenFramebuffers();
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -1015,7 +1155,7 @@ public class Chunk {
 
         int depthBuffer = glGenRenderbuffers();
         glBindRenderbuffer(GL_RENDERBUFFER, depthBuffer);
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, textureSize, textureSize);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer);
 
         int status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -1031,13 +1171,40 @@ public class Chunk {
 
         int[] viewport = new int[4];
         glGetIntegerv(GL_VIEWPORT, viewport);
-        glViewport(0, 0, IMPOSTOR_TEXTURE_SIZE, IMPOSTOR_TEXTURE_SIZE);
+        glViewport(0, 0, textureSize, textureSize);
 
         glClearColor(0f, 0f, 0f, 0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
+        glPushAttrib(GL_ENABLE_BIT | GL_LIGHTING_BIT | GL_CURRENT_BIT);
         glDisable(GL_FOG);
-        glDisable(GL_LIGHTING);
+        glEnable(GL_LIGHTING);
+        glEnable(GL_LIGHT0);
+        glEnable(GL_COLOR_MATERIAL);
+        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+        float[] sunDir = manager.getLightDirection();
+        float[] sunColor = manager.getLightColor();
+        float lightY = Math.max(0.2f, sunDir[1]);
+        float lightZ = -1f;
+        float lightLen = (float) Math.sqrt(lightY * lightY + lightZ * lightZ);
+        float lightDirX = 0f;
+        float lightDirY = lightY / lightLen;
+        float lightDirZ = lightZ / lightLen;
+        FloatBuffer impostorLightPos = BufferUtils.createFloatBuffer(4).put(new float[] {
+                lightDirX, lightDirY, lightDirZ, 0f
+        }).flip();
+        glLightfv(GL_LIGHT0, GL_POSITION, impostorLightPos);
+        FloatBuffer impostorDiffuse = BufferUtils.createFloatBuffer(4).put(new float[] {
+                Math.min(1f, sunColor[0] * 1.15f),
+                Math.min(1f, sunColor[1] * 1.15f),
+                Math.min(1f, sunColor[2] * 1.15f),
+                1f
+        }).flip();
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, impostorDiffuse);
+        FloatBuffer impostorAmbient = BufferUtils.createFloatBuffer(4).put(new float[] {
+                sunColor[0] * 0.55f, sunColor[1] * 0.55f, sunColor[2] * 0.55f, 1f
+        }).flip();
+        glLightfv(GL_LIGHT0, GL_AMBIENT, impostorAmbient);
         glDisable(GL_CULL_FACE);
         glColor4f(1f, 1f, 1f, 1f);
 
@@ -1051,6 +1218,7 @@ public class Chunk {
         glMatrixMode(GL_MODELVIEW);
         glPushMatrix();
         glLoadIdentity();
+        glRotatef(angleDegrees, 0f, 1f, 0f);
         glTranslatef(-feature.x, -feature.y, -feature.z);
         feature.draw();
         glPopMatrix();
@@ -1058,6 +1226,7 @@ public class Chunk {
         glMatrixMode(GL_PROJECTION);
         glPopMatrix();
         glMatrixMode(GL_MODELVIEW);
+        glPopAttrib();
 
         glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -1075,17 +1244,35 @@ public class Chunk {
     }
 
     private void addSkirts(Map<BatchKey, FloatBuilder> builders, int step, float texScale) {
+        boolean drawWest = shouldDrawSkirtForNeighbor(cx - 1, cz);
+        boolean drawEast = shouldDrawSkirtForNeighbor(cx + 1, cz);
+        boolean drawNorth = shouldDrawSkirtForNeighbor(cx, cz - 1);
+        boolean drawSouth = shouldDrawSkirtForNeighbor(cx, cz + 1);
+
         for (int x = 0; x < SIZE; x += step) {
             int x2 = Math.min(x + step, SIZE);
-            addSkirtQuad(builders, x, 0, x2, 0, heights[x][0], heights[x2][0], texScale);
-            addSkirtQuad(builders, x, SIZE, x2, SIZE, heights[x][SIZE], heights[x2][SIZE], texScale);
+            if (drawNorth) {
+                addSkirtQuad(builders, x, 0, x2, 0, heights[x][0], heights[x2][0], texScale);
+            }
+            if (drawSouth) {
+                addSkirtQuad(builders, x, SIZE, x2, SIZE, heights[x][SIZE], heights[x2][SIZE], texScale);
+            }
         }
 
         for (int z = 0; z < SIZE; z += step) {
             int z2 = Math.min(z + step, SIZE);
-            addSkirtQuad(builders, 0, z, 0, z2, heights[0][z], heights[0][z2], texScale);
-            addSkirtQuad(builders, SIZE, z, SIZE, z2, heights[SIZE][z], heights[SIZE][z2], texScale);
+            if (drawWest) {
+                addSkirtQuad(builders, 0, z, 0, z2, heights[0][z], heights[0][z2], texScale);
+            }
+            if (drawEast) {
+                addSkirtQuad(builders, SIZE, z, SIZE, z2, heights[SIZE][z], heights[SIZE][z2], texScale);
+            }
         }
+    }
+
+    private boolean shouldDrawSkirtForNeighbor(int neighborCx, int neighborCz) {
+        Chunk neighbor = manager.getChunk(neighborCx, neighborCz);
+        return neighbor == null || neighbor.getLOD() != lod;
     }
 
     private void addSkirtQuad(Map<BatchKey, FloatBuilder> builders, int x1, int z1, int x2, int z2,
@@ -1140,14 +1327,12 @@ public class Chunk {
         float wx = (cx * SIZE + (x1 + x2 + x3) / 3f) * scale;
         float wz = (cz * SIZE + (z1 + z2 + z3) / 3f) * scale;
         BiomeBlend blend = getBiomeBlend(wx, wz, manager);
-        int primaryTex = pickTextureForBiome(blend.primary, height, slope, manager);
-        addTriangleToBuilder(builders, primaryTex, 1f, x1, z1, x2, z2, x3, z3, y1, y2, y3, texScale);
+        float primaryAlpha = blend.secondary == null ? 1f : (1f - blend.blend);
+        addBiomeTextureLayers(builders, blend.primary, primaryAlpha, height, slope, x1, z1, x2, z2, x3, z3,
+                y1, y2, y3, texScale);
         if (blend.blend > 0.0f && blend.secondary != null) {
-            int secondaryTex = pickTextureForBiome(blend.secondary, height, slope, manager);
-            if (secondaryTex != primaryTex) {
-                addTriangleToBuilder(builders, secondaryTex, blend.blend, x1, z1, x2, z2, x3, z3, y1, y2, y3,
-                        texScale);
-            }
+            addBiomeTextureLayers(builders, blend.secondary, blend.blend, height, slope, x1, z1, x2, z2, x3, z3,
+                    y1, y2, y3, texScale);
         }
     }
 
@@ -1388,6 +1573,90 @@ public class Chunk {
         return t * t * (3.0 - 2.0 * t);
     }
 
+    private void addBiomeTextureLayers(Map<BatchKey, FloatBuilder> builders, Biome targetBiome, float biomeAlpha,
+                                       float height, float slope,
+                                       int x1, int z1, int x2, int z2, int x3, int z3,
+                                       float y1, float y2, float y3, float texScale) {
+        float snowWeight = smoothstepf(SNOW_HEIGHT_START - 1.5f, SNOW_HEIGHT_FULL, height);
+        float baseWeight = 1f - snowWeight;
+        float sandWeight = (1f - smoothstepf(WATER_SURROUNDING_LEVEL + 0.2f, WATER_SURROUNDING_LEVEL + 3f, height))
+                * baseWeight;
+        float remainingBase = Math.max(0f, baseWeight - sandWeight);
+        float rockWeight = smoothstepf(ROCK_SLOPE_START - 0.1f, ROCK_SLOPE_START + 0.05f, slope) * remainingBase;
+        float dirtWeight = smoothstepf(DIRT_SLOPE_START - 0.1f, DIRT_SLOPE_START + 0.05f, slope)
+                * remainingBase * (1f - rockWeight);
+        float grassWeight = Math.max(0f, remainingBase - rockWeight - dirtWeight);
+
+        float total = snowWeight + sandWeight + rockWeight + dirtWeight + grassWeight;
+        if (total < 0.001f) {
+            grassWeight = 1f;
+            total = 1f;
+        }
+        if (total > 1f) {
+            float inv = 1f / total;
+            snowWeight *= inv;
+            sandWeight *= inv;
+            rockWeight *= inv;
+            dirtWeight *= inv;
+            grassWeight *= inv;
+        }
+
+        float maxWeight = grassWeight;
+        int baseTex = manager.getTexture(targetBiome.grassTex);
+        if (sandWeight > maxWeight) {
+            maxWeight = sandWeight;
+            baseTex = manager.getWaterBottomTexture();
+        }
+        if (dirtWeight > maxWeight) {
+            maxWeight = dirtWeight;
+            baseTex = manager.getTexture(targetBiome.dirtTex);
+        }
+        if (rockWeight > maxWeight) {
+            maxWeight = rockWeight;
+            baseTex = manager.getTexture(targetBiome.rockTex);
+        }
+        if (snowWeight > maxWeight) {
+            baseTex = manager.getSnowTexture();
+        }
+
+        addTriangleToBuilder(builders, baseTex, biomeAlpha, x1, z1, x2, z2, x3, z3, y1, y2, y3, texScale);
+
+        if (snowWeight > 0.001f && baseTex != manager.getSnowTexture()) {
+            int tex = manager.getSnowTexture();
+            addTriangleToBuilder(builders, tex, snowWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
+                    y1, y2, y3, texScale);
+        }
+        if (sandWeight > 0.001f && baseTex != manager.getWaterBottomTexture()) {
+            int tex = manager.getWaterBottomTexture();
+            addTriangleToBuilder(builders, tex, sandWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
+                    y1, y2, y3, texScale);
+        }
+        if (rockWeight > 0.001f && baseTex != manager.getTexture(targetBiome.rockTex)) {
+            int tex = manager.getTexture(targetBiome.rockTex);
+            addTriangleToBuilder(builders, tex, rockWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
+                    y1, y2, y3, texScale);
+        }
+        if (dirtWeight > 0.001f && baseTex != manager.getTexture(targetBiome.dirtTex)) {
+            int tex = manager.getTexture(targetBiome.dirtTex);
+            addTriangleToBuilder(builders, tex, dirtWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
+                    y1, y2, y3, texScale);
+        }
+        if (grassWeight > 0.001f && baseTex != manager.getTexture(targetBiome.grassTex)) {
+            int tex = manager.getTexture(targetBiome.grassTex);
+            addTriangleToBuilder(builders, tex, grassWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
+                    y1, y2, y3, texScale);
+        }
+    }
+
+    private static float smoothstepf(float edge0, float edge1, float x) {
+        float t = Math.max(0f, Math.min(1f, (x - edge0) / (edge1 - edge0)));
+        return t * t * (3f - 2f * t);
+    }
+
+    private static float lerp(float a, float b, float t) {
+        return a + (b - a) * t;
+    }
+
     private float computeSlope(int x, int z) {
         return computeSlope(heights, x, z);
     }
@@ -1422,6 +1691,9 @@ public class Chunk {
         }
         // --- Water surrounding zone ---
         else if (height <= WATER_SURROUNDING_LEVEL) {
+            return manager.getWaterBottomTexture();
+        }
+        if (height <= WATER_SURROUNDING_LEVEL + 3f) {
             return manager.getWaterBottomTexture();
         }
 
@@ -1675,8 +1947,63 @@ public class Chunk {
                 int iy = Math.round(height * 1000);
                 long seed = FeatureUtil.hashSeed(ix, iy, iz, input.seed);
 
-                spawns.add(new FeatureSpawn(spawner, wx, wy, wz, seed));
-                input.featureMask[x][z] = true;
+                if (spawner instanceof GrassSpawner) {
+                    int clusterCount = 9 + rand.nextInt(7);
+                    int clusterRadius = 2 + rand.nextInt(2);
+                    float jitter = 0.6f * input.scale;
+                    for (int p = 0; p < clusterCount; p++) {
+                        int px;
+                        int pz;
+                        if (p == 0) {
+                            px = x;
+                            pz = z;
+                        } else {
+                            int dx = rand.nextInt(clusterRadius * 2 + 1) - clusterRadius;
+                            int dz = rand.nextInt(clusterRadius * 2 + 1) - clusterRadius;
+                            px = x + dx;
+                            pz = z + dz;
+                        }
+                        if (px < 0 || pz < 0 || px >= SIZE || pz >= SIZE) {
+                            continue;
+                        }
+                        if (input.featureMask[px][pz] || input.lakeMask[px][pz]) {
+                            continue;
+                        }
+                        if (input.riverSurface != null
+                                && input.riverSurface[px][pz] > Float.NEGATIVE_INFINITY / 2) {
+                            continue;
+                        }
+                        float patchHeight = input.heights[px][pz];
+                        if (patchHeight < FEATURE_MIN_HEIGHT || patchHeight > FEATURE_MAX_HEIGHT) {
+                            continue;
+                        }
+                        float patchSlope = computeSlope(input.heights, px, pz);
+                        if (patchSlope > FEATURE_SLOPE_SPAWN_THRESHOLD) {
+                            continue;
+                        }
+                        float dist = (float) Math.sqrt((px - x) * (px - x) + (pz - z) * (pz - z));
+                        float t = clusterRadius <= 0 ? 0f : Math.min(1f, dist / (float) clusterRadius);
+                        float heightScale = lerp(1.1f, 0.55f, t);
+                        float widthScale = lerp(1.05f, 0.7f, t);
+                        float colorScale = lerp(1.05f, 0.85f, t);
+                        float jx = (rand.nextFloat() - 0.5f) * jitter;
+                        float jz = (rand.nextFloat() - 0.5f) * jitter;
+                        float pwx = (input.cx * SIZE + px + 0.5f) * input.scale + jx;
+                        float pwz = (input.cz * SIZE + pz + 0.5f) * input.scale + jz;
+                        float patchSlopeAdjustment = patchSlope * 2.0f;
+                        float pwy = patchHeight - patchSlopeAdjustment;
+                        int pix = input.cx * SIZE + px;
+                        int piz = input.cz * SIZE + pz;
+                        int piy = Math.round(patchHeight * 1000);
+                        long pseed = FeatureUtil.hashSeed(pix, piy, piz, input.seed);
+                        spawns.add(new FeatureSpawn(spawner, pwx, pwy, pwz, pseed,
+                                heightScale, widthScale, colorScale));
+                        input.featureMask[px][pz] = true;
+                    }
+                } else {
+                    spawns.add(new FeatureSpawn(spawner, wx, wy, wz, seed));
+                    input.featureMask[x][z] = true;
+                }
             }
         }
 

@@ -1,6 +1,7 @@
 package game;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
+import util.MatrixUtils;
 import java.nio.FloatBuffer;
 
 public class Frustum {
@@ -9,65 +10,68 @@ public class Frustum {
     public static Frustum fromOpenGL() {
         FloatBuffer projBuffer = BufferUtils.createFloatBuffer(16);
         FloatBuffer modelBuffer = BufferUtils.createFloatBuffer(16);
-        FloatBuffer clipBuffer = BufferUtils.createFloatBuffer(16);
 
         GL11.glGetFloatv(GL11.GL_PROJECTION_MATRIX, projBuffer);
         GL11.glGetFloatv(GL11.GL_MODELVIEW_MATRIX, modelBuffer);
 
+        projBuffer.rewind();
+        modelBuffer.rewind();
+
         float[] proj = new float[16];
         float[] model = new float[16];
-        projBuffer.get(proj).flip();
-        modelBuffer.get(model).flip();
+        projBuffer.get(proj);
+        modelBuffer.get(model);
 
-        float[] clip = new float[16];
-        for (int i = 0; i < 4; i++) {
-            int row = i * 4;
-            for (int j = 0; j < 4; j++) {
-                clip[row + j] = proj[0 + j] * model[row + 0]
-                        + proj[4 + j] * model[row + 1]
-                        + proj[8 + j] * model[row + 2]
-                        + proj[12 + j] * model[row + 3];
-            }
-        }
+        float[] clip = MatrixUtils.multiply(proj, model);
 
         Frustum frustum = new Frustum();
 
-        // Extract planes
-        frustum.extractPlane(0, clip, -1, 0); // Right
-        frustum.extractPlane(1, clip, 1, 0); // Left
-        frustum.extractPlane(2, clip, 1, 1); // Bottom
-        frustum.extractPlane(3, clip, -1, 1); // Top
-        frustum.extractPlane(4, clip, -1, 2); // Far
-        frustum.extractPlane(5, clip, 1, 2); // Near
+        // Column-major extraction from clip matrix.
+        frustum.setPlane(0, clip[3] - clip[0], clip[7] - clip[4], clip[11] - clip[8], clip[15] - clip[12]); // Right
+        frustum.setPlane(1, clip[3] + clip[0], clip[7] + clip[4], clip[11] + clip[8], clip[15] + clip[12]); // Left
+        frustum.setPlane(2, clip[3] + clip[1], clip[7] + clip[5], clip[11] + clip[9], clip[15] + clip[13]); // Bottom
+        frustum.setPlane(3, clip[3] - clip[1], clip[7] - clip[5], clip[11] - clip[9], clip[15] - clip[13]); // Top
+        frustum.setPlane(4, clip[3] - clip[2], clip[7] - clip[6], clip[11] - clip[10], clip[15] - clip[14]); // Far
+        frustum.setPlane(5, clip[3] + clip[2], clip[7] + clip[6], clip[11] + clip[10], clip[15] + clip[14]); // Near
 
         return frustum;
     }
 
-    private void extractPlane(int plane, float[] clip, int sign, int column) {
-        int base = column;
-        planes[plane][0] = clip[3] + sign * clip[base];
-        planes[plane][1] = clip[7] + sign * clip[base + 4];
-        planes[plane][2] = clip[11] + sign * clip[base + 8];
-        planes[plane][3] = clip[15] + sign * clip[base + 12];
-
+    private void setPlane(int plane, float a, float b, float c, float d) {
+        planes[plane][0] = a;
+        planes[plane][1] = b;
+        planes[plane][2] = c;
+        planes[plane][3] = d;
         normalizePlane(plane);
     }
 
     private void normalizePlane(int plane) {
         float[] p = planes[plane];
         float length = (float) Math.sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+        if (length < 1e-6f) {
+            return;
+        }
         for (int i = 0; i < 4; i++) {
             p[i] /= length;
         }
     }
 
     public boolean isBoxVisible(float minX, float minY, float minZ, float maxX, float maxY, float maxZ) {
+        final float epsilon = 0.05f;
         for (int i = 0; i < 6; i++) {
             float[] p = planes[i];
-            if (p[0] * ((p[0] < 0) ? minX : maxX) +
-                    p[1] * ((p[1] < 0) ? minY : maxY) +
-                    p[2] * ((p[2] < 0) ? minZ : maxZ) +
-                    p[3] <= 0) {
+            int outside = 0;
+
+            outside += p[0] * minX + p[1] * minY + p[2] * minZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * maxX + p[1] * minY + p[2] * minZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * minX + p[1] * maxY + p[2] * minZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * maxX + p[1] * maxY + p[2] * minZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * minX + p[1] * minY + p[2] * maxZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * maxX + p[1] * minY + p[2] * maxZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * minX + p[1] * maxY + p[2] * maxZ + p[3] <= -epsilon ? 1 : 0;
+            outside += p[0] * maxX + p[1] * maxY + p[2] * maxZ + p[3] <= -epsilon ? 1 : 0;
+
+            if (outside == 8) {
                 return false;
             }
         }

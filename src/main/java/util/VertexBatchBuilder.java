@@ -10,18 +10,21 @@ public class VertexBatchBuilder {
     private int size = 0;
 
     public void append(float[] vertices, float offsetX, float offsetY, float offsetZ) {
-        for (int i = 0; i < vertices.length; i += 5) {
-            ensureCapacity(5);
+        for (int i = 0; i < vertices.length; i += 8) {
+            ensureCapacity(8);
             data[size++] = vertices[i] + offsetX;
             data[size++] = vertices[i + 1] + offsetY;
             data[size++] = vertices[i + 2] + offsetZ;
             data[size++] = vertices[i + 3];
             data[size++] = vertices[i + 4];
+            data[size++] = vertices[i + 5];
+            data[size++] = vertices[i + 6];
+            data[size++] = vertices[i + 7];
         }
     }
 
     public int getVertexCount() {
-        return size / 5;
+        return size / 8;
     }
 
     public FloatBuffer toBuffer() {

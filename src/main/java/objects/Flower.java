@@ -16,6 +16,7 @@ public class Flower extends Feature implements ColorBatchableFeature {
 
     private int displayList = -1;
     private final float[] batchVertices;
+    private final float impostorHeight;
 
     public Flower(float x, float y, float z, FlowerType type, long globalSeed) {
         super(x, y, z);
@@ -41,6 +42,7 @@ public class Flower extends Feature implements ColorBatchableFeature {
                 0.1f + rand.nextFloat() * 0.05f
         };
 
+        this.impostorHeight = type.height + 0.08f;
         buildDisplayList();
         this.batchVertices = buildBatchVertices();
     }
@@ -151,6 +153,18 @@ public class Flower extends Feature implements ColorBatchableFeature {
         if (displayList != -1) {
             glDeleteLists(displayList, 1);
         }
+    }
+
+    public float getImpostorWidth() {
+        return 0.24f;
+    }
+
+    public float getImpostorHeight() {
+        return impostorHeight;
+    }
+
+    public FlowerType getType() {
+        return type;
     }
 
     private float[] buildBatchVertices() {

@@ -25,9 +25,22 @@ public class Main {
     private ShadowRenderer shadowRenderer;
 
     private boolean fullscreen = false;
-    private final int windowedWidth = 1600;
-    private final int windowedHeight = 1200;
+    private int windowedWidth = 1600;
+    private int windowedHeight = 1200;
+    private int framebufferWidth = windowedWidth;
+    private int framebufferHeight = windowedHeight;
     private long primaryMonitor;
+
+    private static final int[][] RESOLUTION_OPTIONS = new int[][] {
+            { 640, 360 },
+            { 1280, 720 },
+            { 1600, 1200 },
+            { 1920, 1080 },
+            { 2560, 1440 },
+            { 3840, 2160 }
+    };
+    private int resolutionIndex = 2;
+    private boolean vsyncEnabled = false;
     private boolean menuOpen = false;
     private boolean prevMouseDown = false;
 
@@ -43,16 +56,22 @@ public class Main {
             throw new RuntimeException("Failed to create window");
 
         glfwMakeContextCurrent(window);
-        glfwSwapInterval(1);
         GL.createCapabilities();
+        applyVSync();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer w = stack.mallocInt(1), h = stack.mallocInt(1);
             glfwGetFramebufferSize(window, w, h);
-            glViewport(0, 0, w.get(0), h.get(0));
+            framebufferWidth = w.get(0);
+            framebufferHeight = h.get(0);
+            glViewport(0, 0, framebufferWidth, framebufferHeight);
         }
 
-        glfwSetFramebufferSizeCallback(window, (win, w, h) -> glViewport(0, 0, w, h));
+        glfwSetFramebufferSizeCallback(window, (win, w, h) -> {
+            framebufferWidth = Math.max(1, w);
+            framebufferHeight = Math.max(1, h);
+            glViewport(0, 0, framebufferWidth, framebufferHeight);
+        });
 
         sky = new SkyRenderer(); // create sky first
         terrain = new TerrainManager(1234L, 1f, 8, 4, sky); // pass sky into terrain manager
@@ -79,7 +98,7 @@ public class Main {
     private void setupProjection() {
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
-        float aspect = 800f / 600f;
+        float aspect = framebufferHeight > 0 ? (float) framebufferWidth / (float) framebufferHeight : 1f;
         float fov = 45f;
         float near = 0.1f;
         float far = 2000f; // Updated far plane
@@ -96,14 +115,22 @@ public class Main {
         glLoadMatrixf(proj);
     }
 
+    private void applyVSync() {
+        glfwSwapInterval(vsyncEnabled ? 1 : 0);
+    }
+
     private void toggleFullscreen() {
         fullscreen = !fullscreen;
         GLFWVidMode vidmode = glfwGetVideoMode(primaryMonitor);
+        if (vidmode == null) {
+            return;
+        }
 
         if (fullscreen) {
+            int[] resolution = RESOLUTION_OPTIONS[resolutionIndex];
             glfwSetWindowMonitor(window, primaryMonitor,
                     0, 0,
-                    vidmode.width(), vidmode.height(),
+                    resolution[0], resolution[1],
                     vidmode.refreshRate());
         } else {
             int centerX = (vidmode.width() - windowedWidth) / 2;
@@ -114,6 +141,66 @@ public class Main {
                     windowedWidth, windowedHeight,
                     vidmode.refreshRate());
         }
+    }
+
+    private void changeResolution(int delta) {
+        int next = Math.max(0, Math.min(RESOLUTION_OPTIONS.length - 1, resolutionIndex + delta));
+        if (next == resolutionIndex) {
+            return;
+        }
+        resolutionIndex = next;
+        int[] resolution = RESOLUTION_OPTIONS[resolutionIndex];
+        applyResolution(resolution[0], resolution[1]);
+    }
+
+    private void applyResolution(int width, int height) {
+        width = Math.max(320, width);
+        height = Math.max(240, height);
+        windowedWidth = width;
+        windowedHeight = height;
+
+        GLFWVidMode vidmode = glfwGetVideoMode(primaryMonitor);
+        int refreshRate = vidmode != null ? vidmode.refreshRate() : GLFW_DONT_CARE;
+        if (fullscreen) {
+            glfwSetWindowMonitor(window, primaryMonitor,
+                    0, 0,
+                    width, height,
+                    refreshRate);
+        } else {
+            glfwSetWindowSize(window, width, height);
+            if (vidmode != null) {
+                int centerX = (vidmode.width() - width) / 2;
+                int centerY = (vidmode.height() - height) / 2;
+                glfwSetWindowPos(window, centerX, centerY);
+            }
+        }
+    }
+
+    private String getVsyncLabel() {
+        return vsyncEnabled ? "ON" : "OFF";
+    }
+
+    private String getResolutionLabel() {
+        int[] resolution = RESOLUTION_OPTIONS[resolutionIndex];
+        int w = resolution[0];
+        int h = resolution[1];
+        String tier;
+        if (w == 640 && h == 360) {
+            tier = "360p";
+        } else if (w == 1280 && h == 720) {
+            tier = "HD";
+        } else if (w == 1600 && h == 1200) {
+            tier = "UXGA";
+        } else if (w == 1920 && h == 1080) {
+            tier = "Full HD";
+        } else if (w == 2560 && h == 1440) {
+            tier = "QHD";
+        } else if (w == 3840 && h == 2160) {
+            tier = "4K";
+        } else {
+            tier = "Custom";
+        }
+        return tier + " (" + w + "x" + h + ")";
     }
 
     private void drawInfoOverlay(int width, int height) {
@@ -136,7 +223,7 @@ public class Main {
     private void drawMenuOverlay(int width, int height, double mouseX, double mouseY) {
         UIRenderer.begin2D(width, height);
         float panelWidth = 520f;
-        float panelHeight = 360f;
+        float panelHeight = 620f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
 
@@ -158,11 +245,26 @@ public class Main {
         drawMenuRow("Impostor feature distance", terrain.getFeatureImpostorDistance(), panelX + 20, rowY,
                 mouseX, mouseY);
         rowY -= 40;
+        drawMenuRow("Impostor angles", terrain.getImpostorAngleCount(), panelX + 20, rowY,
+                mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("Impostor quality", getImpostorQualityLabel(), panelX + 20, rowY,
+                mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRow("HQ impostor distance", terrain.getImpostorHighQualityDistance(), panelX + 20, rowY,
+                mouseX, mouseY);
+        rowY -= 40;
         drawMenuRow("Grass detail distance", terrain.getGrassDetailDistance(), panelX + 20, rowY,
                 mouseX, mouseY);
         rowY -= 40;
         drawMenuRow("Shadow render distance", terrain.getShadowRenderDistance(), panelX + 20, rowY,
                 mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("Fullscreen", fullscreen ? "ON" : "OFF", panelX + 20, rowY, mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("Resolution", getResolutionLabel(), panelX + 20, rowY, mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("VSync", getVsyncLabel(), panelX + 20, rowY, mouseX, mouseY);
 
         PixelTextRenderer.drawText("Time: " + String.format("%.2f", sky.getTimeOfDay()),
                 panelX + 20, panelY + 30, 1.0f);
@@ -190,6 +292,16 @@ public class Main {
         drawButton(plusX, buttonY, buttonSize, buttonSize, "+", mouseX, mouseY);
     }
 
+    private void drawMenuRowText(String label, String value, float x, float y, double mouseX, double mouseY) {
+        PixelTextRenderer.drawText(label + ": " + value, x, y + 12, 1.0f);
+        float buttonSize = 22f;
+        float minusX = x + 300;
+        float plusX = x + 340;
+        float buttonY = y;
+        drawButton(minusX, buttonY, buttonSize, buttonSize, "-", mouseX, mouseY);
+        drawButton(plusX, buttonY, buttonSize, buttonSize, "+", mouseX, mouseY);
+    }
+
     private void drawButton(float x, float y, float w, float h, String label,
                             double mouseX, double mouseY) {
         boolean hover = mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h;
@@ -205,7 +317,7 @@ public class Main {
 
     private void handleMenuClick(double mouseX, double mouseY, int width, int height) {
         float panelWidth = 520f;
-        float panelHeight = 360f;
+        float panelHeight = 620f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
         float rowY = panelY + panelHeight - 80;
@@ -226,7 +338,31 @@ public class Main {
             return;
         }
         rowY -= 40;
-        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 4);
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 4)) {
+            return;
+        }
+        rowY -= 40;
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 5)) {
+            return;
+        }
+        rowY -= 40;
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 6)) {
+            return;
+        }
+        rowY -= 40;
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 7)) {
+            return;
+        }
+        rowY -= 40;
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 8)) {
+            return;
+        }
+        rowY -= 40;
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 9)) {
+            return;
+        }
+        rowY -= 40;
+        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 10);
     }
 
     private boolean handleRowClick(double mouseX, double mouseY, float x, float y, int rowIndex) {
@@ -256,13 +392,60 @@ public class Main {
                 terrain.setFeatureImpostorDistance(terrain.getFeatureImpostorDistance() + delta);
                 break;
             case 3:
-                terrain.setGrassDetailDistance(terrain.getGrassDetailDistance() + delta);
+                terrain.setImpostorAngleCount(adjustImpostorAngleCount(terrain.getImpostorAngleCount(), delta));
                 break;
             case 4:
+                terrain.setImpostorQualityPreset(adjustImpostorQualityPreset(terrain.getImpostorQualityPreset(), delta));
+                break;
+            case 5:
+                terrain.setImpostorHighQualityDistance(terrain.getImpostorHighQualityDistance() + delta);
+                break;
+            case 6:
+                terrain.setGrassDetailDistance(terrain.getGrassDetailDistance() + delta);
+                break;
+            case 7:
                 terrain.setShadowRenderDistance(terrain.getShadowRenderDistance() + delta);
+                break;
+            case 8:
+                toggleFullscreen();
+                break;
+            case 9:
+                changeResolution(delta);
+                break;
+            case 10:
+                vsyncEnabled = !vsyncEnabled;
+                applyVSync();
                 break;
             default:
                 break;
+        }
+    }
+
+    private int adjustImpostorAngleCount(int current, int delta) {
+        int[] options = new int[] { 1, 4, 8 };
+        int index = 0;
+        for (int i = 0; i < options.length; i++) {
+            if (options[i] == current) {
+                index = i;
+                break;
+            }
+        }
+        int next = Math.max(0, Math.min(options.length - 1, index + delta));
+        return options[next];
+    }
+
+    private int adjustImpostorQualityPreset(int current, int delta) {
+        return Math.max(0, Math.min(2, current + delta));
+    }
+
+    private String getImpostorQualityLabel() {
+        switch (terrain.getImpostorQualityPreset()) {
+            case 2:
+                return "High";
+            case 1:
+                return "Medium";
+            default:
+                return "Low";
         }
     }
 
@@ -274,8 +457,8 @@ public class Main {
         double lastTime = glfwGetTime();
         boolean prevT = false;
         boolean prevZ = false;
-        boolean prevP = false;
         boolean prevEsc = false;
+        boolean prevF = false;
         boolean prev1 = false;
         boolean prev2 = false;
         boolean prev3 = false;
@@ -321,13 +504,11 @@ public class Main {
             }
             prevEsc = currEsc;
 
-            if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) {
+            boolean currF = glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS;
+            if (currF && !prevF) {
                 toggleFullscreen();
-                try {
-                    Thread.sleep(200);
-                } catch (InterruptedException ignored) {
-                }
             }
+            prevF = currF;
             // --- Key toggles ---
             boolean currT = glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS;
             boolean currZ = glfwGetKey(window, GLFW_KEY_Y) == GLFW_PRESS;
@@ -388,7 +569,13 @@ public class Main {
             if (!menuOpen) {
                 player.update(window, dt);
             }
+
+            setupProjection();
+            glMatrixMode(GL_MODELVIEW);
+            glLoadIdentity();
+            player.applyView();
             Frustum frustum = Frustum.fromOpenGL();
+
             terrain.update(player.getX(), player.getZ(), frustum);
             sky.update(dt);
 
@@ -402,8 +589,8 @@ public class Main {
                     player.getX(),
                     player.getY(),
                     player.getZ(),
-                    windowedWidth,
-                    windowedHeight
+                    framebufferWidth,
+                    framebufferHeight
             );
 
             setupProjection();
