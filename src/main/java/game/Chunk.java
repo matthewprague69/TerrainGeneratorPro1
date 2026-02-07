@@ -812,9 +812,24 @@ public class Chunk {
 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glDepthMask(false);
         glDepthFunc(GL_LEQUAL);
         glPolygonOffset(-1f, -1f);
+        glColorMask(false, false, false, false);
+        glDepthMask(true);
+        for (TerrainBatch batch : terrainBatches) {
+            if (batch.alpha >= 0.999f) {
+                continue;
+            }
+            glBindTexture(GL_TEXTURE_2D, batch.textureId);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, lodBias);
+            glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
+            glVertexPointer(3, GL_FLOAT, strideBytes, 0);
+            glNormalPointer(GL_FLOAT, strideBytes, 3 * Float.BYTES);
+            glTexCoordPointer(2, GL_FLOAT, strideBytes, 6 * Float.BYTES);
+            glDrawArrays(GL_TRIANGLES, 0, batch.vertexCount);
+        }
+        glColorMask(true, true, true, true);
+        glDepthMask(false);
         for (TerrainBatch batch : terrainBatches) {
             if (batch.alpha >= 0.999f) {
                 continue;
