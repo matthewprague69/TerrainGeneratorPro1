@@ -19,6 +19,10 @@ public class GrassSpawner implements FeatureSpawner {
         return new Grass(x, y, z, textureName, seed);
     }
 
+    public String getTextureName() {
+        return textureName;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

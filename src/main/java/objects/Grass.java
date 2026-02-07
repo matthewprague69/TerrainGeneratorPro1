@@ -27,6 +27,9 @@ public class Grass extends Feature implements BatchableFeature {
     private final int vboId;
     private final boolean textured;
     private final float r, g, b;
+    private final float bladeHeightScale;
+    private final float bladeWidthScale;
+    private final float bladeColorScale;
     private final float[] verticesData;
 
     private static final FloatBuffer verticesBuffer =
@@ -38,6 +41,9 @@ public class Grass extends Feature implements BatchableFeature {
         long seed = FeatureUtil.hashSeed(x, y, z, globalSeed);
         this.rand = new Random(seed);
         this.textured = true;
+        this.bladeHeightScale = 1f;
+        this.bladeWidthScale = 1f;
+        this.bladeColorScale = 1f;
         float tint = 0.9f + rand.nextFloat() * 0.2f;
         this.r = tint * (0.9f + rand.nextFloat() * 0.2f);
         this.g = tint * (0.95f + rand.nextFloat() * 0.2f);
@@ -50,12 +56,37 @@ public class Grass extends Feature implements BatchableFeature {
         vboId = uploadToGPU();
     }
 
+    public Grass(float x, float y, float z, String textureName, long globalSeed,
+                 float heightScale, float widthScale, float colorScale) {
+        super(x, y, z);
+
+        long seed = FeatureUtil.hashSeed(x, y, z, globalSeed);
+        this.rand = new Random(seed);
+        this.textured = true;
+        this.bladeHeightScale = heightScale;
+        this.bladeWidthScale = widthScale;
+        this.bladeColorScale = colorScale;
+        float tint = 0.9f + rand.nextFloat() * 0.2f;
+        this.r = tint * (0.9f + rand.nextFloat() * 0.2f);
+        this.g = tint * (0.95f + rand.nextFloat() * 0.2f);
+        this.b = tint * (0.85f + rand.nextFloat() * 0.2f);
+
+        this.textureId = TextureLoader.getOrLoad(textureName);
+
+        this.verticesData = new float[BLADE_COUNT * 8 * 8];
+        generateGrassVertices();
+        vboId = uploadToGPU();
+    }
+
     public Grass(float x, float y, float z, float r, float g, float b, long globalSeed) {
         super(x, y, z);
 
         long seed = FeatureUtil.hashSeed(x, y, z, globalSeed);
         this.rand = new Random(seed);
         this.textured = false;
+        this.bladeHeightScale = 1f;
+        this.bladeWidthScale = 1f;
+        this.bladeColorScale = 1f;
         this.r = r;
         this.g = g;
         this.b = b;
@@ -86,11 +117,12 @@ public class Grass extends Feature implements BatchableFeature {
             float offsetZ = (float) Math.sin(theta) * radius;
             float edge = clamp01(radius / Math.max(0.001f, patchRadius));
             float heightScale = lerp(0.45f, 1f, 1f - edge * edge);
-            float height = (BLADE_BASE_HEIGHT + rand.nextFloat() * BLADE_HEIGHT_VARIATION) * heightScale;
-            float widthScale = 0.7f + rand.nextFloat() * 0.6f;
+            float height = (BLADE_BASE_HEIGHT + rand.nextFloat() * BLADE_HEIGHT_VARIATION)
+                    * heightScale * bladeHeightScale;
+            float widthScale = (0.7f + rand.nextFloat() * 0.6f) * bladeWidthScale;
             float angle = rand.nextFloat() * 360f;
             float lean = (rand.nextFloat() - 0.5f) * 0.45f;
-            float bladeTint = 0.85f + rand.nextFloat() * 0.25f;
+            float bladeTint = (0.85f + rand.nextFloat() * 0.25f) * bladeColorScale;
             float bladeR = clamp01(r * bladeTint);
             float bladeG = clamp01(g * bladeTint);
             float bladeB = clamp01(b * bladeTint);
@@ -205,11 +237,11 @@ public class Grass extends Feature implements BatchableFeature {
     }
 
     public float getImpostorWidth() {
-        return IMPOSTOR_WIDTH;
+        return IMPOSTOR_WIDTH * bladeWidthScale;
     }
 
     public float getImpostorHeight() {
-        return IMPOSTOR_HEIGHT;
+        return IMPOSTOR_HEIGHT * bladeHeightScale;
     }
 
     private static float lerp(float a, float b, float t) {

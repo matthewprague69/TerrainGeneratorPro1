@@ -125,13 +125,24 @@ public class Chunk {
         public final float y;
         public final float z;
         public final long seed;
+        public final float grassHeightScale;
+        public final float grassWidthScale;
+        public final float grassColorScale;
 
         public FeatureSpawn(FeatureSpawner spawner, float x, float y, float z, long seed) {
+            this(spawner, x, y, z, seed, 1f, 1f, 1f);
+        }
+
+        public FeatureSpawn(FeatureSpawner spawner, float x, float y, float z, long seed,
+                            float grassHeightScale, float grassWidthScale, float grassColorScale) {
             this.spawner = spawner;
             this.x = x;
             this.y = y;
             this.z = z;
             this.seed = seed;
+            this.grassHeightScale = grassHeightScale;
+            this.grassWidthScale = grassWidthScale;
+            this.grassColorScale = grassColorScale;
         }
     }
 
@@ -471,7 +482,14 @@ public class Chunk {
         }
         copyMaskInto(result.featureMask, featureMask);
         for (FeatureSpawn spawn : result.spawns) {
-            Feature f = spawn.spawner.spawn(spawn.x, spawn.y, spawn.z, spawn.seed);
+            Feature f;
+            if (spawn.spawner instanceof GrassSpawner) {
+                GrassSpawner grassSpawner = (GrassSpawner) spawn.spawner;
+                f = new Grass(spawn.x, spawn.y, spawn.z, grassSpawner.getTextureName(), spawn.seed,
+                        spawn.grassHeightScale, spawn.grassWidthScale, spawn.grassColorScale);
+            } else {
+                f = spawn.spawner.spawn(spawn.x, spawn.y, spawn.z, spawn.seed);
+            }
             features.add(f);
         }
         featuresGenerated = true;
@@ -1547,6 +1565,10 @@ public class Chunk {
         return t * t * (3.0 - 2.0 * t);
     }
 
+    private static float lerp(float a, float b, float t) {
+        return a + (b - a) * t;
+    }
+
     private float computeSlope(int x, int z) {
         return computeSlope(heights, x, z);
     }
@@ -1834,8 +1856,55 @@ public class Chunk {
                 int iy = Math.round(height * 1000);
                 long seed = FeatureUtil.hashSeed(ix, iy, iz, input.seed);
 
-                spawns.add(new FeatureSpawn(spawner, wx, wy, wz, seed));
-                input.featureMask[x][z] = true;
+                if (spawner instanceof GrassSpawner) {
+                    int patchCount = 1 + rand.nextInt(15);
+                    float patchRadius = 0.8f + rand.nextFloat() * 2.2f;
+                    float jitter = 0.6f * input.scale;
+                    for (int p = 0; p < patchCount; p++) {
+                        float offRadius = p == 0 ? 0f : (float) Math.sqrt(rand.nextFloat()) * patchRadius;
+                        float theta = rand.nextFloat() * (float) (Math.PI * 2.0);
+                        int px = x + Math.round((float) Math.cos(theta) * offRadius);
+                        int pz = z + Math.round((float) Math.sin(theta) * offRadius);
+                        if (px < 0 || pz < 0 || px >= SIZE || pz >= SIZE) {
+                            continue;
+                        }
+                        if (input.featureMask[px][pz] || input.lakeMask[px][pz]) {
+                            continue;
+                        }
+                        if (input.riverSurface != null
+                                && input.riverSurface[px][pz] > Float.NEGATIVE_INFINITY / 2) {
+                            continue;
+                        }
+                        float patchHeight = input.heights[px][pz];
+                        if (patchHeight < FEATURE_MIN_HEIGHT || patchHeight > FEATURE_MAX_HEIGHT) {
+                            continue;
+                        }
+                        float patchSlope = computeSlope(input.heights, px, pz);
+                        if (patchSlope > FEATURE_SLOPE_SPAWN_THRESHOLD) {
+                            continue;
+                        }
+                        float t = patchRadius <= 0.001f ? 0f : Math.min(1f, offRadius / patchRadius);
+                        float heightScale = lerp(1.1f, 0.55f, t);
+                        float widthScale = lerp(1.05f, 0.7f, t);
+                        float colorScale = lerp(1.05f, 0.85f, t);
+                        float jx = (rand.nextFloat() - 0.5f) * jitter;
+                        float jz = (rand.nextFloat() - 0.5f) * jitter;
+                        float pwx = (input.cx * SIZE + px + 0.5f) * input.scale + jx;
+                        float pwz = (input.cz * SIZE + pz + 0.5f) * input.scale + jz;
+                        float patchSlopeAdjustment = patchSlope * 2.0f;
+                        float pwy = patchHeight - patchSlopeAdjustment;
+                        int pix = input.cx * SIZE + px;
+                        int piz = input.cz * SIZE + pz;
+                        int piy = Math.round(patchHeight * 1000);
+                        long pseed = FeatureUtil.hashSeed(pix, piy, piz, input.seed);
+                        spawns.add(new FeatureSpawn(spawner, pwx, pwy, pwz, pseed,
+                                heightScale, widthScale, colorScale));
+                        input.featureMask[px][pz] = true;
+                    }
+                } else {
+                    spawns.add(new FeatureSpawn(spawner, wx, wy, wz, seed));
+                    input.featureMask[x][z] = true;
+                }
             }
         }
 
