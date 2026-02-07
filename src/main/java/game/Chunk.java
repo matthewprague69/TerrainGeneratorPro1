@@ -906,9 +906,7 @@ public class Chunk {
     }
 
     private void drawFeatureDepthForLod(Feature feature, FeatureLod lod) {
-        if (lod == FeatureLod.IMPOSTOR) {
-            drawFeatureImpostorDepth(feature);
-        } else {
+        if (lod != FeatureLod.IMPOSTOR) {
             feature.drawDepth();
         }
     }
