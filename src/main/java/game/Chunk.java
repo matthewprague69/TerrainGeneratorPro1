@@ -1601,49 +1601,27 @@ public class Chunk {
             grassWeight *= inv;
         }
 
-        float maxWeight = grassWeight;
         int baseTex = manager.getTexture(targetBiome.grassTex);
-        if (sandWeight > maxWeight) {
-            maxWeight = sandWeight;
-            baseTex = manager.getWaterBottomTexture();
-        }
-        if (dirtWeight > maxWeight) {
-            maxWeight = dirtWeight;
-            baseTex = manager.getTexture(targetBiome.dirtTex);
-        }
-        if (rockWeight > maxWeight) {
-            maxWeight = rockWeight;
-            baseTex = manager.getTexture(targetBiome.rockTex);
-        }
-        if (snowWeight > maxWeight) {
-            baseTex = manager.getSnowTexture();
-        }
-
         addTriangleToBuilder(builders, baseTex, biomeAlpha, x1, z1, x2, z2, x3, z3, y1, y2, y3, texScale);
 
-        if (snowWeight > 0.001f && baseTex != manager.getSnowTexture()) {
+        if (snowWeight > 0.001f) {
             int tex = manager.getSnowTexture();
             addTriangleToBuilder(builders, tex, snowWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
                     y1, y2, y3, texScale);
         }
-        if (sandWeight > 0.001f && baseTex != manager.getWaterBottomTexture()) {
+        if (sandWeight > 0.001f) {
             int tex = manager.getWaterBottomTexture();
             addTriangleToBuilder(builders, tex, sandWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
                     y1, y2, y3, texScale);
         }
-        if (rockWeight > 0.001f && baseTex != manager.getTexture(targetBiome.rockTex)) {
+        if (rockWeight > 0.001f) {
             int tex = manager.getTexture(targetBiome.rockTex);
             addTriangleToBuilder(builders, tex, rockWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
                     y1, y2, y3, texScale);
         }
-        if (dirtWeight > 0.001f && baseTex != manager.getTexture(targetBiome.dirtTex)) {
+        if (dirtWeight > 0.001f) {
             int tex = manager.getTexture(targetBiome.dirtTex);
             addTriangleToBuilder(builders, tex, dirtWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
-                    y1, y2, y3, texScale);
-        }
-        if (grassWeight > 0.001f && baseTex != manager.getTexture(targetBiome.grassTex)) {
-            int tex = manager.getTexture(targetBiome.grassTex);
-            addTriangleToBuilder(builders, tex, grassWeight * biomeAlpha, x1, z1, x2, z2, x3, z3,
                     y1, y2, y3, texScale);
         }
     }
