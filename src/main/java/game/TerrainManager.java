@@ -803,7 +803,7 @@ public class TerrainManager {
         float brightness = getFogBrightness(time);
 
         float fogEnd = Math.max(0f, renderDist * Chunk.SIZE * scale);
-        float fogStart = Math.max(0f, (renderDist - 1f) * Chunk.SIZE * scale);
+        float fogStart = Math.max(0f, fogEnd * 0.55f);
         glFogf(GL_FOG_START, fogStart);
         glFogf(GL_FOG_END, fogEnd);
 
@@ -823,7 +823,7 @@ public class TerrainManager {
         float time = skyRenderer.getTimeOfDay();
         float brightness = getFogBrightness(time);
         float fogEnd = Math.max(0f, renderDist * Chunk.SIZE * scale);
-        float fogStart = Math.max(0f, (renderDist - 1f) * Chunk.SIZE * scale);
+        float fogStart = Math.max(0f, fogEnd * 0.55f);
         float r = 0.6f * brightness;
         float g = 0.75f * brightness;
         float b = 1.0f * brightness;
