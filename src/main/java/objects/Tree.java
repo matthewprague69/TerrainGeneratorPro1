@@ -16,6 +16,8 @@ public class Tree extends Feature {
     private final TreeType type;
     private final boolean hasLeaves;
     private final float height;
+    private final float visualHeight;
+    private final float visualRadius;
 
     private static final Map<TreeType, Branch> spruceTemplateCache = new HashMap<>();
     private static final Map<TreeType, Integer> spruceDisplayLists = new HashMap<>();
@@ -31,11 +33,15 @@ public class Tree extends Feature {
         final int displayList;
         final int trunkDisplayList;
         final float height;
+        final float visualHeight;
+        final float visualRadius;
 
-        TreeVariant(int displayList, int trunkDisplayList, float height) {
+        TreeVariant(int displayList, int trunkDisplayList, float height, float visualHeight, float visualRadius) {
             this.displayList = displayList;
             this.trunkDisplayList = trunkDisplayList;
             this.height = height;
+            this.visualHeight = visualHeight;
+            this.visualRadius = visualRadius;
         }
     }
 
@@ -58,6 +64,8 @@ public class Tree extends Feature {
             buildSpruceDisplayListIfNeeded(type);
             buildSpruceTrunkDisplayListIfNeeded(type);
             this.sharedDisplayList = true;
+            this.visualHeight = Math.max(height, computeVisualHeight(root, type, hasLeaves));
+            this.visualRadius = Math.max(type.baseThickness, computeVisualRadius(root, type, hasLeaves));
         } else {
             this.root = null;
             List<TreeVariant> variants = getOrCreateTreeVariants(type, hasLeaves);
@@ -67,6 +75,8 @@ public class Tree extends Feature {
             this.trunkDisplayList = variant.trunkDisplayList;
             this.sharedDisplayList = true;
             this.variantScale = height / Math.max(0.0001f, variant.height);
+            this.visualHeight = Math.max(height, variant.visualHeight * variantScale);
+            this.visualRadius = Math.max(type.baseThickness, variant.visualRadius * variantScale);
         }
     }
 
@@ -83,7 +93,11 @@ public class Tree extends Feature {
     }
 
     public float getHeight() {
-        return height;
+        return visualHeight;
+    }
+
+    public float getCanopyRadius() {
+        return visualRadius;
     }
 
     @Override
@@ -112,7 +126,9 @@ public class Tree extends Feature {
             Tree temp = new Tree(type, hasLeaves, rand, height, root);
             temp.buildDisplayList(true);
             temp.buildDisplayList(false);
-            variants.add(new TreeVariant(temp.displayList, temp.trunkDisplayList, height));
+            float visualHeight = computeVisualHeight(root, type, hasLeaves);
+            float visualRadius = computeVisualRadius(root, type, hasLeaves);
+            variants.add(new TreeVariant(temp.displayList, temp.trunkDisplayList, height, visualHeight, visualRadius));
         }
         treeVariants.put(key, variants);
         return variants;
@@ -127,10 +143,98 @@ public class Tree extends Feature {
         this.leafTex = TextureLoader.getOrLoad(type.leafTex);
         this.height = height;
         this.root = root;
+        this.visualHeight = Math.max(height, computeVisualHeight(root, type, hasLeaves));
+        this.visualRadius = Math.max(type.baseThickness, computeVisualRadius(root, type, hasLeaves));
     }
 
     private static Branch getOrCreateSpruceTemplate(TreeType type, float height) {
         return spruceTemplateCache.computeIfAbsent(type, t -> generateSpruceTemplate(t, height));
+    }
+
+    private static float computeVisualHeight(Branch root, TreeType type, boolean hasLeaves) {
+        if (root == null) {
+            return 0f;
+        }
+        return computeBranchHeight(root, type, hasLeaves, 0);
+    }
+
+    private static float computeVisualRadius(Branch root, TreeType type, boolean hasLeaves) {
+        if (root == null) {
+            return 0f;
+        }
+        return computeBranchRadius(root, type, hasLeaves, 0);
+    }
+
+    private static float computeBranchHeight(Branch branch, TreeType type, boolean hasLeaves, int depth) {
+        float vertical = 0f;
+        if (branch.length > 0f) {
+            float verticalFactor = computeVerticalFactor(branch);
+            vertical = Math.max(0f, branch.length * verticalFactor);
+        }
+
+        float maxHeight = vertical;
+        if (branch.children.isEmpty()) {
+            if (hasLeaves) {
+                maxHeight = Math.max(maxHeight, vertical + computeLeafHeight(type, depth));
+            }
+        } else {
+            for (Branch child : branch.children) {
+                maxHeight = Math.max(maxHeight, vertical + computeBranchHeight(child, type, hasLeaves, depth + 1));
+            }
+        }
+        return maxHeight;
+    }
+
+    private static float computeBranchRadius(Branch branch, TreeType type, boolean hasLeaves, int depth) {
+        float lateral = 0f;
+        if (branch.length > 0f) {
+            float verticalFactor = computeVerticalFactor(branch);
+            float horizontalFactor = (float) Math.sqrt(Math.max(0f, 1f - verticalFactor * verticalFactor));
+            lateral = branch.length * horizontalFactor;
+        }
+
+        float maxRadius = lateral;
+        if (branch.children.isEmpty()) {
+            if (hasLeaves) {
+                maxRadius = Math.max(maxRadius, lateral + computeLeafRadius(type, depth));
+            }
+        } else {
+            for (Branch child : branch.children) {
+                maxRadius = Math.max(maxRadius, lateral + computeBranchRadius(child, type, hasLeaves, depth + 1));
+            }
+        }
+        return maxRadius;
+    }
+
+    private static float computeVerticalFactor(Branch branch) {
+        float rotX = (float) Math.toRadians(branch.rotX);
+        float rotZ = (float) Math.toRadians(branch.rotZ);
+        float cosX = (float) Math.cos(rotX);
+        if (branch.applyOutwardTilt) {
+            return cosX;
+        }
+        float cosZ = (float) Math.cos(rotZ);
+        return cosX * cosZ;
+    }
+
+    private static float computeLeafHeight(TreeType type, int depth) {
+        if (type.renderStyle == TreeRenderStyle.SPRUCE) {
+            return type.leafSize * 0.25f;
+        }
+        if (depth < 3) {
+            return 0f;
+        }
+        return type.leafSize * 0.25f;
+    }
+
+    private static float computeLeafRadius(TreeType type, int depth) {
+        if (type.renderStyle == TreeRenderStyle.SPRUCE) {
+            return type.leafSize * 0.75f;
+        }
+        if (depth < 3) {
+            return 0f;
+        }
+        return type.leafSize;
     }
 
     private static Branch generateSpruceTemplate(TreeType type, float totalHeight) {
