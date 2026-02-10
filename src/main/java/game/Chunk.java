@@ -188,6 +188,10 @@ public class Chunk {
         final double PERSISTENCE = 0.35;
         final double macroFreq = 0.002;
         final double macroAmp = 2.0;
+        final int lodClamped = Math.max(0, lod);
+        final int baseOctaves = 2;
+        final int lodPenalty = Math.max(0, lodClamped - 1);
+        final int lodOctaves = Math.max(baseOctaves, OCTAVES - lodPenalty);
 
         float[][] heights = new float[SIZE + 1][SIZE + 1];
         float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
@@ -268,7 +272,7 @@ public class Chunk {
                     double amp = entryBiome.amplitude * 0.5;
                     double sum = 0;
 
-                    for (int o = 0; o < OCTAVES; o++) {
+                    for (int o = 0; o < lodOctaves; o++) {
                         double offset = o * 100.0;
                         double val = terrainNoise.eval((wx + offset) * freq, (wz - offset) * freq);
                         val = (val * val * val) * 1.2;
