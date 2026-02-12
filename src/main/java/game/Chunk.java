@@ -1392,10 +1392,8 @@ public class Chunk {
             baseTex = rockTex;
         }
 
-        float baseAlpha = 1f;
         if (blendTex != -1 && blendTex != baseTex) {
             blendAlpha = Math.max(0f, Math.min(1f, blendAlpha));
-            baseAlpha = 1f - blendAlpha;
         } else {
             blendAlpha = 0f;
         }
@@ -1415,12 +1413,10 @@ public class Chunk {
         float exposedGround = 1f - snowBlend;
         int count = 0;
 
-        float weightedBaseAlpha = baseAlpha * exposedGround;
-        if (weightedBaseAlpha > 0.001f) {
-            textures[count] = baseTex;
-            alphas[count] = weightedBaseAlpha;
-            count++;
-        }
+        // Keep a fully opaque base layer so terrain always writes depth and never turns see-through.
+        textures[count] = baseTex;
+        alphas[count] = 1f;
+        count++;
 
         float weightedBlendAlpha = blendAlpha * exposedGround;
         if (blendTex != -1 && blendTex != baseTex && weightedBlendAlpha > 0.001f) {
@@ -1433,12 +1429,6 @@ public class Chunk {
             textures[count] = manager.getSnowTexture();
             alphas[count] = snowBlend;
             count++;
-        }
-
-        if (count == 0) {
-            textures[0] = baseTex;
-            alphas[0] = 1f;
-            return 1;
         }
 
         return count;
