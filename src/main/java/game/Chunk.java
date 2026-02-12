@@ -1392,24 +1392,53 @@ public class Chunk {
             baseTex = rockTex;
         }
 
-        int count = 0;
-        textures[count] = baseTex;
-        alphas[count] = 1f;
-        count++;
+        float baseAlpha = 1f;
+        if (blendTex != -1 && blendTex != baseTex) {
+            blendAlpha = Math.max(0f, Math.min(1f, blendAlpha));
+            baseAlpha = 1f - blendAlpha;
+        } else {
+            blendAlpha = 0f;
+        }
 
-        if (blendTex != -1 && blendTex != baseTex && blendAlpha > 0.001f) {
-            textures[count] = blendTex;
-            alphas[count] = blendAlpha;
+        float snowBlend = 0f;
+        if (height >= SNOW_HEIGHT_START) {
+            snowBlend = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
+            snowBlend = Math.max(0f, Math.min(1f, snowBlend));
+        }
+
+        if (snowBlend >= 0.999f) {
+            textures[0] = manager.getSnowTexture();
+            alphas[0] = 1f;
+            return 1;
+        }
+
+        float exposedGround = 1f - snowBlend;
+        int count = 0;
+
+        float weightedBaseAlpha = baseAlpha * exposedGround;
+        if (weightedBaseAlpha > 0.001f) {
+            textures[count] = baseTex;
+            alphas[count] = weightedBaseAlpha;
             count++;
         }
 
-        if (height >= SNOW_HEIGHT_START) {
-            float snowBlend = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
-            if (snowBlend > 0.001f) {
-                textures[count] = manager.getSnowTexture();
-                alphas[count] = snowBlend;
-                count++;
-            }
+        float weightedBlendAlpha = blendAlpha * exposedGround;
+        if (blendTex != -1 && blendTex != baseTex && weightedBlendAlpha > 0.001f) {
+            textures[count] = blendTex;
+            alphas[count] = weightedBlendAlpha;
+            count++;
+        }
+
+        if (snowBlend > 0.001f) {
+            textures[count] = manager.getSnowTexture();
+            alphas[count] = snowBlend;
+            count++;
+        }
+
+        if (count == 0) {
+            textures[0] = baseTex;
+            alphas[0] = 1f;
+            return 1;
         }
 
         return count;
