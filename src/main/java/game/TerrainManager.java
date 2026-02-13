@@ -559,7 +559,7 @@ public class TerrainManager {
             ArrayDeque<Long> rebuiltPendingNear = new ArrayDeque<>();
             ArrayDeque<Long> rebuiltPendingFar = new ArrayDeque<>();
             Map<Long, Integer> rebuiltLods = new HashMap<>();
-            for (long key : getNeededKeysSorted(pcx, pcz, frustum, true)) {
+            for (long key : getNeededKeysSorted(pcx, pcz, frustum, false)) {
                 int cx = (int) (key >> 32);
                 int cz = (int) key;
                 int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
@@ -671,27 +671,29 @@ public class TerrainManager {
         };
 
         List<Long> nearVisible = new ArrayList<>();
+        List<Long> nearHidden = new ArrayList<>();
         List<Long> upgradeVisible = new ArrayList<>();
         List<Long> farVisible = new ArrayList<>();
 
         for (long key : pendingChunks) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            if (!isChunkVisible(frustum, cx, cz)) {
-                continue;
-            }
             int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
-            if (isUpgradeRequest(key)) {
+            boolean visible = isChunkVisible(frustum, cx, cz);
+            if (visible && isUpgradeRequest(key)) {
                 upgradeVisible.add(key);
-            } else if (dist <= LOD_PRIORITY_RADIUS) {
+            } else if (visible && dist <= LOD_PRIORITY_RADIUS) {
                 nearVisible.add(key);
-            } else {
+            } else if (visible) {
                 farVisible.add(key);
+            } else if (dist <= LOD_PRIORITY_RADIUS + 1) {
+                nearHidden.add(key);
             }
         }
 
         upgradeVisible.sort(priorityComparator);
         nearVisible.sort(priorityComparator);
+        nearHidden.sort(priorityComparator);
         farVisible.sort(priorityComparator);
 
         int processed = 0;
@@ -707,6 +709,15 @@ public class TerrainManager {
         }
 
         for (long key : nearVisible) {
+            if (processed >= nearBudget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                break;
+            }
+            if (tryDispatchChunkGeneration(key, true)) {
+                processed++;
+            }
+        }
+
+        for (long key : nearHidden) {
             if (processed >= nearBudget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
                 break;
             }
