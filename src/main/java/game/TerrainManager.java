@@ -112,6 +112,7 @@ public class TerrainManager {
     private static final int LOD_PRIORITY_RADIUS = 4;
     private static final int LOD_PRIORITY_MIN_BUDGET = 6;
     private static final int MAX_PENDING_CHUNK_QUEUE = 4096;
+    private static final int MAX_PENDING_RENDER_QUEUE = 4096;
     private static final int MAX_INFLIGHT_CHUNK_BUILDS = 12;
     private static final int MAX_INFLIGHT_FEATURE_BUILDS = 64;
 
@@ -554,6 +555,52 @@ public class TerrainManager {
             pendingFeatureChunks.addAll(near);
             pendingFeatureChunks.addAll(far);
         }
+
+        if (!pendingRenderBuilds.isEmpty()) {
+            ArrayDeque<Chunk> visibleNear = new ArrayDeque<>();
+            ArrayDeque<Chunk> visibleFar = new ArrayDeque<>();
+            ArrayDeque<Chunk> hidden = new ArrayDeque<>();
+
+            Iterator<Chunk> iterator = pendingRenderBuilds.iterator();
+            while (iterator.hasNext()) {
+                Chunk chunk = iterator.next();
+                long key = key(chunk.cx, chunk.cz);
+                Chunk pendingReplacement = pendingChunkReplacements.get(key);
+                if (chunks.get(key) != chunk && pendingReplacement != chunk) {
+                    pendingRenderBuildKeys.remove(key);
+                    if (pendingReplacement != null) {
+                        chunk.dispose();
+                    }
+                    iterator.remove();
+                    continue;
+                }
+
+                int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
+                if (dist > cacheRenderDist) {
+                    pendingRenderBuildKeys.remove(key);
+                    if (pendingReplacement == chunk) {
+                        pendingChunkReplacements.remove(key);
+                        chunk.dispose();
+                    }
+                    iterator.remove();
+                    continue;
+                }
+
+                boolean visible = frustum != null && isChunkVisible(frustum, chunk.cx, chunk.cz);
+                if (visible && dist <= LOD_PRIORITY_RADIUS) {
+                    visibleNear.addLast(chunk);
+                } else if (visible) {
+                    visibleFar.addLast(chunk);
+                } else {
+                    hidden.addLast(chunk);
+                }
+                iterator.remove();
+            }
+
+            pendingRenderBuilds.addAll(visibleNear);
+            pendingRenderBuilds.addAll(visibleFar);
+            pendingRenderBuilds.addAll(hidden);
+        }
     }
 
     private boolean isChunkVisible(Frustum frustum, int cx, int cz) {
@@ -852,6 +899,9 @@ public class TerrainManager {
         if (pendingRenderBuildKeys.contains(key)) {
             return;
         }
+        if (pendingRenderBuilds.size() >= MAX_PENDING_RENDER_QUEUE) {
+            return;
+        }
         pendingRenderBuildKeys.add(key);
         if (dist <= 2) {
             pendingRenderBuilds.addFirst(chunk);
@@ -863,7 +913,9 @@ public class TerrainManager {
     private void processPendingRenderBuilds(int pcx, int pcz) {
         int built = 0;
         long start = System.nanoTime();
-        while (built < MAX_RENDER_BUILDS_PER_FRAME && !pendingRenderBuilds.isEmpty()) {
+        int dynamicBudget = MAX_RENDER_BUILDS_PER_FRAME
+                + Math.min(4, Math.max(0, pendingRenderBuilds.size() - 128) / 256);
+        while (built < dynamicBudget && !pendingRenderBuilds.isEmpty()) {
             if (System.nanoTime() - start > RENDER_BUILD_BUDGET_NS) {
                 break;
             }
