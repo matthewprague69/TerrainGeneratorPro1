@@ -555,8 +555,11 @@ public class TerrainManager {
             pendingChunkLods.putAll(rebuiltLods);
         }
 
-        if (frustum != null && !pendingRenderBuilds.isEmpty()) {
-            reprioritizePendingRenderBuilds(pcx, pcz, frustum);
+        if (frustum != null) {
+            seedVisibleRenderBuildNeeds(pcx, pcz, frustum);
+            if (!pendingRenderBuilds.isEmpty()) {
+                reprioritizePendingRenderBuilds(pcx, pcz, frustum);
+            }
         }
 
         if (!pendingFeatureChunks.isEmpty()) {
@@ -938,10 +941,37 @@ public class TerrainManager {
         return false;
     }
 
+    private void seedVisibleRenderBuildNeeds(int pcx, int pcz, Frustum frustum) {
+        for (long neededKey : neededKeys) {
+            int cx = (int) (neededKey >> 32);
+            int cz = (int) neededKey;
+            if (!isChunkVisible(frustum, cx, cz)) {
+                continue;
+            }
+            Chunk chunk = chunks.get(neededKey);
+            if (chunk == null || !chunk.needsRenderResources()) {
+                continue;
+            }
+            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            queueRenderBuild(chunk, dist);
+        }
+
+        if (!pendingChunkReplacements.isEmpty()) {
+            for (Chunk replacement : new ArrayList<>(pendingChunkReplacements.values())) {
+                if (!isChunkVisible(frustum, replacement.cx, replacement.cz)) {
+                    continue;
+                }
+                int dist = Math.max(Math.abs(replacement.cx - pcx), Math.abs(replacement.cz - pcz));
+                queueRenderBuild(replacement, dist);
+            }
+        }
+    }
+
     private void reprioritizePendingRenderBuilds(int pcx, int pcz, Frustum frustum) {
         ArrayDeque<Chunk> nearVisible = new ArrayDeque<>();
         ArrayDeque<Chunk> nearHidden = new ArrayDeque<>();
         ArrayDeque<Chunk> farVisible = new ArrayDeque<>();
+        ArrayDeque<Chunk> farHidden = new ArrayDeque<>();
         Set<Long> rebuiltKeys = new HashSet<>();
 
         for (Chunk chunk : pendingRenderBuilds) {
@@ -963,13 +993,6 @@ public class TerrainManager {
                 continue;
             }
             boolean visible = isChunkVisible(frustum, chunk.cx, chunk.cz);
-            if (!visible && dist > LOD_PRIORITY_RADIUS) {
-                if (pendingReplacement == chunk) {
-                    pendingChunkReplacements.remove(key);
-                    chunk.dispose();
-                }
-                continue;
-            }
             if (rebuiltKeys.contains(key)) {
                 continue;
             }
@@ -977,8 +1000,10 @@ public class TerrainManager {
                 nearVisible.addLast(chunk);
             } else if (dist <= LOD_PRIORITY_RADIUS) {
                 nearHidden.addLast(chunk);
-            } else {
+            } else if (visible) {
                 farVisible.addLast(chunk);
+            } else {
+                farHidden.addLast(chunk);
             }
             rebuiltKeys.add(key);
             if (rebuiltKeys.size() >= MAX_PENDING_RENDER_BUILDS) {
@@ -991,6 +1016,7 @@ public class TerrainManager {
         pendingRenderBuilds.addAll(nearVisible);
         pendingRenderBuilds.addAll(nearHidden);
         pendingRenderBuilds.addAll(farVisible);
+        pendingRenderBuilds.addAll(farHidden);
         pendingRenderBuildKeys.addAll(rebuiltKeys);
     }
 
