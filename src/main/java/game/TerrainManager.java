@@ -98,13 +98,16 @@ public class TerrainManager {
         }
     }
 
+    private static final int AVAILABLE_CORES = Math.max(1, Runtime.getRuntime().availableProcessors());
+    private static final int CHUNK_GENERATOR_THREADS = Math.max(2, Math.min(8, AVAILABLE_CORES));
+    private static final int FEATURE_GENERATOR_THREADS = Math.max(1, Math.min(4, AVAILABLE_CORES / 2));
     private static final int MAX_CHUNKS_PER_FRAME = 20;
     private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 4;
     private static final long CHUNK_BUDGET_NS = 10_000_000L;
     private static final long FEATURE_BUDGET_NS = 3_000_000L;
     private static final int MAX_APPLIED_CHUNKS_PER_FRAME = 8;
     private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
-    private static final int MAX_RENDER_BUILDS_PER_FRAME = 2;
+    private static final int MAX_RENDER_BUILDS_PER_FRAME = Math.max(2, Math.min(6, AVAILABLE_CORES / 2));
     private static final long RENDER_BUILD_BUDGET_NS = 3_000_000L;
     private static final int LOD_NEAR_THRESHOLD = 16;
     private static final int LOD_MID_THRESHOLD = 24;
@@ -113,8 +116,8 @@ public class TerrainManager {
     private static final int LOD_PRIORITY_MIN_BUDGET = 6;
     private static final int MAX_PENDING_CHUNK_QUEUE = 4096;
     private static final int MAX_PENDING_RENDER_QUEUE = 4096;
-    private static final int MAX_INFLIGHT_CHUNK_BUILDS = 12;
-    private static final int MAX_INFLIGHT_FEATURE_BUILDS = 64;
+    private static final int MAX_INFLIGHT_CHUNK_BUILDS = CHUNK_GENERATOR_THREADS * 8;
+    private static final int MAX_INFLIGHT_FEATURE_BUILDS = FEATURE_GENERATOR_THREADS * 32;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -131,12 +134,12 @@ public class TerrainManager {
     private final Set<Long> pendingRenderBuildKeys = new HashSet<>();
     private final Map<Long, Chunk> pendingChunkReplacements = new HashMap<>();
     private final Map<Long, float[][][]> biomeWeightCache = new HashMap<>();
-    private final ExecutorService chunkGenerator = Executors.newFixedThreadPool(2, r -> {
+    private final ExecutorService chunkGenerator = Executors.newFixedThreadPool(CHUNK_GENERATOR_THREADS, r -> {
         Thread t = new Thread(r, "chunk-generator");
         t.setDaemon(true);
         return t;
     });
-    private final ExecutorService featureGenerator = Executors.newSingleThreadExecutor(r -> {
+    private final ExecutorService featureGenerator = Executors.newFixedThreadPool(FEATURE_GENERATOR_THREADS, r -> {
         Thread t = new Thread(r, "feature-generator");
         t.setDaemon(true);
         return t;
