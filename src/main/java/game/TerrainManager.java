@@ -113,6 +113,7 @@ public class TerrainManager {
     private static final int LOD_PRIORITY_MIN_BUDGET = 6;
     private static final int MAX_PENDING_CHUNK_QUEUE = 4096;
     private static final int MAX_INFLIGHT_CHUNK_BUILDS = 12;
+    private static final int MAX_INFLIGHT_FEATURE_BUILDS = 64;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -173,6 +174,7 @@ public class TerrainManager {
     private int perfWaterChunksDrawn = 0;
     private int perfDepthChunksDrawn = 0;
     private int perfVisibleFeatures = 0;
+    private Frustum lastCameraFrustum = null;
 
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
         this(seed, scale, renderDist, renderDist - 1,  skyRenderer);
@@ -260,6 +262,7 @@ public class TerrainManager {
     public void update(float wx, float wz, Frustum frustum) {
         resetPerformanceFrame();
         long updateStart = System.nanoTime();
+        lastCameraFrustum = frustum;
 
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
@@ -716,6 +719,9 @@ public class TerrainManager {
     }
 
     private void processPendingFeatureGenerations(int pcx, int pcz) {
+        if (inflightFeatureKeys.size() >= MAX_INFLIGHT_FEATURE_BUILDS) {
+            return;
+        }
         int backlog = pendingFeatureChunks.size();
         int budget = MAX_FEATURE_CHUNKS_PER_FRAME + Math.min(6, backlog / 12);
         int count = 0;
@@ -742,6 +748,9 @@ public class TerrainManager {
             }
             if (chunk.needsRenderResources()) {
                 continue;
+            }
+            if (inflightFeatureKeys.size() >= MAX_INFLIGHT_FEATURE_BUILDS) {
+                break;
             }
             Chunk.FeatureGenerationInput input = chunk.createFeatureGenerationInput();
             inflightFeatureKeys.add(key);
@@ -916,6 +925,9 @@ public class TerrainManager {
             if (dist > renderDist) {
                 continue;
             }
+            if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
+                continue;
+            }
             c.drawTerrainAndFeatures(dist, impostorDistance, grassDetailDistance,
                     featureRenderDist);
             renderedTerrainChunks++;
@@ -936,6 +948,9 @@ public class TerrainManager {
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
             if (dist > renderDist) {
+                continue;
+            }
+            if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
                 continue;
             }
             c.drawWater();
