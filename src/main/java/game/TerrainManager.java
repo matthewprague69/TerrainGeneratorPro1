@@ -90,6 +90,7 @@ public class TerrainManager {
     private static final int LOD_PRIORITY_RADIUS = 2;
     private static final int LOD_PRIORITY_MIN_BUDGET = 6;
     private static final int MAX_PENDING_CHUNK_QUEUE = 4096;
+    private static final int MAX_INFLIGHT_CHUNK_BUILDS = 12;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -246,7 +247,7 @@ public class TerrainManager {
             rebuildNeededChunks(pcx, pcz);
             recordStage(PipelineStage.REBUILD_NEEDED_CHUNKS, System.nanoTime() - stageStart);
             stageStart = System.nanoTime();
-            refreshChunkLods(pcx, pcz);
+            refreshChunkLods(pcx, pcz, frustum);
             recordStage(PipelineStage.REFRESH_CHUNK_LODS, System.nanoTime() - stageStart);
             stageStart = System.nanoTime();
             reprioritizePendingQueues(pcx, pcz, frustum);
@@ -258,7 +259,7 @@ public class TerrainManager {
         boolean movedChunk = pcx != lastUpdateChunkX || pcz != lastUpdateChunkZ;
         if (!movedChunk) {
             stageStart = System.nanoTime();
-            refreshChunkLods(pcx, pcz);
+            refreshChunkLods(pcx, pcz, frustum);
             recordStage(PipelineStage.REFRESH_CHUNK_LODS, System.nanoTime() - stageStart);
             stageStart = System.nanoTime();
             reprioritizePendingQueues(pcx, pcz, frustum);
@@ -330,14 +331,14 @@ public class TerrainManager {
     private void updateNeededChunks(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
         if (neededKeys.isEmpty() || Math.abs(pcx - prevChunkX) > 1 || Math.abs(pcz - prevChunkZ) > 1) {
             rebuildNeededChunks(pcx, pcz);
-            refreshChunkLods(pcx, pcz);
+            refreshChunkLods(pcx, pcz, null);
             return;
         }
 
         int expectedKeyCount = (renderDist * 2 + 1) * (renderDist * 2 + 1);
         if (neededKeys.size() != expectedKeyCount) {
             rebuildNeededChunks(pcx, pcz);
-            refreshChunkLods(pcx, pcz);
+            refreshChunkLods(pcx, pcz, null);
             return;
         }
 
@@ -367,18 +368,23 @@ public class TerrainManager {
             rebuildNeededChunks(pcx, pcz);
         }
 
-        refreshChunkLods(pcx, pcz);
+        refreshChunkLods(pcx, pcz, null);
     }
 
-    private void refreshChunkLods(int pcx, int pcz) {
+    private void refreshChunkLods(int pcx, int pcz, Frustum frustum) {
         for (long key : neededKeys) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
             int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
             int targetLOD = computeTargetLod(dist);
             Chunk existing = chunks.get(key);
-            if (existing != null && existing.getLOD() != targetLOD && dist <= LOD_PRIORITY_RADIUS) {
-                queueChunkGeneration(key, cx, cz, targetLOD, 0);
+            if (existing == null || existing.getLOD() == targetLOD) {
+                continue;
+            }
+            boolean forceNear = dist <= LOD_PRIORITY_RADIUS;
+            boolean visible = frustum != null && isChunkVisible(frustum, cx, cz);
+            if (forceNear || visible) {
+                queueChunkGeneration(key, cx, cz, targetLOD, dist);
             }
         }
     }
@@ -447,37 +453,40 @@ public class TerrainManager {
     }
 
     private void reprioritizePendingQueues(int pcx, int pcz, Frustum frustum) {
-        if (!pendingChunks.isEmpty()) {
-            ArrayDeque<Long> visibleNear = new ArrayDeque<>();
-            ArrayDeque<Long> visibleFar = new ArrayDeque<>();
-            Iterator<Long> iterator = pendingChunks.iterator();
-            while (iterator.hasNext()) {
-                long key = iterator.next();
+        if (frustum != null) {
+            ArrayDeque<Long> rebuiltPending = new ArrayDeque<>();
+            Map<Long, Integer> rebuiltLods = new HashMap<>();
+            for (long key : neededKeys) {
                 int cx = (int) (key >> 32);
                 int cz = (int) key;
                 int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
                 if (dist > cacheRenderDist) {
-                    pendingChunkLods.remove(key);
-                    iterator.remove();
                     continue;
                 }
-                boolean visible = frustum != null && isChunkVisible(frustum, cx, cz);
-                if (dist <= 2) {
-                    if (visible) {
-                        visibleNear.addLast(key);
-                    }
+                Chunk existing = chunks.get(key);
+                int targetLod = computeTargetLod(dist);
+                boolean needsBuild = existing == null || existing.getLOD() != targetLod;
+                if (!needsBuild) {
+                    continue;
+                }
+                boolean visible = isChunkVisible(frustum, cx, cz);
+                if (!visible && dist > LOD_PRIORITY_RADIUS) {
+                    continue;
+                }
+                if (rebuiltPending.size() >= MAX_PENDING_CHUNK_QUEUE && dist > LOD_PRIORITY_RADIUS) {
+                    continue;
+                }
+                rebuiltLods.put(key, targetLod);
+                if (dist <= LOD_PRIORITY_RADIUS) {
+                    rebuiltPending.addFirst(key);
                 } else {
-                    if (visible) {
-                        visibleFar.addLast(key);
-                    }
+                    rebuiltPending.addLast(key);
                 }
-                if (!visible) {
-                    pendingChunkLods.remove(key);
-                }
-                iterator.remove();
             }
-            pendingChunks.addAll(visibleNear);
-            pendingChunks.addAll(visibleFar);
+            pendingChunks.clear();
+            pendingChunkLods.clear();
+            pendingChunks.addAll(rebuiltPending);
+            pendingChunkLods.putAll(rebuiltLods);
         }
 
         if (!pendingFeatureChunks.isEmpty()) {
@@ -616,6 +625,9 @@ public class TerrainManager {
     }
 
     private boolean tryDispatchChunkGeneration(long key, boolean prioritizeRequeue) {
+        if (inflightChunkKeys.size() >= MAX_INFLIGHT_CHUNK_BUILDS) {
+            return false;
+        }
         if (!pendingChunks.remove(key)) {
             return false;
         }
