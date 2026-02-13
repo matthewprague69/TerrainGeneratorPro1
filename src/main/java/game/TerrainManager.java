@@ -109,7 +109,7 @@ public class TerrainManager {
     private static final int LOD_NEAR_THRESHOLD = 16;
     private static final int LOD_MID_THRESHOLD = 24;
     private static final int LOD_FAR_THRESHOLD = 32;
-    private static final int LOD_PRIORITY_RADIUS = 2;
+    private static final int LOD_PRIORITY_RADIUS = 4;
     private static final int LOD_PRIORITY_MIN_BUDGET = 6;
     private static final int MAX_PENDING_CHUNK_QUEUE = 4096;
     private static final int MAX_INFLIGHT_CHUNK_BUILDS = 12;
@@ -316,6 +316,10 @@ public class TerrainManager {
         stageStart = System.nanoTime();
         updateNeededChunks(pcx, pcz, prevChunkX, prevChunkZ);
         recordStage(PipelineStage.UPDATE_NEEDED_CHUNKS, System.nanoTime() - stageStart);
+
+        stageStart = System.nanoTime();
+        refreshChunkLods(pcx, pcz, frustum);
+        recordStage(PipelineStage.REFRESH_CHUNK_LODS, System.nanoTime() - stageStart);
 
         stageStart = System.nanoTime();
         reprioritizePendingQueues(pcx, pcz, frustum);
@@ -596,6 +600,7 @@ public class TerrainManager {
         };
 
         List<Long> nearVisible = new ArrayList<>();
+        List<Long> upgradeVisible = new ArrayList<>();
         List<Long> farVisible = new ArrayList<>();
 
         for (long key : pendingChunks) {
@@ -605,18 +610,30 @@ public class TerrainManager {
                 continue;
             }
             int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
-            if (dist <= LOD_PRIORITY_RADIUS) {
+            if (isUpgradeRequest(key)) {
+                upgradeVisible.add(key);
+            } else if (dist <= LOD_PRIORITY_RADIUS) {
                 nearVisible.add(key);
             } else {
                 farVisible.add(key);
             }
         }
 
+        upgradeVisible.sort(priorityComparator);
         nearVisible.sort(priorityComparator);
         farVisible.sort(priorityComparator);
 
         int processed = 0;
-        int nearBudget = Math.min(budget, Math.max(LOD_PRIORITY_MIN_BUDGET, budget / 2));
+        int nearBudget = Math.min(budget, Math.max(LOD_PRIORITY_MIN_BUDGET, (budget * 2) / 3));
+
+        for (long key : upgradeVisible) {
+            if (processed >= nearBudget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                break;
+            }
+            if (tryDispatchChunkGeneration(key, true)) {
+                processed++;
+            }
+        }
 
         for (long key : nearVisible) {
             if (processed >= nearBudget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
@@ -639,6 +656,12 @@ public class TerrainManager {
                 processed++;
             }
         }
+    }
+
+    private boolean isUpgradeRequest(long key) {
+        Chunk existing = chunks.get(key);
+        Integer pendingLod = pendingChunkLods.get(key);
+        return existing != null && pendingLod != null && pendingLod < existing.getLOD();
     }
 
     private void seedVisibleLodMismatches(int pcx, int pcz, Frustum frustum) {
