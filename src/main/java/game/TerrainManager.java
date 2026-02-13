@@ -10,6 +10,7 @@ import java.lang.management.BufferPoolMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
+import com.sun.management.OperatingSystemMXBean;
 
 
 import java.util.*;
@@ -65,6 +66,10 @@ public class TerrainManager {
         public final int depthChunksDrawn;
         public final int visibleFeatures;
         public final long estimatedFrameNanos;
+        public final int chunkWorkerCount;
+        public final int featureWorkerCount;
+        public final double processCpuLoadPct;
+        public final double systemCpuLoadPct;
 
         private PerformanceSnapshot(EnumMap<PipelineStage, StageStats> stages, long totalUpdateNanos,
                                     int loadedChunks, int pendingChunkGenerations,
@@ -75,7 +80,9 @@ public class TerrainManager {
                                     long nonHeapUsedBytes, long directBufferBytes,
                                     int terrainChunksDrawn, int waterChunksDrawn,
                                     int depthChunksDrawn, int visibleFeatures,
-                                    long estimatedFrameNanos) {
+                                    long estimatedFrameNanos, int chunkWorkerCount,
+                                    int featureWorkerCount, double processCpuLoadPct,
+                                    double systemCpuLoadPct) {
             this.stages = stages;
             this.totalUpdateNanos = totalUpdateNanos;
             this.loadedChunks = loadedChunks;
@@ -95,6 +102,10 @@ public class TerrainManager {
             this.depthChunksDrawn = depthChunksDrawn;
             this.visibleFeatures = visibleFeatures;
             this.estimatedFrameNanos = estimatedFrameNanos;
+            this.chunkWorkerCount = chunkWorkerCount;
+            this.featureWorkerCount = featureWorkerCount;
+            this.processCpuLoadPct = processCpuLoadPct;
+            this.systemCpuLoadPct = systemCpuLoadPct;
         }
     }
 
@@ -113,8 +124,10 @@ public class TerrainManager {
     private static final int LOD_PRIORITY_RADIUS = 4;
     private static final int LOD_PRIORITY_MIN_BUDGET = 6;
     private static final int MAX_PENDING_CHUNK_QUEUE = 4096;
-    private static final int MAX_INFLIGHT_CHUNK_BUILDS = 12;
-    private static final int MAX_INFLIGHT_FEATURE_BUILDS = 64;
+    private static final int CHUNK_INFLIGHT_PER_WORKER = 2;
+    private static final int FEATURE_INFLIGHT_PER_WORKER = 16;
+    private static final int MAX_INFLIGHT_CHUNK_BUILDS_CAP = 64;
+    private static final int MAX_INFLIGHT_FEATURE_BUILDS_CAP = 256;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -131,16 +144,12 @@ public class TerrainManager {
     private final Set<Long> pendingRenderBuildKeys = new HashSet<>();
     private final Map<Long, Chunk> pendingChunkReplacements = new HashMap<>();
     private final Map<Long, float[][][]> biomeWeightCache = new HashMap<>();
-    private final ExecutorService chunkGenerator = Executors.newFixedThreadPool(2, r -> {
-        Thread t = new Thread(r, "chunk-generator");
-        t.setDaemon(true);
-        return t;
-    });
-    private final ExecutorService featureGenerator = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "feature-generator");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ExecutorService chunkGenerator;
+    private final ExecutorService featureGenerator;
+    private final int chunkWorkerCount;
+    private final int featureWorkerCount;
+    private final int maxInflightChunkBuilds;
+    private final int maxInflightFeatureBuilds;
     private final OpenSimplexNoise terrainNoise;
     private final BiomeRegionGenerator regionGenerator;
     private final SkyRenderer skyRenderer;
@@ -194,6 +203,25 @@ public class TerrainManager {
         this.grassDetailDistance = Math.max(1, featureRenderDist - 2);
         this.impostorHighQualityDistance = Math.min(10, this.featureRenderDist);
         this.regionGenerator = new BiomeRegionGenerator(seed);
+
+        int cpuCount = Math.max(2, Runtime.getRuntime().availableProcessors());
+        this.chunkWorkerCount = Math.max(2, Math.min(16, cpuCount - 1));
+        this.featureWorkerCount = Math.max(1, Math.min(8, cpuCount / 2));
+        this.maxInflightChunkBuilds = Math.min(MAX_INFLIGHT_CHUNK_BUILDS_CAP,
+                Math.max(this.chunkWorkerCount, this.chunkWorkerCount * CHUNK_INFLIGHT_PER_WORKER));
+        this.maxInflightFeatureBuilds = Math.min(MAX_INFLIGHT_FEATURE_BUILDS_CAP,
+                Math.max(FEATURE_INFLIGHT_PER_WORKER, this.featureWorkerCount * FEATURE_INFLIGHT_PER_WORKER));
+
+        this.chunkGenerator = Executors.newFixedThreadPool(this.chunkWorkerCount, r -> {
+            Thread t = new Thread(r, "chunk-generator");
+            t.setDaemon(true);
+            return t;
+        });
+        this.featureGenerator = Executors.newFixedThreadPool(this.featureWorkerCount, r -> {
+            Thread t = new Thread(r, "feature-generator");
+            t.setDaemon(true);
+            return t;
+        });
 
 
         snowTex = TextureLoader.getOrLoad("snow.png");
@@ -686,7 +714,7 @@ public class TerrainManager {
     }
 
     private boolean tryDispatchChunkGeneration(long key, boolean prioritizeRequeue) {
-        if (inflightChunkKeys.size() >= MAX_INFLIGHT_CHUNK_BUILDS) {
+        if (inflightChunkKeys.size() >= maxInflightChunkBuilds) {
             return false;
         }
         if (!pendingChunks.remove(key)) {
@@ -747,7 +775,7 @@ public class TerrainManager {
     }
 
     private void processPendingFeatureGenerations(int pcx, int pcz) {
-        if (inflightFeatureKeys.size() >= MAX_INFLIGHT_FEATURE_BUILDS) {
+        if (inflightFeatureKeys.size() >= maxInflightFeatureBuilds) {
             return;
         }
         int backlog = pendingFeatureChunks.size();
@@ -777,7 +805,7 @@ public class TerrainManager {
             if (chunk.needsRenderResources()) {
                 continue;
             }
-            if (inflightFeatureKeys.size() >= MAX_INFLIGHT_FEATURE_BUILDS) {
+            if (inflightFeatureKeys.size() >= maxInflightFeatureBuilds) {
                 break;
             }
             Chunk.FeatureGenerationInput input = chunk.createFeatureGenerationInput();
@@ -1288,6 +1316,8 @@ public class TerrainManager {
         for (PipelineStage stage : PipelineStage.values()) {
             estimatedFrameNanos += perfStageNanos.getOrDefault(stage, 0L);
         }
+        double processCpuLoadPct = getCpuLoadPct(true);
+        double systemCpuLoadPct = getCpuLoadPct(false);
         return new PerformanceSnapshot(
                 stageCopies,
                 perfTotalUpdateNanos,
@@ -1307,7 +1337,11 @@ public class TerrainManager {
                 perfWaterChunksDrawn,
                 perfDepthChunksDrawn,
                 perfVisibleFeatures,
-                estimatedFrameNanos);
+                estimatedFrameNanos,
+                chunkWorkerCount,
+                featureWorkerCount,
+                processCpuLoadPct,
+                systemCpuLoadPct);
     }
 
     public String buildPerformanceReport() {
@@ -1321,6 +1355,10 @@ public class TerrainManager {
         sb.append("pending_render_builds=").append(snapshot.pendingRenderBuilds).append('\n');
         sb.append("inflight_chunk_generations=").append(snapshot.inflightChunkGenerations).append('\n');
         sb.append("inflight_feature_generations=").append(snapshot.inflightFeatureGenerations).append('\n');
+        sb.append("chunk_worker_count=").append(snapshot.chunkWorkerCount).append('\n');
+        sb.append("feature_worker_count=").append(snapshot.featureWorkerCount).append('\n');
+        sb.append("process_cpu_load_pct=").append(String.format(Locale.US, "%.2f", snapshot.processCpuLoadPct)).append('\n');
+        sb.append("system_cpu_load_pct=").append(String.format(Locale.US, "%.2f", snapshot.systemCpuLoadPct)).append('\n');
         sb.append("memory_used_mb=").append(String.format(Locale.US, "%.2f", snapshot.usedMemoryBytes / (1024.0 * 1024.0))).append('\n');
         sb.append("memory_free_mb=").append(String.format(Locale.US, "%.2f", snapshot.freeMemoryBytes / (1024.0 * 1024.0))).append('\n');
         sb.append("memory_total_mb=").append(String.format(Locale.US, "%.2f", snapshot.totalMemoryBytes / (1024.0 * 1024.0))).append('\n');
@@ -1463,4 +1501,18 @@ public class TerrainManager {
     public float getShadowStrength() {
         return skyRenderer.getShadowStrength();
     }
+
+    private double getCpuLoadPct(boolean process) {
+        java.lang.management.OperatingSystemMXBean mxBean = ManagementFactory.getOperatingSystemMXBean();
+        if (!(mxBean instanceof OperatingSystemMXBean)) {
+            return -1.0;
+        }
+        OperatingSystemMXBean osBean = (OperatingSystemMXBean) mxBean;
+        double load = process ? osBean.getProcessCpuLoad() : osBean.getCpuLoad();
+        if (load < 0.0) {
+            return -1.0;
+        }
+        return Math.max(0.0, Math.min(100.0, load * 100.0));
+    }
+
 }

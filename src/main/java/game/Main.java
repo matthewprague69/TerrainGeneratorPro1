@@ -280,6 +280,10 @@ public class Main {
         PixelTextRenderer.drawText("In-flight chunk=" + snapshot.inflightChunkGenerations
                 + " | in-flight feature=" + snapshot.inflightFeatureGenerations, panelX + 12f, y, 1.0f);
         y -= 16f;
+        PixelTextRenderer.drawText("Workers chunk/feature=" + snapshot.chunkWorkerCount + "/" + snapshot.featureWorkerCount
+                + " | CPU process/system=" + String.format(Locale.US, "%.1f", snapshot.processCpuLoadPct)
+                + "%/" + String.format(Locale.US, "%.1f", snapshot.systemCpuLoadPct) + "%", panelX + 12f, y, 1.0f);
+        y -= 16f;
         PixelTextRenderer.drawText("Memory used=" + formatMb(snapshot.usedMemoryBytes)
                 + "MB free=" + formatMb(snapshot.freeMemoryBytes)
                 + "MB total=" + formatMb(snapshot.totalMemoryBytes)
