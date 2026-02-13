@@ -105,6 +105,7 @@ public class TerrainManager {
     private static final int MAX_APPLIED_CHUNKS_PER_FRAME = 8;
     private static final int MAX_APPLIED_FEATURES_PER_FRAME = 6;
     private static final int MAX_RENDER_BUILDS_PER_FRAME = 2;
+    private static final int MAX_PENDING_RENDER_BUILDS = 1536;
     private static final long RENDER_BUILD_BUDGET_NS = 3_000_000L;
     private static final int LOD_NEAR_THRESHOLD = 16;
     private static final int LOD_MID_THRESHOLD = 24;
@@ -526,6 +527,10 @@ public class TerrainManager {
             pendingChunkLods.putAll(rebuiltLods);
         }
 
+        if (frustum != null && !pendingRenderBuilds.isEmpty()) {
+            reprioritizePendingRenderBuilds(pcx, pcz, frustum);
+        }
+
         if (!pendingFeatureChunks.isEmpty()) {
             ArrayDeque<Chunk> near = new ArrayDeque<>();
             ArrayDeque<Chunk> far = new ArrayDeque<>();
@@ -849,15 +854,116 @@ public class TerrainManager {
 
     private void queueRenderBuild(Chunk chunk, int dist) {
         long key = key(chunk.cx, chunk.cz);
+        boolean visible = lastCameraFrustum != null && isChunkVisible(lastCameraFrustum, chunk.cx, chunk.cz);
+
         if (pendingRenderBuildKeys.contains(key)) {
-            return;
+            removePendingRenderBuildByKey(key);
+        } else {
+            if (pendingRenderBuilds.size() >= MAX_PENDING_RENDER_BUILDS && dist > LOD_PRIORITY_RADIUS && !visible) {
+                return;
+            }
+            if (pendingRenderBuilds.size() >= MAX_PENDING_RENDER_BUILDS && !evictStaleFarPendingRenderBuild()) {
+                return;
+            }
+            pendingRenderBuildKeys.add(key);
         }
-        pendingRenderBuildKeys.add(key);
-        if (dist <= 2) {
+
+        if (dist <= LOD_PRIORITY_RADIUS || visible) {
             pendingRenderBuilds.addFirst(chunk);
         } else {
             pendingRenderBuilds.addLast(chunk);
         }
+    }
+
+    private void removePendingRenderBuildByKey(long targetKey) {
+        Iterator<Chunk> it = pendingRenderBuilds.iterator();
+        while (it.hasNext()) {
+            Chunk queued = it.next();
+            long queuedKey = key(queued.cx, queued.cz);
+            if (queuedKey != targetKey) {
+                continue;
+            }
+            it.remove();
+            return;
+        }
+    }
+
+    private boolean evictStaleFarPendingRenderBuild() {
+        Iterator<Chunk> it = pendingRenderBuilds.descendingIterator();
+        while (it.hasNext()) {
+            Chunk candidate = it.next();
+            int dist = Math.max(Math.abs(candidate.cx - lastUpdateChunkX), Math.abs(candidate.cz - lastUpdateChunkZ));
+            boolean visible = lastCameraFrustum != null && isChunkVisible(lastCameraFrustum, candidate.cx, candidate.cz);
+            if (dist <= LOD_PRIORITY_RADIUS || visible) {
+                continue;
+            }
+            long candidateKey = key(candidate.cx, candidate.cz);
+            it.remove();
+            pendingRenderBuildKeys.remove(candidateKey);
+            Chunk replacement = pendingChunkReplacements.get(candidateKey);
+            if (replacement == candidate) {
+                pendingChunkReplacements.remove(candidateKey);
+                candidate.dispose();
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private void reprioritizePendingRenderBuilds(int pcx, int pcz, Frustum frustum) {
+        ArrayDeque<Chunk> nearVisible = new ArrayDeque<>();
+        ArrayDeque<Chunk> nearHidden = new ArrayDeque<>();
+        ArrayDeque<Chunk> farVisible = new ArrayDeque<>();
+        Set<Long> rebuiltKeys = new HashSet<>();
+
+        for (Chunk chunk : pendingRenderBuilds) {
+            long key = key(chunk.cx, chunk.cz);
+            Chunk pendingReplacement = pendingChunkReplacements.get(key);
+            boolean valid = chunks.get(key) == chunk || pendingReplacement == chunk;
+            if (!valid) {
+                if (pendingReplacement != null) {
+                    chunk.dispose();
+                }
+                continue;
+            }
+            int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
+            if (dist > cacheRenderDist) {
+                if (pendingReplacement == chunk) {
+                    pendingChunkReplacements.remove(key);
+                    chunk.dispose();
+                }
+                continue;
+            }
+            boolean visible = isChunkVisible(frustum, chunk.cx, chunk.cz);
+            if (!visible && dist > LOD_PRIORITY_RADIUS) {
+                if (pendingReplacement == chunk) {
+                    pendingChunkReplacements.remove(key);
+                    chunk.dispose();
+                }
+                continue;
+            }
+            if (rebuiltKeys.contains(key)) {
+                continue;
+            }
+            if (dist <= LOD_PRIORITY_RADIUS && visible) {
+                nearVisible.addLast(chunk);
+            } else if (dist <= LOD_PRIORITY_RADIUS) {
+                nearHidden.addLast(chunk);
+            } else {
+                farVisible.addLast(chunk);
+            }
+            rebuiltKeys.add(key);
+            if (rebuiltKeys.size() >= MAX_PENDING_RENDER_BUILDS) {
+                break;
+            }
+        }
+
+        pendingRenderBuilds.clear();
+        pendingRenderBuildKeys.clear();
+        pendingRenderBuilds.addAll(nearVisible);
+        pendingRenderBuilds.addAll(nearHidden);
+        pendingRenderBuilds.addAll(farVisible);
+        pendingRenderBuildKeys.addAll(rebuiltKeys);
     }
 
     private void processPendingRenderBuilds(int pcx, int pcz) {
