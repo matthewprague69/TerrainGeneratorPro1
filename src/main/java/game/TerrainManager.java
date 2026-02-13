@@ -89,6 +89,7 @@ public class TerrainManager {
     private static final int LOD_FAR_THRESHOLD = 32;
     private static final int LOD_PRIORITY_RADIUS = 2;
     private static final int LOD_PRIORITY_MIN_BUDGET = 6;
+    private static final int MAX_PENDING_CHUNK_QUEUE = 4096;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -376,7 +377,7 @@ public class TerrainManager {
             int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
             int targetLOD = computeTargetLod(dist);
             Chunk existing = chunks.get(key);
-            if (existing != null && existing.getLOD() != targetLOD) {
+            if (existing != null && existing.getLOD() != targetLOD && dist <= LOD_PRIORITY_RADIUS) {
                 queueChunkGeneration(key, cx, cz, targetLOD, 0);
             }
         }
@@ -395,16 +396,6 @@ public class TerrainManager {
     private void addNeededChunk(int cx, int cz, int pcx, int pcz) {
         long k = key(cx, cz);
         neededKeys.add(k);
-
-        Chunk existing = chunks.get(k);
-        int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
-        int targetLOD = computeTargetLod(dist);
-
-        if (existing == null) {
-            queueChunkGeneration(k, cx, cz, targetLOD, dist);
-        } else if (existing.getLOD() != targetLOD) {
-            queueChunkGeneration(k, cx, cz, targetLOD, dist);
-        }
     }
 
     private int computeTargetLod(int dist) {
@@ -444,6 +435,9 @@ public class TerrainManager {
             }
             return;
         }
+        if (pendingChunks.size() >= MAX_PENDING_CHUNK_QUEUE && dist > LOD_PRIORITY_RADIUS) {
+            return;
+        }
         pendingChunkLods.put(key, targetLOD);
         if (dist <= LOD_PRIORITY_RADIUS) {
             pendingChunks.addFirst(key);
@@ -456,8 +450,6 @@ public class TerrainManager {
         if (!pendingChunks.isEmpty()) {
             ArrayDeque<Long> visibleNear = new ArrayDeque<>();
             ArrayDeque<Long> visibleFar = new ArrayDeque<>();
-            ArrayDeque<Long> hiddenNear = new ArrayDeque<>();
-            ArrayDeque<Long> hiddenFar = new ArrayDeque<>();
             Iterator<Long> iterator = pendingChunks.iterator();
             while (iterator.hasNext()) {
                 long key = iterator.next();
@@ -473,22 +465,19 @@ public class TerrainManager {
                 if (dist <= 2) {
                     if (visible) {
                         visibleNear.addLast(key);
-                    } else {
-                        hiddenNear.addLast(key);
                     }
                 } else {
                     if (visible) {
                         visibleFar.addLast(key);
-                    } else {
-                        hiddenFar.addLast(key);
                     }
+                }
+                if (!visible) {
+                    pendingChunkLods.remove(key);
                 }
                 iterator.remove();
             }
             pendingChunks.addAll(visibleNear);
             pendingChunks.addAll(visibleFar);
-            pendingChunks.addAll(hiddenNear);
-            pendingChunks.addAll(hiddenFar);
         }
 
         if (!pendingFeatureChunks.isEmpty()) {
