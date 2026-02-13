@@ -270,6 +270,8 @@ public class Main {
         y -= 20f;
         PixelTextRenderer.drawText("Update total: " + formatMs(snapshot.totalUpdateNanos) + " ms", panelX + 12f, y, 1.0f);
         y -= 16f;
+        PixelTextRenderer.drawText("Estimated frame: " + formatMs(snapshot.estimatedFrameNanos) + " ms", panelX + 12f, y, 1.0f);
+        y -= 16f;
         PixelTextRenderer.drawText("Chunks loaded=" + snapshot.loadedChunks
                 + " | pendingChunkGen=" + snapshot.pendingChunkGenerations
                 + " | pendingFeatureGen=" + snapshot.pendingFeatureGenerations
@@ -283,8 +285,16 @@ public class Main {
                 + "MB total=" + formatMb(snapshot.totalMemoryBytes)
                 + "MB max=" + formatMb(snapshot.maxMemoryBytes) + "MB", panelX + 12f, y, 1.0f);
         y -= 20f;
+        PixelTextRenderer.drawText("Non-heap=" + formatMb(snapshot.nonHeapUsedBytes)
+                + "MB direct=" + formatMb(snapshot.directBufferBytes)
+                + "MB", panelX + 12f, y, 1.0f);
+        y -= 16f;
+        PixelTextRenderer.drawText("Draw load chunks terrain/water/depth=" + snapshot.terrainChunksDrawn + "/"
+                + snapshot.waterChunksDrawn + "/" + snapshot.depthChunksDrawn
+                + " | visible features=" + snapshot.visibleFeatures, panelX + 12f, y, 1.0f);
+        y -= 20f;
 
-        long total = Math.max(1L, snapshot.totalUpdateNanos);
+        long total = Math.max(1L, snapshot.estimatedFrameNanos);
         for (TerrainManager.PipelineStage stage : TerrainManager.PipelineStage.values()) {
             TerrainManager.StageStats stats = snapshot.stages.get(stage);
             long nanos = stats != null ? stats.nanos : 0L;

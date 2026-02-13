@@ -6,6 +6,10 @@ import util.TextureLoader;
 import static org.lwjgl.opengl.GL11.*;
 import org.lwjgl.BufferUtils;
 import java.nio.FloatBuffer;
+import java.lang.management.BufferPoolMXBean;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.MemoryUsage;
 
 
 import java.util.*;
@@ -54,13 +58,24 @@ public class TerrainManager {
         public final long freeMemoryBytes;
         public final long totalMemoryBytes;
         public final long maxMemoryBytes;
+        public final long nonHeapUsedBytes;
+        public final long directBufferBytes;
+        public final int terrainChunksDrawn;
+        public final int waterChunksDrawn;
+        public final int depthChunksDrawn;
+        public final int visibleFeatures;
+        public final long estimatedFrameNanos;
 
         private PerformanceSnapshot(EnumMap<PipelineStage, StageStats> stages, long totalUpdateNanos,
                                     int loadedChunks, int pendingChunkGenerations,
                                     int pendingFeatureGenerations, int pendingRenderBuilds,
                                     int inflightChunkGenerations, int inflightFeatureGenerations,
                                     long usedMemoryBytes, long freeMemoryBytes,
-                                    long totalMemoryBytes, long maxMemoryBytes) {
+                                    long totalMemoryBytes, long maxMemoryBytes,
+                                    long nonHeapUsedBytes, long directBufferBytes,
+                                    int terrainChunksDrawn, int waterChunksDrawn,
+                                    int depthChunksDrawn, int visibleFeatures,
+                                    long estimatedFrameNanos) {
             this.stages = stages;
             this.totalUpdateNanos = totalUpdateNanos;
             this.loadedChunks = loadedChunks;
@@ -73,6 +88,13 @@ public class TerrainManager {
             this.freeMemoryBytes = freeMemoryBytes;
             this.totalMemoryBytes = totalMemoryBytes;
             this.maxMemoryBytes = maxMemoryBytes;
+            this.nonHeapUsedBytes = nonHeapUsedBytes;
+            this.directBufferBytes = directBufferBytes;
+            this.terrainChunksDrawn = terrainChunksDrawn;
+            this.waterChunksDrawn = waterChunksDrawn;
+            this.depthChunksDrawn = depthChunksDrawn;
+            this.visibleFeatures = visibleFeatures;
+            this.estimatedFrameNanos = estimatedFrameNanos;
         }
     }
 
@@ -147,6 +169,10 @@ public class TerrainManager {
     private final EnumMap<PipelineStage, Long> perfStageNanos = new EnumMap<>(PipelineStage.class);
     private final EnumMap<PipelineStage, Integer> perfStageCalls = new EnumMap<>(PipelineStage.class);
     private long perfTotalUpdateNanos = 0L;
+    private int perfTerrainChunksDrawn = 0;
+    private int perfWaterChunksDrawn = 0;
+    private int perfDepthChunksDrawn = 0;
+    private int perfVisibleFeatures = 0;
 
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
         this(seed, scale, renderDist, renderDist - 1,  skyRenderer);
@@ -186,6 +212,10 @@ public class TerrainManager {
 
     private void resetPerformanceFrame() {
         perfTotalUpdateNanos = 0L;
+        perfTerrainChunksDrawn = 0;
+        perfWaterChunksDrawn = 0;
+        perfDepthChunksDrawn = 0;
+        perfVisibleFeatures = 0;
         for (PipelineStage stage : PipelineStage.values()) {
             perfStageNanos.put(stage, 0L);
             perfStageCalls.put(stage, 0);
@@ -879,6 +909,8 @@ public class TerrainManager {
         int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
+        int renderedTerrainChunks = 0;
+        int renderedFeatures = 0;
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
             if (dist > renderDist) {
@@ -886,9 +918,13 @@ public class TerrainManager {
             }
             c.drawTerrainAndFeatures(dist, impostorDistance, grassDetailDistance,
                     featureRenderDist);
+            renderedTerrainChunks++;
+            renderedFeatures += c.getFeatures().size();
         }
 
         disableFog();
+        perfTerrainChunksDrawn = renderedTerrainChunks;
+        perfVisibleFeatures = renderedFeatures;
         recordStage(PipelineStage.DRAW_TERRAIN_AND_FEATURES, System.nanoTime() - start);
     }
 
@@ -896,13 +932,16 @@ public class TerrainManager {
         long start = System.nanoTime();
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        int renderedWaterChunks = 0;
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
             if (dist > renderDist) {
                 continue;
             }
             c.drawWater();
+            renderedWaterChunks++;
         }
+        perfWaterChunksDrawn = renderedWaterChunks;
         recordStage(PipelineStage.DRAW_WATER, System.nanoTime() - start);
     }
 
@@ -913,6 +952,7 @@ public class TerrainManager {
         int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
+        int renderedDepthChunks = 0;
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
             if (dist > shadowRenderDist) {
@@ -920,7 +960,9 @@ public class TerrainManager {
             }
             c.renderDepth(dist, impostorDistance, grassDetailDistance,
                     featureRenderDist);
+            renderedDepthChunks++;
         }
+        perfDepthChunksDrawn = renderedDepthChunks;
         recordStage(PipelineStage.DRAW_DEPTH, System.nanoTime() - start);
     }
 
@@ -1089,6 +1131,19 @@ public class TerrainManager {
         long total = runtime.totalMemory();
         long free = runtime.freeMemory();
         long used = total - free;
+        MemoryMXBean memoryMXBean = ManagementFactory.getMemoryMXBean();
+        MemoryUsage nonHeap = memoryMXBean.getNonHeapMemoryUsage();
+        long directBytes = 0L;
+        for (BufferPoolMXBean pool : ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class)) {
+            if ("direct".equalsIgnoreCase(pool.getName())) {
+                directBytes = pool.getMemoryUsed();
+                break;
+            }
+        }
+        long estimatedFrameNanos = 0L;
+        for (PipelineStage stage : PipelineStage.values()) {
+            estimatedFrameNanos += perfStageNanos.getOrDefault(stage, 0L);
+        }
         return new PerformanceSnapshot(
                 stageCopies,
                 perfTotalUpdateNanos,
@@ -1101,7 +1156,14 @@ public class TerrainManager {
                 used,
                 free,
                 total,
-                runtime.maxMemory());
+                runtime.maxMemory(),
+                nonHeap != null ? nonHeap.getUsed() : 0L,
+                directBytes,
+                perfTerrainChunksDrawn,
+                perfWaterChunksDrawn,
+                perfDepthChunksDrawn,
+                perfVisibleFeatures,
+                estimatedFrameNanos);
     }
 
     public String buildPerformanceReport() {
@@ -1119,8 +1181,15 @@ public class TerrainManager {
         sb.append("memory_free_mb=").append(String.format(Locale.US, "%.2f", snapshot.freeMemoryBytes / (1024.0 * 1024.0))).append('\n');
         sb.append("memory_total_mb=").append(String.format(Locale.US, "%.2f", snapshot.totalMemoryBytes / (1024.0 * 1024.0))).append('\n');
         sb.append("memory_max_mb=").append(String.format(Locale.US, "%.2f", snapshot.maxMemoryBytes / (1024.0 * 1024.0))).append('\n');
+        sb.append("memory_non_heap_mb=").append(String.format(Locale.US, "%.2f", snapshot.nonHeapUsedBytes / (1024.0 * 1024.0))).append('\n');
+        sb.append("memory_direct_mb=").append(String.format(Locale.US, "%.2f", snapshot.directBufferBytes / (1024.0 * 1024.0))).append('\n');
+        sb.append("terrain_chunks_drawn=").append(snapshot.terrainChunksDrawn).append('\n');
+        sb.append("water_chunks_drawn=").append(snapshot.waterChunksDrawn).append('\n');
+        sb.append("depth_chunks_drawn=").append(snapshot.depthChunksDrawn).append('\n');
+        sb.append("visible_features=").append(snapshot.visibleFeatures).append('\n');
+        sb.append("estimated_frame_ms=").append(String.format(Locale.US, "%.3f", snapshot.estimatedFrameNanos / 1_000_000.0)).append('\n');
         sb.append("-- stages --\n");
-        long total = Math.max(1L, snapshot.totalUpdateNanos);
+        long total = Math.max(1L, snapshot.estimatedFrameNanos);
         for (PipelineStage stage : PipelineStage.values()) {
             StageStats stats = snapshot.stages.get(stage);
             long nanos = stats != null ? stats.nanos : 0L;
