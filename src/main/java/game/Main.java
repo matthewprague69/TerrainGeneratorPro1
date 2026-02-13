@@ -11,6 +11,13 @@ import renderers.UIRenderer;
 import util.TextureLoader;
 
 import java.nio.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 
 import static org.lwjgl.glfw.Callbacks.*;
 import static org.lwjgl.glfw.GLFW.*;
@@ -42,7 +49,10 @@ public class Main {
     private int resolutionIndex = 2;
     private boolean vsyncEnabled = false;
     private boolean menuOpen = false;
+    private boolean debugMenuOpen = false;
     private boolean prevMouseDown = false;
+    private String debugExportStatus = "";
+    private static final DateTimeFormatter DEBUG_EXPORT_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
     private void init() {
         GLFWErrorCallback.createPrint(System.err).set();
@@ -212,11 +222,86 @@ public class Main {
         PixelTextRenderer.drawText("ZMENSENI RENDER DISTANCE - SHIFT T", 10, height - 20, 1.0f);
         PixelTextRenderer.drawText("ZMENSENI GENERACE OBJEKTU DISTANCE -  SHIFT Z", 10, height - 40, 1.0f);
         PixelTextRenderer.drawText("TIME SPEED - R", 10, height - 50, 1.0f);
+        PixelTextRenderer.drawText("PERF DEBUG MENU - K (EXPORT - O)", 10, height - 60, 1.0f);
 
         PixelTextRenderer.drawText("Generace Terenu", 10, 40, 1.0f);
         PixelTextRenderer.drawText("Matous Prazak UHK PGRF2 2025 ", 10, 30, 1.0f);
         PixelTextRenderer.drawText("LAST UPDATED: 25.04 21:03", 10, 20, 1.0f);
 
+        UIRenderer.end2D();
+    }
+
+    private String formatMs(long nanos) {
+        return String.format(Locale.US, "%.3f", nanos / 1_000_000.0);
+    }
+
+    private String formatMb(long bytes) {
+        return String.format(Locale.US, "%.2f", bytes / (1024.0 * 1024.0));
+    }
+
+    private void exportDebugReport() {
+        try {
+            String report = terrain.buildPerformanceReport();
+            String filename = "terrain_debug_report_" + LocalDateTime.now().format(DEBUG_EXPORT_FORMAT) + ".txt";
+            Path output = Paths.get(filename);
+            Files.writeString(output, report, StandardCharsets.UTF_8);
+            debugExportStatus = "Exported: " + output.toAbsolutePath();
+        } catch (Exception ex) {
+            debugExportStatus = "Export failed: " + ex.getMessage();
+        }
+    }
+
+    private void drawDebugOverlay(int width, int height) {
+        TerrainManager.PerformanceSnapshot snapshot = terrain.getPerformanceSnapshot();
+        UIRenderer.begin2D(width, height);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(0f, 0f, 0f, 0.72f);
+        float panelX = 14f;
+        float panelY = 14f;
+        float panelWidth = Math.min(width - 28f, 880f);
+        float panelHeight = Math.min(height - 28f, 700f);
+        drawRect(panelX, panelY, panelWidth, panelHeight);
+        glDisable(GL_BLEND);
+
+        glColor3f(1f, 1f, 1f);
+        float y = panelY + panelHeight - 24f;
+        PixelTextRenderer.drawText("PERFORMANCE DEBUG (K to toggle, O to export)", panelX + 12f, y, 1.1f);
+        y -= 20f;
+        PixelTextRenderer.drawText("Update total: " + formatMs(snapshot.totalUpdateNanos) + " ms", panelX + 12f, y, 1.0f);
+        y -= 16f;
+        PixelTextRenderer.drawText("Chunks loaded=" + snapshot.loadedChunks
+                + " | pendingChunkGen=" + snapshot.pendingChunkGenerations
+                + " | pendingFeatureGen=" + snapshot.pendingFeatureGenerations
+                + " | pendingRenderBuild=" + snapshot.pendingRenderBuilds, panelX + 12f, y, 1.0f);
+        y -= 16f;
+        PixelTextRenderer.drawText("In-flight chunk=" + snapshot.inflightChunkGenerations
+                + " | in-flight feature=" + snapshot.inflightFeatureGenerations, panelX + 12f, y, 1.0f);
+        y -= 16f;
+        PixelTextRenderer.drawText("Memory used=" + formatMb(snapshot.usedMemoryBytes)
+                + "MB free=" + formatMb(snapshot.freeMemoryBytes)
+                + "MB total=" + formatMb(snapshot.totalMemoryBytes)
+                + "MB max=" + formatMb(snapshot.maxMemoryBytes) + "MB", panelX + 12f, y, 1.0f);
+        y -= 20f;
+
+        long total = Math.max(1L, snapshot.totalUpdateNanos);
+        for (TerrainManager.PipelineStage stage : TerrainManager.PipelineStage.values()) {
+            TerrainManager.StageStats stats = snapshot.stages.get(stage);
+            long nanos = stats != null ? stats.nanos : 0L;
+            int calls = stats != null ? stats.calls : 0;
+            double pct = nanos * 100.0 / total;
+            String line = stage.name() + " : " + formatMs(nanos) + " ms, calls=" + calls
+                    + ", " + String.format(Locale.US, "%.2f", pct) + "%";
+            PixelTextRenderer.drawText(line, panelX + 12f, y, 0.88f);
+            y -= 14f;
+            if (y < panelY + 24f) {
+                break;
+            }
+        }
+
+        if (!debugExportStatus.isEmpty()) {
+            PixelTextRenderer.drawText(debugExportStatus, panelX + 12f, panelY + 10f, 0.9f);
+        }
         UIRenderer.end2D();
     }
 
@@ -465,6 +550,8 @@ public class Main {
         boolean prev4 = false;
         boolean prev5 = false;
         boolean prev6 = false;
+        boolean prevK = false;
+        boolean prevO = false;
 
         while (!glfwWindowShouldClose(window)) {
             double now = glfwGetTime();
@@ -509,6 +596,18 @@ public class Main {
                 toggleFullscreen();
             }
             prevF = currF;
+
+            boolean currK = glfwGetKey(window, GLFW_KEY_K) == GLFW_PRESS;
+            if (currK && !prevK) {
+                debugMenuOpen = !debugMenuOpen;
+            }
+            prevK = currK;
+
+            boolean currO = glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS;
+            if (currO && !prevO && debugMenuOpen) {
+                exportDebugReport();
+            }
+            prevO = currO;
             // --- Key toggles ---
             boolean currT = glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS;
             boolean currZ = glfwGetKey(window, GLFW_KEY_Y) == GLFW_PRESS;
@@ -624,6 +723,9 @@ public class Main {
                 drawMenuOverlay(fbWidth, fbHeight, mouseX, mouseY);
             } else {
                 drawInfoOverlay(fbWidth, fbHeight);
+            }
+            if (debugMenuOpen) {
+                drawDebugOverlay(fbWidth, fbHeight);
             }
 
             glfwSwapBuffers(window);

@@ -14,6 +14,68 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class TerrainManager {
+    public enum PipelineStage {
+        DRAIN_COMPLETED_CHUNK_BUILDS,
+        PROCESS_PENDING_RENDER_BUILDS,
+        DRAIN_COMPLETED_FEATURES,
+        REBUILD_NEEDED_CHUNKS,
+        REFRESH_CHUNK_LODS,
+        REPRIORITIZE_QUEUES,
+        UPDATE_NEEDED_CHUNKS,
+        QUEUE_FEATURES_FOR_VISIBLE_CHUNKS,
+        DISPOSE_FAR_CHUNKS,
+        PROCESS_PENDING_CHUNK_GENERATIONS,
+        PROCESS_PENDING_FEATURE_GENERATIONS,
+        DRAW_TERRAIN_AND_FEATURES,
+        DRAW_WATER,
+        DRAW_DEPTH
+    }
+
+    public static final class StageStats {
+        public final long nanos;
+        public final int calls;
+
+        private StageStats(long nanos, int calls) {
+            this.nanos = nanos;
+            this.calls = calls;
+        }
+    }
+
+    public static final class PerformanceSnapshot {
+        public final EnumMap<PipelineStage, StageStats> stages;
+        public final long totalUpdateNanos;
+        public final int loadedChunks;
+        public final int pendingChunkGenerations;
+        public final int pendingFeatureGenerations;
+        public final int pendingRenderBuilds;
+        public final int inflightChunkGenerations;
+        public final int inflightFeatureGenerations;
+        public final long usedMemoryBytes;
+        public final long freeMemoryBytes;
+        public final long totalMemoryBytes;
+        public final long maxMemoryBytes;
+
+        private PerformanceSnapshot(EnumMap<PipelineStage, StageStats> stages, long totalUpdateNanos,
+                                    int loadedChunks, int pendingChunkGenerations,
+                                    int pendingFeatureGenerations, int pendingRenderBuilds,
+                                    int inflightChunkGenerations, int inflightFeatureGenerations,
+                                    long usedMemoryBytes, long freeMemoryBytes,
+                                    long totalMemoryBytes, long maxMemoryBytes) {
+            this.stages = stages;
+            this.totalUpdateNanos = totalUpdateNanos;
+            this.loadedChunks = loadedChunks;
+            this.pendingChunkGenerations = pendingChunkGenerations;
+            this.pendingFeatureGenerations = pendingFeatureGenerations;
+            this.pendingRenderBuilds = pendingRenderBuilds;
+            this.inflightChunkGenerations = inflightChunkGenerations;
+            this.inflightFeatureGenerations = inflightFeatureGenerations;
+            this.usedMemoryBytes = usedMemoryBytes;
+            this.freeMemoryBytes = freeMemoryBytes;
+            this.totalMemoryBytes = totalMemoryBytes;
+            this.maxMemoryBytes = maxMemoryBytes;
+        }
+    }
+
     private static final int MAX_CHUNKS_PER_FRAME = 20;
     private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 4;
     private static final long CHUNK_BUDGET_NS = 10_000_000L;
@@ -80,6 +142,9 @@ public class TerrainManager {
     private final int snowTex;
     private final int waterBottomTex;
     private final int waterBottomAbsTex;
+    private final EnumMap<PipelineStage, Long> perfStageNanos = new EnumMap<>(PipelineStage.class);
+    private final EnumMap<PipelineStage, Integer> perfStageCalls = new EnumMap<>(PipelineStage.class);
+    private long perfTotalUpdateNanos = 0L;
 
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
         this(seed, scale, renderDist, renderDist - 1,  skyRenderer);
@@ -111,6 +176,23 @@ public class TerrainManager {
             textureMap.put(b.rockTex, TextureLoader.getOrLoad(b.rockTex));
         }
         this.skyRenderer = skyRenderer;
+        for (PipelineStage stage : PipelineStage.values()) {
+            perfStageNanos.put(stage, 0L);
+            perfStageCalls.put(stage, 0);
+        }
+    }
+
+    private void resetPerformanceFrame() {
+        perfTotalUpdateNanos = 0L;
+        for (PipelineStage stage : PipelineStage.values()) {
+            perfStageNanos.put(stage, 0L);
+            perfStageCalls.put(stage, 0);
+        }
+    }
+
+    private void recordStage(PipelineStage stage, long nanos) {
+        perfStageNanos.put(stage, perfStageNanos.get(stage) + Math.max(0L, nanos));
+        perfStageCalls.put(stage, perfStageCalls.get(stage) + 1);
     }
 
     private long key(int cx, int cz) {
@@ -144,38 +226,68 @@ public class TerrainManager {
     }
 
     public void update(float wx, float wz, Frustum frustum) {
+        resetPerformanceFrame();
+        long updateStart = System.nanoTime();
 
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        long stageStart = System.nanoTime();
         drainCompletedChunkBuilds(pcx, pcz);
+        recordStage(PipelineStage.DRAIN_COMPLETED_CHUNK_BUILDS, System.nanoTime() - stageStart);
+        stageStart = System.nanoTime();
         processPendingRenderBuilds(pcx, pcz);
+        recordStage(PipelineStage.PROCESS_PENDING_RENDER_BUILDS, System.nanoTime() - stageStart);
+        stageStart = System.nanoTime();
         drainCompletedFeatureGenerations(pcx, pcz);
+        recordStage(PipelineStage.DRAIN_COMPLETED_FEATURES, System.nanoTime() - stageStart);
         if (renderDistanceDirty) {
+            stageStart = System.nanoTime();
             rebuildNeededChunks(pcx, pcz);
+            recordStage(PipelineStage.REBUILD_NEEDED_CHUNKS, System.nanoTime() - stageStart);
+            stageStart = System.nanoTime();
             refreshChunkLods(pcx, pcz);
+            recordStage(PipelineStage.REFRESH_CHUNK_LODS, System.nanoTime() - stageStart);
+            stageStart = System.nanoTime();
             reprioritizePendingQueues(pcx, pcz, frustum);
+            recordStage(PipelineStage.REPRIORITIZE_QUEUES, System.nanoTime() - stageStart);
             lastUpdateChunkX = pcx;
             lastUpdateChunkZ = pcz;
             renderDistanceDirty = false;
         }
         boolean movedChunk = pcx != lastUpdateChunkX || pcz != lastUpdateChunkZ;
         if (!movedChunk) {
+            stageStart = System.nanoTime();
             refreshChunkLods(pcx, pcz);
+            recordStage(PipelineStage.REFRESH_CHUNK_LODS, System.nanoTime() - stageStart);
+            stageStart = System.nanoTime();
             reprioritizePendingQueues(pcx, pcz, frustum);
+            recordStage(PipelineStage.REPRIORITIZE_QUEUES, System.nanoTime() - stageStart);
+            stageStart = System.nanoTime();
             processPendingChunkGenerations(pcx, pcz, frustum);
+            recordStage(PipelineStage.PROCESS_PENDING_CHUNK_GENERATIONS, System.nanoTime() - stageStart);
+            stageStart = System.nanoTime();
             processPendingRenderBuilds(pcx, pcz);
+            recordStage(PipelineStage.PROCESS_PENDING_RENDER_BUILDS, System.nanoTime() - stageStart);
+            stageStart = System.nanoTime();
             processPendingFeatureGenerations(pcx, pcz);
+            recordStage(PipelineStage.PROCESS_PENDING_FEATURE_GENERATIONS, System.nanoTime() - stageStart);
+            perfTotalUpdateNanos = System.nanoTime() - updateStart;
             return;
         }
         int prevChunkX = lastUpdateChunkX;
         int prevChunkZ = lastUpdateChunkZ;
         lastUpdateChunkX = pcx;
         lastUpdateChunkZ = pcz;
+        stageStart = System.nanoTime();
         updateNeededChunks(pcx, pcz, prevChunkX, prevChunkZ);
+        recordStage(PipelineStage.UPDATE_NEEDED_CHUNKS, System.nanoTime() - stageStart);
 
+        stageStart = System.nanoTime();
         reprioritizePendingQueues(pcx, pcz, frustum);
+        recordStage(PipelineStage.REPRIORITIZE_QUEUES, System.nanoTime() - stageStart);
 
         // Generate/unload features based on featureRenderDist
+        stageStart = System.nanoTime();
         for (Chunk c : chunks.values()) {
             c.unloadFeaturesIfOutOfRange(pcx, pcz, cacheFeatureRenderDist);
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
@@ -183,8 +295,10 @@ public class TerrainManager {
                 queueFeatureGeneration(c, pcx, pcz);
             }
         }
+        recordStage(PipelineStage.QUEUE_FEATURES_FOR_VISIBLE_CHUNKS, System.nanoTime() - stageStart);
 
         // Dispose chunks no longer needed
+        stageStart = System.nanoTime();
         for (Iterator<Map.Entry<Long, Chunk>> it = chunks.entrySet().iterator(); it.hasNext();) {
             Map.Entry<Long, Chunk> entry = it.next();
             if (!neededKeys.contains(entry.getKey())) {
@@ -198,10 +312,18 @@ public class TerrainManager {
                 it.remove();
             }
         }
+        recordStage(PipelineStage.DISPOSE_FAR_CHUNKS, System.nanoTime() - stageStart);
 
+        stageStart = System.nanoTime();
         processPendingChunkGenerations(pcx, pcz, frustum);
+        recordStage(PipelineStage.PROCESS_PENDING_CHUNK_GENERATIONS, System.nanoTime() - stageStart);
+        stageStart = System.nanoTime();
         processPendingRenderBuilds(pcx, pcz);
+        recordStage(PipelineStage.PROCESS_PENDING_RENDER_BUILDS, System.nanoTime() - stageStart);
+        stageStart = System.nanoTime();
         processPendingFeatureGenerations(pcx, pcz);
+        recordStage(PipelineStage.PROCESS_PENDING_FEATURE_GENERATIONS, System.nanoTime() - stageStart);
+        perfTotalUpdateNanos = System.nanoTime() - updateStart;
     }
 
     private void updateNeededChunks(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
@@ -748,6 +870,7 @@ public class TerrainManager {
     }
 
     public void drawTerrainAndFeatures(float wx, float wz) {
+        long start = System.nanoTime();
         enableFogDynamic();
 
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
@@ -765,9 +888,11 @@ public class TerrainManager {
         }
 
         disableFog();
+        recordStage(PipelineStage.DRAW_TERRAIN_AND_FEATURES, System.nanoTime() - start);
     }
 
     public void drawWater(float wx, float wz) {
+        long start = System.nanoTime();
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         for (Chunk c : chunks.values()) {
@@ -777,9 +902,11 @@ public class TerrainManager {
             }
             c.drawWater();
         }
+        recordStage(PipelineStage.DRAW_WATER, System.nanoTime() - start);
     }
 
     public void drawDepth(float wx, float wz) {
+        long start = System.nanoTime();
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
@@ -793,6 +920,7 @@ public class TerrainManager {
             c.renderDepth(dist, impostorDistance, grassDetailDistance,
                     featureRenderDist);
         }
+        recordStage(PipelineStage.DRAW_DEPTH, System.nanoTime() - start);
     }
 
     private void enableFogDynamic() {
@@ -946,6 +1074,67 @@ public class TerrainManager {
     }
     public int getWaterBottomAbsTexture() {
         return waterBottomAbsTex;
+    }
+
+
+    public PerformanceSnapshot getPerformanceSnapshot() {
+        EnumMap<PipelineStage, StageStats> stageCopies = new EnumMap<>(PipelineStage.class);
+        for (PipelineStage stage : PipelineStage.values()) {
+            long nanos = perfStageNanos.getOrDefault(stage, 0L);
+            int calls = perfStageCalls.getOrDefault(stage, 0);
+            stageCopies.put(stage, new StageStats(nanos, calls));
+        }
+        Runtime runtime = Runtime.getRuntime();
+        long total = runtime.totalMemory();
+        long free = runtime.freeMemory();
+        long used = total - free;
+        return new PerformanceSnapshot(
+                stageCopies,
+                perfTotalUpdateNanos,
+                chunks.size(),
+                pendingChunks.size(),
+                pendingFeatureChunks.size(),
+                pendingRenderBuilds.size(),
+                inflightChunkKeys.size(),
+                inflightFeatureKeys.size(),
+                used,
+                free,
+                total,
+                runtime.maxMemory());
+    }
+
+    public String buildPerformanceReport() {
+        PerformanceSnapshot snapshot = getPerformanceSnapshot();
+        StringBuilder sb = new StringBuilder(4096);
+        sb.append("=== Terrain Pipeline Debug Report ===\n");
+        sb.append("update_total_ms=").append(String.format(Locale.US, "%.3f", snapshot.totalUpdateNanos / 1_000_000.0)).append('\n');
+        sb.append("loaded_chunks=").append(snapshot.loadedChunks).append('\n');
+        sb.append("pending_chunk_generations=").append(snapshot.pendingChunkGenerations).append('\n');
+        sb.append("pending_feature_generations=").append(snapshot.pendingFeatureGenerations).append('\n');
+        sb.append("pending_render_builds=").append(snapshot.pendingRenderBuilds).append('\n');
+        sb.append("inflight_chunk_generations=").append(snapshot.inflightChunkGenerations).append('\n');
+        sb.append("inflight_feature_generations=").append(snapshot.inflightFeatureGenerations).append('\n');
+        sb.append("memory_used_mb=").append(String.format(Locale.US, "%.2f", snapshot.usedMemoryBytes / (1024.0 * 1024.0))).append('\n');
+        sb.append("memory_free_mb=").append(String.format(Locale.US, "%.2f", snapshot.freeMemoryBytes / (1024.0 * 1024.0))).append('\n');
+        sb.append("memory_total_mb=").append(String.format(Locale.US, "%.2f", snapshot.totalMemoryBytes / (1024.0 * 1024.0))).append('\n');
+        sb.append("memory_max_mb=").append(String.format(Locale.US, "%.2f", snapshot.maxMemoryBytes / (1024.0 * 1024.0))).append('\n');
+        sb.append("-- stages --\n");
+        long total = Math.max(1L, snapshot.totalUpdateNanos);
+        for (PipelineStage stage : PipelineStage.values()) {
+            StageStats stats = snapshot.stages.get(stage);
+            long nanos = stats != null ? stats.nanos : 0L;
+            int calls = stats != null ? stats.calls : 0;
+            double pct = (nanos * 100.0) / total;
+            sb.append(stage.name().toLowerCase(Locale.ROOT))
+                    .append(": ms=")
+                    .append(String.format(Locale.US, "%.3f", nanos / 1_000_000.0))
+                    .append(", calls=")
+                    .append(calls)
+                    .append(", pct=")
+                    .append(String.format(Locale.US, "%.2f", pct))
+                    .append('\n');
+        }
+        return sb.toString();
     }
 
     public void setRenderDistance(int r) {
