@@ -22,6 +22,10 @@ public class WeatherSystem {
         float tempBlend = Math.min(1f, dt * 0.25f);
         temperatureC += (targetTemp - temperatureC) * tempBlend;
 
+        if (weatherType == WeatherType.SNOWY && temperatureC > -0.25f) {
+            temperatureC = Math.max(-8f, temperatureC - dt * 12f);
+        }
+
         float targetPrecip = weatherType == WeatherType.SUNNY ? 0f : 1f;
         precipitationStrength += (targetPrecip - precipitationStrength) * Math.min(1f, dt * 0.8f);
 
@@ -117,6 +121,12 @@ public class WeatherSystem {
 
     public void setWeatherType(WeatherType weatherType) {
         this.weatherType = weatherType == null ? WeatherType.SUNNY : weatherType;
+
+        if (this.weatherType == WeatherType.SNOWY) {
+            temperatureC = Math.min(temperatureC, -2f);
+        } else {
+            temperatureC = Math.max(temperatureC, 2f);
+        }
     }
 
     public float getTemperatureC() {
