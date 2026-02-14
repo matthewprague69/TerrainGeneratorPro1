@@ -1089,18 +1089,23 @@ public class TerrainManager {
     }
 
     private void enableFogDynamic() {
+        float[] fogRange = computeFogRange();
+        if (fogRange == null) {
+            glDisable(GL_FOG);
+            return;
+        }
+
         glEnable(GL_FOG);
         glFogi(GL_FOG_MODE, GL_LINEAR);
 
         float time = skyRenderer.getTimeOfDay();
         float brightness = getFogBrightness(time);
 
-        float fogEnd = Math.max(0f, renderDist * Chunk.SIZE * scale);
-        float fogStart = Math.max(0f, fogEnd * 0.35f);
+        float fogStart = fogRange[0];
+        float fogEnd = fogRange[1];
         glFogf(GL_FOG_START, fogStart);
         glFogf(GL_FOG_END, fogEnd);
 
-        // --- New: match fog color to sky color ---
         float r = 0.6f * brightness;
         float g = 0.75f * brightness;
         float b = 1.0f * brightness;
@@ -1113,16 +1118,55 @@ public class TerrainManager {
     }
 
     public float[] getFogSettings() {
+        float[] fogRange = computeFogRange();
         float time = skyRenderer.getTimeOfDay();
         float brightness = getFogBrightness(time);
-        float fogEnd = Math.max(0f, renderDist * Chunk.SIZE * scale);
-        float fogStart = Math.max(0f, fogEnd * 0.35f);
         float r = 0.6f * brightness;
         float g = 0.75f * brightness;
         float b = 1.0f * brightness;
-        return new float[] { fogStart, fogEnd, r, g, b };
+        if (fogRange == null) {
+            return new float[] { 0f, 0f, r, g, b };
+        }
+        return new float[] { fogRange[0], fogRange[1], r, g, b };
     }
 
+
+    private float[] computeFogRange() {
+        int pcx = lastUpdateChunkX;
+        int pcz = lastUpdateChunkZ;
+        if (pcx == Integer.MIN_VALUE || pcz == Integer.MIN_VALUE) {
+            return null;
+        }
+
+        int nearestMissingDist = Integer.MAX_VALUE;
+        Frustum frustum = lastCameraFrustum;
+        for (long key : neededKeys) {
+            int cx = (int) (key >> 32);
+            int cz = (int) key;
+            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            if (dist > cacheRenderDist) {
+                continue;
+            }
+            if (frustum != null && !isChunkVisible(frustum, cx, cz)) {
+                continue;
+            }
+            Chunk chunk = chunks.get(key);
+            if (chunk == null || chunk.needsRenderResources()) {
+                nearestMissingDist = Math.min(nearestMissingDist, dist);
+            }
+        }
+
+        if (nearestMissingDist == Integer.MAX_VALUE) {
+            return null;
+        }
+
+        float chunkSpan = Chunk.SIZE * scale;
+        float fogCenter = nearestMissingDist * chunkSpan;
+        float fogHalfWidth = Math.max(chunkSpan * 1.5f, 8f * scale);
+        float fogStart = Math.max(0f, fogCenter - fogHalfWidth);
+        float fogEnd = Math.max(fogStart + chunkSpan, fogCenter + fogHalfWidth);
+        return new float[] { fogStart, fogEnd };
+    }
 
     private float getFogBrightness(float time) {
         if (time > 0.2f && time < 0.3f) {
