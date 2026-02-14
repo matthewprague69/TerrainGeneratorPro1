@@ -118,6 +118,9 @@ public class TerrainManager {
     private static final int MAX_PENDING_RENDER_QUEUE = 4096;
     private static final int MAX_INFLIGHT_CHUNK_BUILDS = CHUNK_GENERATOR_THREADS * 8;
     private static final int MAX_INFLIGHT_FEATURE_BUILDS = FEATURE_GENERATOR_THREADS * 32;
+    private static final int DISTANT_TERRAIN_EXTRA_CHUNKS = 120;
+    private static final int DISTANT_TERRAIN_RADIAL_STEPS = 18;
+    private static final int DISTANT_TERRAIN_ANGULAR_STEPS = 56;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -1025,6 +1028,8 @@ public class TerrainManager {
         int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
+        renderDistantTerrainBackdrop(wx, wz);
+
         int renderedTerrainChunks = 0;
         int renderedFeatures = 0;
         for (Chunk c : chunks.values()) {
@@ -1186,6 +1191,63 @@ public class TerrainManager {
     }
 
 
+
+    private void renderDistantTerrainBackdrop(float wx, float wz) {
+        float chunkSpan = Chunk.SIZE * scale;
+        float nearRadius = Math.max(0f, (cacheRenderDist + 2) * chunkSpan);
+        float farRadius = Math.max(nearRadius + chunkSpan * 4f,
+                (cacheRenderDist + DISTANT_TERRAIN_EXTRA_CHUNKS) * chunkSpan);
+
+        float time = skyRenderer.getTimeOfDay();
+        float brightness = Math.max(0.15f, getFogBrightness(time));
+        float baseR = 0.34f * brightness;
+        float baseG = 0.44f * brightness;
+        float baseB = 0.56f * brightness;
+
+        glDisable(GL_TEXTURE_2D);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        for (int ring = 0; ring < DISTANT_TERRAIN_RADIAL_STEPS; ring++) {
+            float t0 = (float) ring / DISTANT_TERRAIN_RADIAL_STEPS;
+            float t1 = (float) (ring + 1) / DISTANT_TERRAIN_RADIAL_STEPS;
+            float r0 = nearRadius + (farRadius - nearRadius) * t0;
+            float r1 = nearRadius + (farRadius - nearRadius) * t1;
+            float alpha0 = 0.55f * (1f - t0);
+            float alpha1 = 0.55f * (1f - t1);
+
+            glBegin(GL_TRIANGLE_STRIP);
+            for (int i = 0; i <= DISTANT_TERRAIN_ANGULAR_STEPS; i++) {
+                float a = (float) (i * Math.PI * 2.0 / DISTANT_TERRAIN_ANGULAR_STEPS);
+                float c = (float) Math.cos(a);
+                float s = (float) Math.sin(a);
+
+                float x0 = wx + c * r0;
+                float z0 = wz + s * r0;
+                float y0 = sampleDistantHeight(x0, z0);
+
+                float x1 = wx + c * r1;
+                float z1 = wz + s * r1;
+                float y1 = sampleDistantHeight(x1, z1);
+
+                glColor4f(baseR, baseG, baseB, alpha0);
+                glVertex3f(x0, y0, z0);
+                glColor4f(baseR, baseG, baseB, alpha1);
+                glVertex3f(x1, y1, z1);
+            }
+            glEnd();
+        }
+
+        glDisable(GL_BLEND);
+        glColor4f(1f, 1f, 1f, 1f);
+    }
+
+    private float sampleDistantHeight(float wx, float wz) {
+        double macro = terrainNoise.eval(wx * 0.00045, wz * 0.00045) * 36.0;
+        double mid = terrainNoise.eval(wx * 0.00125 + 1200.0, wz * 0.00125 - 900.0) * 16.0;
+        double detail = terrainNoise.eval(wx * 0.0035 - 400.0, wz * 0.0035 + 250.0) * 5.0;
+        return (float) (macro + mid + detail + 6.0);
+    }
 
     private void disableFog() {
         glDisable(GL_FOG);
