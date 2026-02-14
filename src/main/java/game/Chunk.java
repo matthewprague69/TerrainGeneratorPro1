@@ -666,16 +666,9 @@ public class Chunk {
             return 0f;
         }
 
-        boolean edgeVertex = x == 0 || z == 0 || x == SIZE || z == SIZE;
-        float slopeFactor;
-        if (edgeVertex) {
-            // Keep border vertices seam-safe between neighboring chunks.
-            slopeFactor = 1f;
-        } else {
-            float slope = computeSlope(heights, x, z);
-            slopeFactor = 1f - Math.min(1f, slope / 1.2f);
-            slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
-        }
+        float slope = computeSlope(heights, x, z);
+        float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
+        slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
 
         float wx = (cx * SIZE + x) * scale;
         float wz = (cz * SIZE + z) * scale;

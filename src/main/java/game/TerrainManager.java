@@ -119,9 +119,9 @@ public class TerrainManager {
     private static final int MAX_INFLIGHT_CHUNK_BUILDS = CHUNK_GENERATOR_THREADS * 8;
     private static final int MAX_INFLIGHT_FEATURE_BUILDS = FEATURE_GENERATOR_THREADS * 32;
 
-    private static final float SNOW_DENT_MIN_STEP_DISTANCE = 0.42f;
-    private static final float SNOW_DENT_RADIUS = 0.38f;
-    private static final float SNOW_DENT_DEPTH = 0.16f;
+    private static final float SNOW_DENT_MIN_STEP_DISTANCE = 0.16f;
+    private static final float SNOW_DENT_RADIUS = 1.15f;
+    private static final float SNOW_DENT_DEPTH = 6.0f;
     private static final float SNOW_DENT_LIFETIME_SECONDS = 120f;
     private static final int MAX_SNOW_DENTS = 4096;
 
@@ -1484,7 +1484,8 @@ public class TerrainManager {
                 continue;
             }
             float dist = (float) Math.sqrt(distSq);
-            float falloff = 1f - (dist / SNOW_DENT_RADIUS);
+            float t = dist / SNOW_DENT_RADIUS;
+            float falloff = 1f - (t * t);
             float ageFade = Math.max(0f, 1f - dent.ageSeconds / SNOW_DENT_LIFETIME_SECONDS);
             depth += SNOW_DENT_DEPTH * falloff * ageFade * coverageScale;
         }
