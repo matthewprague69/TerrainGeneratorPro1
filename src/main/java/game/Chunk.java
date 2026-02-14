@@ -67,6 +67,7 @@ public class Chunk {
     private final boolean[][] featureMask = new boolean[SIZE][SIZE];
     private final boolean[][] lakeMask = new boolean[SIZE][SIZE];
     private boolean featuresGenerated = false;
+    private int heavyFeatureCount = 0;
     private final List<TerrainBatch> terrainBatches = new ArrayList<>();
     private int terrainVboId = -1;
     private final int[] primaryLayerTextures = new int[3];
@@ -91,6 +92,9 @@ public class Chunk {
     private static final int BLEND_STEPS = 8;
     private static final float BLEND_EDGE_START = 0.4f;
     private static final float BLEND_EDGE_END = 0.6f;
+    private static final int HEAVY_FEATURE_OVERLOAD_THRESHOLD = 48;
+    private static final int HEAVY_FEATURES_PER_IMPOSTOR_STEP = 16;
+    private static final int MAX_IMPOSTOR_DISTANCE_REDUCTION = 4;
 
 
     private static final float SNOW_HEIGHT_START = 55f;
@@ -428,6 +432,7 @@ public class Chunk {
         stitchEdges();
         buildTerrainBuffers();
         buildWaterDisplayList();
+        recalculateHeavyFeatureCount();
         buildFeatureBatches();
 
     }
@@ -504,6 +509,7 @@ public class Chunk {
             features.add(f);
         }
         featuresGenerated = true;
+        recalculateHeavyFeatureCount();
         buildFeatureBatches();
     }
 
@@ -916,11 +922,24 @@ public class Chunk {
                     return FeatureLod.CULLED;
                 }
             }
+        } else {
+            impostorStart = getAdaptiveImpostorStart(impostorStart);
         }
         if (chunkDistance >= impostorStart) {
             return FeatureLod.IMPOSTOR;
         }
         return FeatureLod.FULL;
+    }
+
+    private int getAdaptiveImpostorStart(int impostorStart) {
+        int adjusted = Math.max(0, impostorStart);
+        if (heavyFeatureCount <= HEAVY_FEATURE_OVERLOAD_THRESHOLD) {
+            return adjusted;
+        }
+        int overload = heavyFeatureCount - HEAVY_FEATURE_OVERLOAD_THRESHOLD;
+        int reduction = 1 + overload / HEAVY_FEATURES_PER_IMPOSTOR_STEP;
+        reduction = Math.min(MAX_IMPOSTOR_DISTANCE_REDUCTION, reduction);
+        return Math.max(0, adjusted - reduction);
     }
 
     private boolean shouldDrawFeatureForLod(Feature feature, FeatureLod lod) {
@@ -1584,6 +1603,7 @@ public class Chunk {
             // Remove only non-lake features
             features.removeIf(f -> !(f instanceof Lake));
             featuresGenerated = false;
+            recalculateHeavyFeatureCount();
             disposeGrassBatch();
             disposeFlowerBatch();
 
@@ -1833,6 +1853,7 @@ public class Chunk {
         stitchEdges();
         buildTerrainBuffers();
         buildWaterDisplayList();
+        recalculateHeavyFeatureCount();
         buildFeatureBatches();
         renderResourcesBuilt = true;
     }
@@ -1857,7 +1878,19 @@ public class Chunk {
         if (data.lakes != null) {
             features.addAll(data.lakes);
         }
+        recalculateHeavyFeatureCount();
         featuresGenerated = false;
+    }
+
+
+    private void recalculateHeavyFeatureCount() {
+        int count = 0;
+        for (Feature feature : features) {
+            if (!(feature instanceof Grass) && !(feature instanceof ColorBatchableFeature)) {
+                count++;
+            }
+        }
+        heavyFeatureCount = count;
     }
 
     private static float[][] copyHeights(float[][] source) {
