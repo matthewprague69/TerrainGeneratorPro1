@@ -1218,7 +1218,7 @@ public class TerrainManager {
 
     private void renderDistantTerrainBackdrop(float wx, float wz) {
         float chunkSpan = Chunk.SIZE * scale;
-        float nearRadius = Math.max(0f, (cacheRenderDist + 6) * chunkSpan);
+        float nearRadius = Math.max(0f, (renderDist - 1) * chunkSpan);
         float farRadius = Math.max(nearRadius + chunkSpan * 4f,
                 (cacheRenderDist + DISTANT_TERRAIN_EXTRA_CHUNKS) * chunkSpan);
 
