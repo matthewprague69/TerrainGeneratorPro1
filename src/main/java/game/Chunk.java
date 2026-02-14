@@ -444,6 +444,7 @@ public class Chunk {
 
     public void drawWater(boolean frozen, float snowCoverage, float iceThickness) {
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
+        glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);
         glDepthFunc(GL_LEQUAL);
 
@@ -453,15 +454,20 @@ public class Chunk {
             glDepthMask(true);
             glEnable(GL_POLYGON_OFFSET_FILL);
             glPolygonOffset(-1.0f, -2.0f);
-            float iceTint = Math.max(0.2f, Math.min(1f, 0.35f + snowCoverage * 0.4f));
             float iceLift = Math.max(0f, iceThickness);
+            int iceTexture = manager.getIceTexture();
             glPushMatrix();
             glTranslatef(0f, iceLift, 0f);
-            glColor4f(0.78f * iceTint, 0.88f * iceTint, 0.96f, 1.0f);
+            if (iceTexture != 0) {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, iceTexture);
+            }
+            glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
             if (waterDisplayList != -1) {
                 glCallList(waterDisplayList);
             }
             if (snowCoverage > 0.02f && waterDisplayList != -1) {
+                glDisable(GL_TEXTURE_2D);
                 float snowCapAlpha = Math.max(0.25f, Math.min(0.95f, snowCoverage * 0.95f));
                 glTranslatef(0f, 0.015f, 0f);
                 glColor4f(0.96f, 0.98f, 1.0f, snowCapAlpha);
@@ -806,6 +812,7 @@ public class Chunk {
 
     private void buildWaterGeometry() {
         int step = (int) Math.pow(2, lod);
+        float texScale = 0.12f;
 
         for (int z = 0; z < SIZE; z += step) {
             int z2 = Math.min(z + step, SIZE);
@@ -843,9 +850,13 @@ public class Chunk {
 
                     glBegin(GL_QUADS);
                     glNormal3f(0f, 1f, 0f);
+                    glTexCoord2f(wx1 * texScale, wz1 * texScale);
                     glVertex3f(wx1, wy1, wz1);
+                    glTexCoord2f(wx2 * texScale, wz1 * texScale);
                     glVertex3f(wx2, wy2, wz1);
+                    glTexCoord2f(wx2 * texScale, wz2 * texScale);
                     glVertex3f(wx2, wy3, wz2);
+                    glTexCoord2f(wx1 * texScale, wz2 * texScale);
                     glVertex3f(wx1, wy4, wz2);
                     glEnd();
                 }

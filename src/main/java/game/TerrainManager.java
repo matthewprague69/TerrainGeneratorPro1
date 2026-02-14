@@ -193,6 +193,7 @@ public class TerrainManager {
 
     private final Map<String, Integer> textureMap = new HashMap<>();
     private final int snowTex;
+    private final int iceTex;
     private final int waterBottomTex;
     private final int waterBottomAbsTex;
     private final EnumMap<PipelineStage, Long> perfStageNanos = new EnumMap<>(PipelineStage.class);
@@ -224,6 +225,7 @@ public class TerrainManager {
 
 
         snowTex = TextureLoader.getOrLoad("snow.png");
+        iceTex = TextureLoader.getOrLoad("ice.png");
         waterBottomTex = TextureLoader.getOrLoad("sand.png");
         waterBottomAbsTex = TextureLoader.getOrLoad("water_bottom.png");
 
@@ -1039,7 +1041,12 @@ public class TerrainManager {
         int cx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int cz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         Chunk c = chunks.get(key(cx, cz));
-        return c != null ? c.getHeight(wx / scale, wz / scale) : 0f;
+        float terrainHeight = c != null ? c.getHeight(wx / scale, wz / scale) : 0f;
+        if (weatherSystem.isWaterFrozen()) {
+            float iceSurface = Chunk.WATER_LEVEL + weatherSystem.getIceThickness();
+            return Math.max(terrainHeight, iceSurface);
+        }
+        return terrainHeight;
     }
 
     public void drawTerrainAndFeatures(float wx, float wz) {
@@ -1551,6 +1558,10 @@ public class TerrainManager {
 
     public int getSnowTexture() {
         return snowTex;
+    }
+
+    public int getIceTexture() {
+        return iceTex;
     }
 
     public Biome getBiome(int wcx, int wcz) {
