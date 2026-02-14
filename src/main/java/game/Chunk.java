@@ -474,13 +474,21 @@ public class Chunk {
                 } else {
                     glDisable(GL_TEXTURE_2D);
                 }
-                glEnable(GL_BLEND);
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                float snowCapAlpha = Math.max(0.08f, Math.min(0.38f, snowCoverage * 0.35f));
-                glTranslatef(0f, 0.018f, 0f);
-                glColor4f(1.0f, 1.0f, 1.0f, snowCapAlpha);
-                glCallList(waterDisplayList);
+
+                float clampedSnow = Math.max(0f, Math.min(1f, snowCoverage));
+                float snowDepth = 0.012f + clampedSnow * 0.22f;
+                int snowLayers = 1 + (int) (clampedSnow * 5f);
                 glDisable(GL_BLEND);
+                for (int i = 0; i < snowLayers; i++) {
+                    float t = snowLayers <= 1 ? 1f : (float) i / (float) (snowLayers - 1);
+                    float layerOffset = 0.014f + t * snowDepth;
+                    float brightness = 0.92f + 0.08f * t;
+                    glPushMatrix();
+                    glTranslatef(0f, layerOffset, 0f);
+                    glColor4f(brightness, brightness, brightness, 1.0f);
+                    glCallList(waterDisplayList);
+                    glPopMatrix();
+                }
             }
             glPopMatrix();
             glDisable(GL_POLYGON_OFFSET_FILL);
