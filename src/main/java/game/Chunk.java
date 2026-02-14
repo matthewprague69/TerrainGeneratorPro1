@@ -589,43 +589,70 @@ public class Chunk {
 
 
     private void renderSnowLayer(float snowCoverage) {
-        float alpha = Math.max(0f, Math.min(0.85f, snowCoverage * 0.85f));
-        if (alpha <= 0f) {
+        float clampedCoverage = Math.max(0f, Math.min(1f, snowCoverage));
+        if (clampedCoverage <= 0f) {
             return;
         }
-        glDisable(GL_TEXTURE_2D);
+
+        int snowTexture = manager.getSnowTexture();
+        if (snowTexture == 0) {
+            return;
+        }
+
+        float alpha = 0.30f + clampedCoverage * 0.70f;
+        float depth = 0.012f + clampedCoverage * 0.085f;
+        int layerCount = Math.max(1, Math.min(4, (int) (clampedCoverage * 4f) + 1));
+
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, snowTexture);
         glDisable(GL_LIGHTING);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glColor4f(1f, 1f, 1f, alpha);
 
         int step = Math.max(1, (int) Math.pow(2, lod));
-        glBegin(GL_TRIANGLES);
-        for (int z = 0; z < SIZE; z += step) {
-            int z2 = Math.min(z + step, SIZE);
-            for (int x = 0; x < SIZE; x += step) {
-                int x2 = Math.min(x + step, SIZE);
+        float texScale = 0.14f;
+        for (int layer = 0; layer < layerCount; layer++) {
+            float layerOffset = depth * ((layer + 1f) / layerCount);
+            glBegin(GL_TRIANGLES);
+            for (int z = 0; z < SIZE; z += step) {
+                int z2 = Math.min(z + step, SIZE);
+                for (int x = 0; x < SIZE; x += step) {
+                    int x2 = Math.min(x + step, SIZE);
 
-                float wx = (cx * SIZE + x) * scale;
-                float wx2 = (cx * SIZE + x2) * scale;
-                float wz = (cz * SIZE + z) * scale;
-                float wz2 = (cz * SIZE + z2) * scale;
+                    float avgSlope = (computeSlope(x, z) + computeSlope(x2, z)
+                            + computeSlope(x, z2) + computeSlope(x2, z2)) * 0.25f;
+                    if (avgSlope > 1.15f) {
+                        continue;
+                    }
 
-                float y00 = heights[x][z] + 0.05f;
-                float y10 = heights[x2][z] + 0.05f;
-                float y01 = heights[x][z2] + 0.05f;
-                float y11 = heights[x2][z2] + 0.05f;
+                    float wx = (cx * SIZE + x) * scale;
+                    float wx2 = (cx * SIZE + x2) * scale;
+                    float wz = (cz * SIZE + z) * scale;
+                    float wz2 = (cz * SIZE + z2) * scale;
 
-                glVertex3f(wx, y00, wz);
-                glVertex3f(wx2, y10, wz);
-                glVertex3f(wx, y01, wz2);
+                    float y00 = heights[x][z] + layerOffset;
+                    float y10 = heights[x2][z] + layerOffset;
+                    float y01 = heights[x][z2] + layerOffset;
+                    float y11 = heights[x2][z2] + layerOffset;
 
-                glVertex3f(wx2, y10, wz);
-                glVertex3f(wx2, y11, wz2);
-                glVertex3f(wx, y01, wz2);
+                    glTexCoord2f(wx * texScale, wz * texScale);
+                    glVertex3f(wx, y00, wz);
+                    glTexCoord2f(wx2 * texScale, wz * texScale);
+                    glVertex3f(wx2, y10, wz);
+                    glTexCoord2f(wx * texScale, wz2 * texScale);
+                    glVertex3f(wx, y01, wz2);
+
+                    glTexCoord2f(wx2 * texScale, wz * texScale);
+                    glVertex3f(wx2, y10, wz);
+                    glTexCoord2f(wx2 * texScale, wz2 * texScale);
+                    glVertex3f(wx2, y11, wz2);
+                    glTexCoord2f(wx * texScale, wz2 * texScale);
+                    glVertex3f(wx, y01, wz2);
+                }
             }
+            glEnd();
         }
-        glEnd();
 
         glDisable(GL_BLEND);
         glEnable(GL_LIGHTING);

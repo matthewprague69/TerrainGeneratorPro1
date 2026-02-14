@@ -3,6 +3,11 @@ package game;
 import static org.lwjgl.opengl.GL11.*;
 
 public class WeatherSystem {
+    private static final int SNOW_PARTICLES_NEAR = 900;
+    private static final int SNOW_PARTICLES_MID = 1400;
+    private static final int SNOW_PARTICLES_FAR = 1700;
+    private static final int RAIN_PARTICLES = 1500;
+
     private WeatherType weatherType = WeatherType.SUNNY;
     private float temperatureC = 8f;
     private float snowCoverage = 0f;
@@ -21,9 +26,9 @@ public class WeatherSystem {
         precipitationStrength += (targetPrecip - precipitationStrength) * Math.min(1f, dt * 0.8f);
 
         if (weatherType == WeatherType.SNOWY && temperatureC <= 0f) {
-            snowCoverage = Math.min(1f, snowCoverage + dt * 0.015f);
+            snowCoverage = Math.min(1f, snowCoverage + dt * 0.018f);
         } else if (temperatureC > 0f) {
-            snowCoverage = Math.max(0f, snowCoverage - dt * 0.012f);
+            snowCoverage = Math.max(0f, snowCoverage - dt * 0.010f);
         }
 
         precipitationTime += dt;
@@ -34,45 +39,60 @@ public class WeatherSystem {
             return;
         }
 
-        final int particles = 450;
-        final float radius = 52f;
-        final float top = camY + 30f;
-
         glDisable(GL_LIGHTING);
+        glDisable(GL_TEXTURE_2D);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         if (weatherType == WeatherType.SNOWY) {
-            glDisable(GL_TEXTURE_2D);
-            glPointSize(2.2f);
-            glColor4f(1f, 1f, 1f, 0.8f * precipitationStrength);
-            glBegin(GL_POINTS);
-            for (int i = 0; i < particles; i++) {
-                float seed = i * 12.9898f;
-                float x = camX + hash(seed) * radius;
-                float z = camZ + hash(seed + 31.7f) * radius;
-                float fallSpeed = 3.5f + hash(seed + 13.2f) * 2.0f;
-                float y = top - ((precipitationTime * fallSpeed + hash(seed + 7.3f) * 30f) % 30f);
-                glVertex3f(x, y, z);
-            }
-            glEnd();
+            renderSnowParticles(camX, camY, camZ);
         } else {
-            glDisable(GL_TEXTURE_2D);
-            glColor4f(0.72f, 0.82f, 0.95f, 0.7f * precipitationStrength);
-            glBegin(GL_LINES);
-            for (int i = 0; i < particles; i++) {
-                float seed = i * 7.1352f;
-                float x = camX + hash(seed) * radius;
-                float z = camZ + hash(seed + 19.1f) * radius;
-                float fallSpeed = 18f + hash(seed + 4.6f) * 8f;
-                float y = top - ((precipitationTime * fallSpeed + hash(seed + 2.4f) * 30f) % 30f);
-                glVertex3f(x, y, z);
-                glVertex3f(x, y - 1.3f, z);
-            }
-            glEnd();
+            renderRainParticles(camX, camY, camZ);
         }
 
         glDisable(GL_BLEND);
+    }
+
+    private void renderSnowParticles(float camX, float camY, float camZ) {
+        renderSnowPass(camX, camY, camZ, SNOW_PARTICLES_FAR, 85f, 3.2f, 0.9f, 0.30f);
+        renderSnowPass(camX, camY, camZ, SNOW_PARTICLES_MID, 62f, 4.2f, 1.7f, 0.48f);
+        renderSnowPass(camX, camY, camZ, SNOW_PARTICLES_NEAR, 42f, 5.1f, 2.7f, 0.72f);
+    }
+
+    private void renderSnowPass(float camX, float camY, float camZ, int count, float radius,
+                                float baseSpeed, float pointSize, float alpha) {
+        final float top = camY + 34f;
+        glPointSize(pointSize);
+        glColor4f(1f, 1f, 1f, alpha * precipitationStrength);
+        glBegin(GL_POINTS);
+        for (int i = 0; i < count; i++) {
+            float seed = i * 13.37f + radius * 0.123f;
+            float x = camX + hash(seed) * radius;
+            float z = camZ + hash(seed + 31.7f) * radius;
+            float yCycle = 34f + hash(seed + 6.3f) * 8f;
+            float speed = baseSpeed + hash(seed + 13.2f) * 2.4f;
+            float sway = hash(seed + precipitationTime * 0.33f) * 0.16f;
+            float y = top - ((precipitationTime * speed + hash(seed + 7.3f) * yCycle) % yCycle);
+            glVertex3f(x + sway, y, z - sway * 0.6f);
+        }
+        glEnd();
+    }
+
+    private void renderRainParticles(float camX, float camY, float camZ) {
+        final float radius = 62f;
+        final float top = camY + 34f;
+        glColor4f(0.72f, 0.82f, 0.95f, 0.7f * precipitationStrength);
+        glBegin(GL_LINES);
+        for (int i = 0; i < RAIN_PARTICLES; i++) {
+            float seed = i * 7.1352f;
+            float x = camX + hash(seed) * radius;
+            float z = camZ + hash(seed + 19.1f) * radius;
+            float fallSpeed = 18f + hash(seed + 4.6f) * 8f;
+            float y = top - ((precipitationTime * fallSpeed + hash(seed + 2.4f) * 36f) % 36f);
+            glVertex3f(x, y, z);
+            glVertex3f(x + 0.07f, y - 1.55f, z + 0.07f);
+        }
+        glEnd();
     }
 
     private float getBaseTemperatureForWeather(WeatherType type) {
