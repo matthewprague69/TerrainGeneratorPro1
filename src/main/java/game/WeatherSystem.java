@@ -30,7 +30,7 @@ public class WeatherSystem {
         precipitationStrength += (targetPrecip - precipitationStrength) * Math.min(1f, dt * 0.8f);
 
         if (weatherType == WeatherType.SNOWY && temperatureC <= 0f) {
-            snowCoverage = Math.min(1f, snowCoverage + dt * 0.018f);
+            snowCoverage = Math.min(1f, snowCoverage + dt * 0.045f);
         } else if (temperatureC > 0f) {
             snowCoverage = Math.max(0f, snowCoverage - dt * 0.010f);
         }

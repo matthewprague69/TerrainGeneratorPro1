@@ -1461,6 +1461,11 @@ public class TerrainManager {
         return seed;
     }
 
+    public OpenSimplexNoise getTerrainNoise() {
+        return terrainNoise;
+    }
+
+
     public float[] getShadowDirection() {
         return skyRenderer.getShadowDirection();
     }

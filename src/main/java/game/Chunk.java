@@ -663,10 +663,27 @@ public class Chunk {
     }
 
     private float getSnowDepthForVertex(int x, int z, float snowCoverage) {
-        float slope = computeSlope(heights, x, z);
-        float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
-        slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
-        return SNOW_MAX_ACCUMULATION_DEPTH * snowCoverage * slopeFactor;
+        float clampedCoverage = Math.max(0f, Math.min(1f, snowCoverage));
+        if (clampedCoverage <= 0f) {
+            return 0f;
+        }
+
+        boolean edgeVertex = x == 0 || z == 0 || x == SIZE || z == SIZE;
+        float slopeFactor;
+        if (edgeVertex) {
+            // Keep border vertices seam-safe between neighboring chunks.
+            slopeFactor = 1f;
+        } else {
+            float slope = computeSlope(heights, x, z);
+            slopeFactor = 1f - Math.min(1f, slope / 1.2f);
+            slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
+        }
+
+        float wx = (cx * SIZE + x) * scale;
+        float wz = (cz * SIZE + z) * scale;
+        float driftNoise = (float) manager.getTerrainNoise().eval(wx * 0.03 + 1337.0, wz * 0.03 - 911.0);
+        float driftFactor = 0.88f + (driftNoise * 0.12f);
+        return SNOW_MAX_ACCUMULATION_DEPTH * clampedCoverage * slopeFactor * driftFactor;
     }
 
     private void buildWaterDisplayList() {
