@@ -147,6 +147,7 @@ public class TerrainManager {
     private final OpenSimplexNoise terrainNoise;
     private final BiomeRegionGenerator regionGenerator;
     private final SkyRenderer skyRenderer;
+    private final WeatherSystem weatherSystem = new WeatherSystem();
     private final FloatBuffer fogColorBuffer = BufferUtils.createFloatBuffer(4);
 
 
@@ -263,8 +264,9 @@ public class TerrainManager {
         return results;
     }
 
-    public void update(float wx, float wz, Frustum frustum) {
+    public void update(float wx, float wz, Frustum frustum, float dt) {
         resetPerformanceFrame();
+        weatherSystem.update(dt, skyRenderer.getTimeOfDay());
         long updateStart = System.nanoTime();
         lastCameraFrustum = frustum;
 
@@ -1036,7 +1038,7 @@ public class TerrainManager {
                 continue;
             }
             c.drawTerrainAndFeatures(dist, impostorDistance, grassDetailDistance,
-                    featureRenderDist);
+                    featureRenderDist, weatherSystem.getSnowCoverage());
             renderedTerrainChunks++;
             renderedFeatures += c.getFeatures().size();
         }
@@ -1060,7 +1062,7 @@ public class TerrainManager {
             if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
                 continue;
             }
-            c.drawWater();
+            c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getSnowCoverage());
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;
@@ -1420,6 +1422,31 @@ public class TerrainManager {
 
     public int getGrassDetailDistance() {
         return grassDetailDistance;
+    }
+
+
+    public WeatherType getWeatherType() {
+        return weatherSystem.getWeatherType();
+    }
+
+    public void setWeatherType(WeatherType type) {
+        weatherSystem.setWeatherType(type);
+    }
+
+    public float getTemperatureC() {
+        return weatherSystem.getTemperatureC();
+    }
+
+    public float getSnowCoverage() {
+        return weatherSystem.getSnowCoverage();
+    }
+
+    public boolean isWaterFrozen() {
+        return weatherSystem.isWaterFrozen();
+    }
+
+    public void renderWeatherEffects(float camX, float camY, float camZ) {
+        weatherSystem.renderPrecipitation(camX, camY, camZ);
     }
 
     public int getSnowTexture() {

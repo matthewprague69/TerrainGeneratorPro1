@@ -437,31 +437,39 @@ public class Chunk {
 
     }
 
-    public void drawWater() {
+    public void drawWater(boolean frozen, float snowCoverage) {
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDisable(GL_TEXTURE_2D);
-
-        glDepthMask(false); // Disable depth writing for transparency
         glDepthFunc(GL_LEQUAL);
 
-        glEnable(GL_FOG); // <<< ADD THIS
-        glColor4f(0.2f, 0.5f, 0.8f, 0.55f); // base water color
+        glEnable(GL_FOG);
+        if (frozen) {
+            glDisable(GL_BLEND);
+            float iceTint = Math.max(0.2f, Math.min(1f, 0.35f + snowCoverage * 0.4f));
+            glColor4f(0.78f * iceTint, 0.88f * iceTint, 0.96f, 0.95f);
+            if (waterDisplayList != -1) {
+                glCallList(waterDisplayList);
+            }
+        } else {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glDepthMask(false);
+            glColor4f(0.2f, 0.5f, 0.8f, 0.55f);
 
-        if (waterDisplayList != -1) {
-            glCallList(waterDisplayList);
+            if (waterDisplayList != -1) {
+                glCallList(waterDisplayList);
+            }
+
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            glColor4f(0.75f, 0.85f, 0.95f, 0.12f);
+            if (waterDisplayList != -1) {
+                glCallList(waterDisplayList);
+            }
+
+            glDepthMask(true);
         }
 
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-        glColor4f(0.75f, 0.85f, 0.95f, 0.12f); // subtle reflection tint
-        if (waterDisplayList != -1) {
-            glCallList(waterDisplayList);
-        }
-
-        glDepthMask(true); // Re-enable depth writing
-
-        glDisable(GL_FOG); // <<< Disable again after drawing water
+        glDisable(GL_FOG);
         glDepthFunc(GL_LESS);
         glPopAttrib();
     }
@@ -539,11 +547,15 @@ public class Chunk {
     }
 
     public void drawTerrainAndFeatures(int chunkDistance, int featureImpostorDistance,
-                                       int grassDetailDistance, int featureRenderDist) {
+                                       int grassDetailDistance, int featureRenderDist,
+                                       float snowCoverage) {
         glEnable(GL_TEXTURE_2D);
         glColor3f(1f, 1f, 1f);
 
         renderTerrainBuffers();
+        if (snowCoverage > 0.01f) {
+            renderSnowLayer(snowCoverage);
+        }
         if (chunkDistance <= grassDetailDistance && chunkDistance <= featureRenderDist) {
             renderGrassBatch();
         }
@@ -574,6 +586,50 @@ public class Chunk {
     }
 
 
+
+
+    private void renderSnowLayer(float snowCoverage) {
+        float alpha = Math.max(0f, Math.min(0.85f, snowCoverage * 0.85f));
+        if (alpha <= 0f) {
+            return;
+        }
+        glDisable(GL_TEXTURE_2D);
+        glDisable(GL_LIGHTING);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(1f, 1f, 1f, alpha);
+
+        int step = Math.max(1, (int) Math.pow(2, lod));
+        glBegin(GL_TRIANGLES);
+        for (int z = 0; z < SIZE; z += step) {
+            int z2 = Math.min(z + step, SIZE);
+            for (int x = 0; x < SIZE; x += step) {
+                int x2 = Math.min(x + step, SIZE);
+
+                float wx = (cx * SIZE + x) * scale;
+                float wx2 = (cx * SIZE + x2) * scale;
+                float wz = (cz * SIZE + z) * scale;
+                float wz2 = (cz * SIZE + z2) * scale;
+
+                float y00 = heights[x][z] + 0.05f;
+                float y10 = heights[x2][z] + 0.05f;
+                float y01 = heights[x][z2] + 0.05f;
+                float y11 = heights[x2][z2] + 0.05f;
+
+                glVertex3f(wx, y00, wz);
+                glVertex3f(wx2, y10, wz);
+                glVertex3f(wx, y01, wz2);
+
+                glVertex3f(wx2, y10, wz);
+                glVertex3f(wx2, y11, wz2);
+                glVertex3f(wx, y01, wz2);
+            }
+        }
+        glEnd();
+
+        glDisable(GL_BLEND);
+        glEnable(GL_LIGHTING);
+    }
 
     private void buildWaterDisplayList() {
         waterDisplayList = glGenLists(1);

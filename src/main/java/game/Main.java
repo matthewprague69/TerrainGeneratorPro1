@@ -318,7 +318,7 @@ public class Main {
     private void drawMenuOverlay(int width, int height, double mouseX, double mouseY) {
         UIRenderer.begin2D(width, height);
         float panelWidth = 520f;
-        float panelHeight = 620f;
+        float panelHeight = 660f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
 
@@ -360,8 +360,10 @@ public class Main {
         drawMenuRowText("Resolution", getResolutionLabel(), panelX + 20, rowY, mouseX, mouseY);
         rowY -= 40;
         drawMenuRowText("VSync", getVsyncLabel(), panelX + 20, rowY, mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("Weather", getWeatherLabel(), panelX + 20, rowY, mouseX, mouseY);
 
-        PixelTextRenderer.drawText("Time: " + String.format("%.2f", sky.getTimeOfDay()),
+        PixelTextRenderer.drawText("Time: " + String.format("%.2f", sky.getTimeOfDay()) + " | Temp: " + String.format("%.1f", terrain.getTemperatureC()) + "C | Snow: " + String.format("%.0f", terrain.getSnowCoverage() * 100f) + "%",
                 panelX + 20, panelY + 30, 1.0f);
         PixelTextRenderer.drawText("Click +/- to adjust, ESC to close",
                 panelX + 20, panelY + 12, 1.0f);
@@ -412,7 +414,7 @@ public class Main {
 
     private void handleMenuClick(double mouseX, double mouseY, int width, int height) {
         float panelWidth = 520f;
-        float panelHeight = 620f;
+        float panelHeight = 660f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
         float rowY = panelY + panelHeight - 80;
@@ -457,7 +459,11 @@ public class Main {
             return;
         }
         rowY -= 40;
-        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 10);
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 10)) {
+            return;
+        }
+        rowY -= 40;
+        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 11);
     }
 
     private boolean handleRowClick(double mouseX, double mouseY, float x, float y, int rowIndex) {
@@ -511,6 +517,9 @@ public class Main {
                 vsyncEnabled = !vsyncEnabled;
                 applyVSync();
                 break;
+            case 11:
+                terrain.setWeatherType(adjustWeatherType(terrain.getWeatherType(), delta));
+                break;
             default:
                 break;
         }
@@ -531,6 +540,25 @@ public class Main {
 
     private int adjustImpostorQualityPreset(int current, int delta) {
         return Math.max(0, Math.min(2, current + delta));
+    }
+
+
+    private WeatherType adjustWeatherType(WeatherType current, int delta) {
+        WeatherType[] values = WeatherType.values();
+        int index = current.ordinal();
+        index = Math.floorMod(index + delta, values.length);
+        return values[index];
+    }
+
+    private String getWeatherLabel() {
+        switch (terrain.getWeatherType()) {
+            case SNOWY:
+                return "Snowy";
+            case RAINY:
+                return "Rainy";
+            default:
+                return "Sunny";
+        }
     }
 
     private String getImpostorQualityLabel() {
@@ -685,7 +713,7 @@ public class Main {
             player.applyView();
             Frustum frustum = Frustum.fromOpenGL();
 
-            terrain.update(player.getX(), player.getZ(), frustum);
+            terrain.update(player.getX(), player.getZ(), frustum, dt);
             sky.update(dt);
 
             float[] shadowDir = sky.getShadowDirection();
@@ -727,6 +755,7 @@ public class Main {
             terrain.drawTerrainAndFeatures(player.getX(), player.getZ());
             shadowRenderer.endScenePass();
             terrain.drawWater(player.getX(), player.getZ());
+            terrain.renderWeatherEffects(player.getX(), player.getY(), player.getZ());
 
             sky.renderSunAndMoon(player.getX(), player.getY(), player.getZ());
             if (menuOpen) {
