@@ -666,7 +666,7 @@ public class Chunk {
             return 0f;
         }
 
-        float slope = computeSlope(heights, x, z);
+        float slope = computeSnowSlopeAtVertex(x, z);
         float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
         slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
 
@@ -685,6 +685,59 @@ public class Chunk {
                 * slopeFactor * altitudeFactor * driftFactor;
         float dentDepth = manager.getSnowDentDepth(wx, wz, clampedCoverage);
         return Math.max(0f, baseDepth - dentDepth);
+    }
+
+    private float computeSnowSlopeAtVertex(int x, int z) {
+        float hL = sampleHeightForSlope(x - 1, z);
+        float hR = sampleHeightForSlope(x + 1, z);
+        float hD = sampleHeightForSlope(x, z - 1);
+        float hU = sampleHeightForSlope(x, z + 1);
+
+        float dx = (hR - hL) * 0.5f;
+        float dz = (hU - hD) * 0.5f;
+        return (float) Math.sqrt(dx * dx + dz * dz);
+    }
+
+    private float sampleHeightForSlope(int x, int z) {
+        if (x >= 0 && x <= SIZE && z >= 0 && z <= SIZE) {
+            return heights[x][z];
+        }
+
+        int neighborCx = cx;
+        int neighborCz = cz;
+        int neighborX = x;
+        int neighborZ = z;
+
+        if (x < 0) {
+            neighborCx = cx - 1;
+            neighborX = SIZE + x;
+        } else if (x > SIZE) {
+            neighborCx = cx + 1;
+            neighborX = x - SIZE;
+        }
+
+        if (z < 0) {
+            neighborCz = cz - 1;
+            neighborZ = SIZE + z;
+        } else if (z > SIZE) {
+            neighborCz = cz + 1;
+            neighborZ = z - SIZE;
+        }
+
+        if (neighborX < 0 || neighborX > SIZE || neighborZ < 0 || neighborZ > SIZE) {
+            neighborX = Math.max(0, Math.min(SIZE, neighborX));
+            neighborZ = Math.max(0, Math.min(SIZE, neighborZ));
+            return heights[neighborX][neighborZ];
+        }
+
+        Chunk neighbor = manager.getChunk(neighborCx, neighborCz);
+        if (neighbor != null) {
+            return neighbor.heights[neighborX][neighborZ];
+        }
+
+        int clampedX = Math.max(0, Math.min(SIZE, x));
+        int clampedZ = Math.max(0, Math.min(SIZE, z));
+        return heights[clampedX][clampedZ];
     }
 
     private void buildWaterDisplayList() {
