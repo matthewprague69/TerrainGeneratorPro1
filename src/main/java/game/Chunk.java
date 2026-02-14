@@ -99,7 +99,7 @@ public class Chunk {
 
     private static final float SNOW_HEIGHT_START = 55f;
     private static final float SNOW_HEIGHT_FULL = 60f;
-    private static final float SNOW_MAX_ACCUMULATION_DEPTH = 1.2f;
+    private static final float SNOW_MAX_ACCUMULATION_DEPTH = 3.5f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
@@ -678,7 +678,9 @@ public class Chunk {
         float wz = (cz * SIZE + z) * scale;
         float driftNoise = (float) manager.getTerrainNoise().eval(wx * 0.03 + 1337.0, wz * 0.03 - 911.0);
         float driftFactor = 0.88f + (driftNoise * 0.12f);
-        return SNOW_MAX_ACCUMULATION_DEPTH * clampedCoverage * slopeFactor * driftFactor;
+        float baseDepth = SNOW_MAX_ACCUMULATION_DEPTH * clampedCoverage * slopeFactor * driftFactor;
+        float dentDepth = manager.getSnowDentDepth(wx, wz, clampedCoverage);
+        return Math.max(0f, baseDepth - dentDepth);
     }
 
     private void buildWaterDisplayList() {

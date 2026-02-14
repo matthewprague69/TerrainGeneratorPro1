@@ -119,6 +119,13 @@ public class TerrainManager {
     private static final int MAX_INFLIGHT_CHUNK_BUILDS = CHUNK_GENERATOR_THREADS * 8;
     private static final int MAX_INFLIGHT_FEATURE_BUILDS = FEATURE_GENERATOR_THREADS * 32;
 
+    private static final float SNOW_DENT_MIN_STEP_DISTANCE = 0.42f;
+    private static final float SNOW_DENT_RADIUS = 0.38f;
+    private static final float SNOW_DENT_DEPTH = 0.16f;
+    private static final float SNOW_DENT_LIFETIME_SECONDS = 120f;
+    private static final int MAX_SNOW_DENTS = 4096;
+
+
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
     private final Map<Long, Integer> pendingChunkLods = new HashMap<>();
@@ -150,6 +157,22 @@ public class TerrainManager {
     private final WeatherSystem weatherSystem = new WeatherSystem();
     private final FloatBuffer fogColorBuffer = BufferUtils.createFloatBuffer(4);
 
+
+    private static final class SnowDent {
+        private final float x;
+        private final float z;
+        private float ageSeconds;
+
+        private SnowDent(float x, float z) {
+            this.x = x;
+            this.z = z;
+            this.ageSeconds = 0f;
+        }
+    }
+
+    private final ArrayDeque<SnowDent> snowDents = new ArrayDeque<>();
+    private float lastSnowDentX = Float.NaN;
+    private float lastSnowDentZ = Float.NaN;
 
     private final float scale;
     private int renderDist;
@@ -267,6 +290,7 @@ public class TerrainManager {
     public void update(float wx, float wz, Frustum frustum, float dt) {
         resetPerformanceFrame();
         weatherSystem.update(dt, skyRenderer.getTimeOfDay());
+        updateSnowDents(wx, wz, dt);
         long updateStart = System.nanoTime();
         lastCameraFrustum = frustum;
 
@@ -1443,6 +1467,69 @@ public class TerrainManager {
 
     public boolean isWaterFrozen() {
         return weatherSystem.isWaterFrozen();
+    }
+
+    public float getSnowDentDepth(float wx, float wz, float snowCoverage) {
+        if (snowDents.isEmpty() || snowCoverage <= 0.001f) {
+            return 0f;
+        }
+        float coverageScale = Math.max(0f, Math.min(1f, snowCoverage));
+        float depth = 0f;
+        for (SnowDent dent : snowDents) {
+            float dx = wx - dent.x;
+            float dz = wz - dent.z;
+            float distSq = dx * dx + dz * dz;
+            float radiusSq = SNOW_DENT_RADIUS * SNOW_DENT_RADIUS;
+            if (distSq >= radiusSq) {
+                continue;
+            }
+            float dist = (float) Math.sqrt(distSq);
+            float falloff = 1f - (dist / SNOW_DENT_RADIUS);
+            float ageFade = Math.max(0f, 1f - dent.ageSeconds / SNOW_DENT_LIFETIME_SECONDS);
+            depth += SNOW_DENT_DEPTH * falloff * ageFade * coverageScale;
+        }
+        return Math.max(0f, depth);
+    }
+
+    private void updateSnowDents(float wx, float wz, float dt) {
+        if (dt <= 0f) {
+            return;
+        }
+
+        float snowCoverage = weatherSystem.getSnowCoverage();
+        Iterator<SnowDent> iterator = snowDents.iterator();
+        while (iterator.hasNext()) {
+            SnowDent dent = iterator.next();
+            dent.ageSeconds += dt;
+            if (dent.ageSeconds >= SNOW_DENT_LIFETIME_SECONDS || snowCoverage <= 0.001f) {
+                iterator.remove();
+            }
+        }
+
+        if (weatherSystem.getWeatherType() != WeatherType.SNOWY || snowCoverage <= 0.03f) {
+            return;
+        }
+
+        if (Float.isNaN(lastSnowDentX) || Float.isNaN(lastSnowDentZ)) {
+            lastSnowDentX = wx;
+            lastSnowDentZ = wz;
+            snowDents.addLast(new SnowDent(wx, wz));
+            return;
+        }
+
+        float dx = wx - lastSnowDentX;
+        float dz = wz - lastSnowDentZ;
+        float distSq = dx * dx + dz * dz;
+        if (distSq < SNOW_DENT_MIN_STEP_DISTANCE * SNOW_DENT_MIN_STEP_DISTANCE) {
+            return;
+        }
+
+        snowDents.addLast(new SnowDent(wx, wz));
+        lastSnowDentX = wx;
+        lastSnowDentZ = wz;
+        while (snowDents.size() > MAX_SNOW_DENTS) {
+            snowDents.pollFirst();
+        }
     }
 
     public void renderWeatherEffects(float camX, float camY, float camZ) {
