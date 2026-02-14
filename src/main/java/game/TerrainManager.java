@@ -119,6 +119,13 @@ public class TerrainManager {
     private static final int MAX_INFLIGHT_CHUNK_BUILDS = CHUNK_GENERATOR_THREADS * 8;
     private static final int MAX_INFLIGHT_FEATURE_BUILDS = FEATURE_GENERATOR_THREADS * 32;
 
+    private static final float SNOW_DENT_MIN_STEP_DISTANCE = 0.24f;
+    private static final float SNOW_DENT_RADIUS = 1.15f;
+    private static final float SNOW_DENT_DEPTH = 6.0f;
+    private static final float SNOW_DENT_LIFETIME_SECONDS = 45f;
+    private static final int MAX_SNOW_DENTS = 1024;
+
+
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
     private final Map<Long, Integer> pendingChunkLods = new HashMap<>();
@@ -147,8 +154,25 @@ public class TerrainManager {
     private final OpenSimplexNoise terrainNoise;
     private final BiomeRegionGenerator regionGenerator;
     private final SkyRenderer skyRenderer;
+    private final WeatherSystem weatherSystem = new WeatherSystem();
     private final FloatBuffer fogColorBuffer = BufferUtils.createFloatBuffer(4);
 
+
+    private static final class SnowDent {
+        private final float x;
+        private final float z;
+        private float ageSeconds;
+
+        private SnowDent(float x, float z) {
+            this.x = x;
+            this.z = z;
+            this.ageSeconds = 0f;
+        }
+    }
+
+    private final ArrayDeque<SnowDent> snowDents = new ArrayDeque<>();
+    private float lastSnowDentX = Float.NaN;
+    private float lastSnowDentZ = Float.NaN;
 
     private final float scale;
     private int renderDist;
@@ -169,6 +193,7 @@ public class TerrainManager {
 
     private final Map<String, Integer> textureMap = new HashMap<>();
     private final int snowTex;
+    private final int iceTex;
     private final int waterBottomTex;
     private final int waterBottomAbsTex;
     private final EnumMap<PipelineStage, Long> perfStageNanos = new EnumMap<>(PipelineStage.class);
@@ -200,6 +225,7 @@ public class TerrainManager {
 
 
         snowTex = TextureLoader.getOrLoad("snow.png");
+        iceTex = TextureLoader.getOrLoad("ice.png");
         waterBottomTex = TextureLoader.getOrLoad("sand.png");
         waterBottomAbsTex = TextureLoader.getOrLoad("water_bottom.png");
 
@@ -263,8 +289,10 @@ public class TerrainManager {
         return results;
     }
 
-    public void update(float wx, float wz, Frustum frustum) {
+    public void update(float wx, float wy, float wz, Frustum frustum, float dt) {
         resetPerformanceFrame();
+        weatherSystem.update(dt, skyRenderer.getTimeOfDay());
+        updateSnowDents(wx, wy, wz, dt);
         long updateStart = System.nanoTime();
         lastCameraFrustum = frustum;
 
@@ -1013,7 +1041,12 @@ public class TerrainManager {
         int cx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int cz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         Chunk c = chunks.get(key(cx, cz));
-        return c != null ? c.getHeight(wx / scale, wz / scale) : 0f;
+        float terrainHeight = c != null ? c.getHeight(wx / scale, wz / scale) : 0f;
+        if (weatherSystem.isWaterFrozen()) {
+            float iceSurface = Chunk.WATER_LEVEL + weatherSystem.getIceThickness();
+            return Math.max(terrainHeight, iceSurface);
+        }
+        return terrainHeight;
     }
 
     public void drawTerrainAndFeatures(float wx, float wz) {
@@ -1036,7 +1069,7 @@ public class TerrainManager {
                 continue;
             }
             c.drawTerrainAndFeatures(dist, impostorDistance, grassDetailDistance,
-                    featureRenderDist);
+                    featureRenderDist, weatherSystem.getSnowCoverage());
             renderedTerrainChunks++;
             renderedFeatures += c.getFeatures().size();
         }
@@ -1060,7 +1093,7 @@ public class TerrainManager {
             if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
                 continue;
             }
-            c.drawWater();
+            c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(), weatherSystem.getIceThickness());
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;
@@ -1422,8 +1455,121 @@ public class TerrainManager {
         return grassDetailDistance;
     }
 
+
+    public WeatherType getWeatherType() {
+        return weatherSystem.getWeatherType();
+    }
+
+    public void setWeatherType(WeatherType type) {
+        weatherSystem.setWeatherType(type);
+    }
+
+    public float getTemperatureC() {
+        return weatherSystem.getTemperatureC();
+    }
+
+    public float getSnowCoverage() {
+        return weatherSystem.getSnowCoverage();
+    }
+
+    public float getWaterSnowCoverage() {
+        return weatherSystem.getWaterSnowCoverage();
+    }
+
+    public boolean isWaterFrozen() {
+        return weatherSystem.isWaterFrozen();
+    }
+
+    public float getSnowDentDepth(float wx, float wz, float snowCoverage) {
+        if (snowDents.isEmpty() || snowCoverage <= 0.001f) {
+            return 0f;
+        }
+        float coverageScale = Math.max(0f, Math.min(1f, snowCoverage));
+        float depth = 0f;
+        for (SnowDent dent : snowDents) {
+            float dx = wx - dent.x;
+            float dz = wz - dent.z;
+            float distSq = dx * dx + dz * dz;
+            float radiusSq = SNOW_DENT_RADIUS * SNOW_DENT_RADIUS;
+            if (distSq >= radiusSq) {
+                continue;
+            }
+            float dist = (float) Math.sqrt(distSq);
+            float t = dist / SNOW_DENT_RADIUS;
+            float falloff = 1f - (t * t);
+            float ageFade = Math.max(0f, 1f - dent.ageSeconds / SNOW_DENT_LIFETIME_SECONDS);
+            depth += SNOW_DENT_DEPTH * falloff * ageFade * coverageScale;
+        }
+        return Math.max(0f, depth);
+    }
+
+    private void updateSnowDents(float wx, float wy, float wz, float dt) {
+        if (dt <= 0f) {
+            return;
+        }
+
+        float snowCoverage = weatherSystem.getSnowCoverage();
+        Iterator<SnowDent> iterator = snowDents.iterator();
+        while (iterator.hasNext()) {
+            SnowDent dent = iterator.next();
+            dent.ageSeconds += dt;
+            if (dent.ageSeconds >= SNOW_DENT_LIFETIME_SECONDS || snowCoverage <= 0.001f) {
+                iterator.remove();
+            }
+        }
+
+        if (weatherSystem.getWeatherType() != WeatherType.SNOWY || snowCoverage <= 0.03f) {
+            return;
+        }
+
+        float terrainY = getHeight(wx, wz);
+        if (Math.abs(wy - terrainY) > 0.22f) {
+            // Player is not intersecting ground/snow surface right now.
+            return;
+        }
+
+        if (Float.isNaN(lastSnowDentX) || Float.isNaN(lastSnowDentZ)) {
+            lastSnowDentX = wx;
+            lastSnowDentZ = wz;
+            snowDents.addLast(new SnowDent(wx, wz));
+            return;
+        }
+
+        float dx = wx - lastSnowDentX;
+        float dz = wz - lastSnowDentZ;
+        float distSq = dx * dx + dz * dz;
+        if (distSq < SNOW_DENT_MIN_STEP_DISTANCE * SNOW_DENT_MIN_STEP_DISTANCE) {
+            return;
+        }
+
+        snowDents.addLast(new SnowDent(wx, wz));
+        lastSnowDentX = wx;
+        lastSnowDentZ = wz;
+        while (snowDents.size() > MAX_SNOW_DENTS) {
+            snowDents.pollFirst();
+        }
+    }
+
+    public void renderWeatherEffects(float camX, float camY, float camZ) {
+        float surfaceY = getHeight(camX, camZ);
+        float minSurface = Chunk.WATER_LEVEL;
+        if (weatherSystem.isWaterFrozen()) {
+            minSurface += weatherSystem.getIceThickness();
+        }
+        surfaceY = Math.max(surfaceY, minSurface);
+        weatherSystem.renderPrecipitation(camX, camY, camZ, surfaceY);
+    }
+
     public int getSnowTexture() {
         return snowTex;
+    }
+
+    public float getIceThickness() {
+        return weatherSystem.getIceThickness();
+    }
+
+    public int getIceTexture() {
+        return iceTex;
     }
 
     public Biome getBiome(int wcx, int wcz) {
@@ -1433,6 +1579,11 @@ public class TerrainManager {
     public long getSeed() {
         return seed;
     }
+
+    public OpenSimplexNoise getTerrainNoise() {
+        return terrainNoise;
+    }
+
 
     public float[] getShadowDirection() {
         return skyRenderer.getShadowDirection();

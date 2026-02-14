@@ -152,4 +152,12 @@ public class Player {
     public float getY() {
         return y;
     }
+
+    public float getEyeHeight() {
+        return eyeHeight;
+    }
+
+    public float getFootY() {
+        return y - eyeHeight;
+    }
 }
