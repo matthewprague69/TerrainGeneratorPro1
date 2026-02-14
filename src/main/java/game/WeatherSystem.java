@@ -78,23 +78,25 @@ public class WeatherSystem {
     }
 
     private void renderSnowParticles(float camX, float camY, float camZ, float groundY) {
-        float topY = camY + 22f;
-        float snowSpan = Math.max(10f, Math.min(42f, topY - groundY + 1.5f));
+        float snowSpan = Math.max(16f, Math.min(42f, (camY - groundY) + 24f));
+        float topY = groundY + snowSpan;
 
         int start = 0;
         start = renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_FAR,
-                PRECIPITATION_TILE_RADIUS, 2.8f, 1.6f, 0.26f, 22f, snowSpan);
+                PRECIPITATION_TILE_RADIUS, 2.8f, 4.0f, 0.26f, topY, snowSpan);
         start = renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_MID,
-                PRECIPITATION_TILE_RADIUS, 3.8f, 2.8f, 0.45f, 22f, snowSpan);
+                PRECIPITATION_TILE_RADIUS, 3.8f, 8.0f, 0.45f, topY, snowSpan);
         renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_NEAR,
-                PRECIPITATION_TILE_RADIUS, 4.8f, 4.0f, 0.68f, 22f, snowSpan);
+                PRECIPITATION_TILE_RADIUS, 4.8f, 12.0f, 0.68f, topY, snowSpan);
     }
 
     private int renderSnowPass(float camX, float camY, float camZ, int startIndex, int count,
                                float radius, float baseSpeed, float pointSize, float alpha,
                                float topOffset, float verticalSpan) {
-        final float top = camY + topOffset;
+        final float top = topOffset;
         final float effectiveRadius = radius * (0.9f + precipitationStrength * 0.1f);
+        final float snappedCenterX = (float) Math.floor(camX / 3f) * 3f;
+        final float snappedCenterZ = (float) Math.floor(camZ / 3f) * 3f;
         glPointSize(pointSize);
         glColor4f(1f, 1f, 1f, alpha * precipitationStrength);
         glBegin(GL_POINTS);
@@ -105,8 +107,8 @@ public class WeatherSystem {
             float speed = baseSpeed + p.speed * 2.2f;
             float y = top - ((time * speed + p.phase * verticalSpan) % verticalSpan);
             float drift = (float) Math.sin((time + p.phase) * 0.8f) * p.sway;
-            float x = camX + p.xNorm * effectiveRadius + drift;
-            float z = camZ + p.zNorm * effectiveRadius - drift * 0.5f;
+            float x = snappedCenterX + p.xNorm * effectiveRadius + drift;
+            float z = snappedCenterZ + p.zNorm * effectiveRadius - drift * 0.5f;
             glVertex3f(x, y, z);
         }
         glEnd();

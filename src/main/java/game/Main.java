@@ -221,7 +221,7 @@ public class Main {
         PixelTextRenderer.drawText("ZVETSENI GENERACE OBJEKTU DISTANCE - Z", 10, height - 30, 1.0f);
         PixelTextRenderer.drawText("ZMENSENI RENDER DISTANCE - SHIFT T", 10, height - 20, 1.0f);
         PixelTextRenderer.drawText("ZMENSENI GENERACE OBJEKTU DISTANCE -  SHIFT Z", 10, height - 40, 1.0f);
-        PixelTextRenderer.drawText("TIME SPEED - R", 10, height - 50, 1.0f);
+        PixelTextRenderer.drawText("TIME SPEED - In Settings", 10, height - 50, 1.0f);
         PixelTextRenderer.drawText("PERF DEBUG MENU - K (EXPORT - O)", 10, height - 60, 1.0f);
 
         PixelTextRenderer.drawText("Generace Terenu", 10, 40, 1.0f);
@@ -362,6 +362,9 @@ public class Main {
         drawMenuRowText("VSync", getVsyncLabel(), panelX + 20, rowY, mouseX, mouseY);
         rowY -= 40;
         drawMenuRowText("Weather", getWeatherLabel(), panelX + 20, rowY, mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("World tick speed", String.format(Locale.US, "%.2fx", sky.getTimeSpeed()),
+                panelX + 20, rowY, mouseX, mouseY);
 
         PixelTextRenderer.drawText("Time: " + String.format("%.2f", sky.getTimeOfDay()) + " | Temp: " + String.format("%.1f", terrain.getTemperatureC()) + "C | Snow: " + String.format("%.0f", terrain.getSnowCoverage() * 100f) + "%",
                 panelX + 20, panelY + 30, 1.0f);
@@ -463,7 +466,11 @@ public class Main {
             return;
         }
         rowY -= 40;
-        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 11);
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 11)) {
+            return;
+        }
+        rowY -= 40;
+        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 12);
     }
 
     private boolean handleRowClick(double mouseX, double mouseY, float x, float y, int rowIndex) {
@@ -519,6 +526,9 @@ public class Main {
                 break;
             case 11:
                 terrain.setWeatherType(adjustWeatherType(terrain.getWeatherType(), delta));
+                break;
+            case 12:
+                sky.setTimeSpeed(sky.getTimeSpeed() + delta * 0.25f);
                 break;
             default:
                 break;
