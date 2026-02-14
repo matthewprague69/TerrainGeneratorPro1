@@ -601,64 +601,59 @@ public class Chunk {
             return;
         }
 
-        float alpha = 0.30f + clampedCoverage * 0.70f;
-        int layerCount = Math.max(1, Math.min(4, (int) (clampedCoverage * 4f) + 1));
-
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, snowTexture);
         glDisable(GL_LIGHTING);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glColor4f(1f, 1f, 1f, alpha);
+        glDisable(GL_BLEND);
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(-1f, -1f);
+        glColor3f(1f, 1f, 1f);
 
         int step = Math.max(1, (int) Math.pow(2, lod));
         float texScale = 0.14f;
-        for (int layer = 0; layer < layerCount; layer++) {
-            float layerT = (layer + 1f) / layerCount;
-            glBegin(GL_TRIANGLES);
-            for (int z = 0; z < SIZE; z += step) {
-                int z2 = Math.min(z + step, SIZE);
-                for (int x = 0; x < SIZE; x += step) {
-                    int x2 = Math.min(x + step, SIZE);
+        glBegin(GL_TRIANGLES);
+        for (int z = 0; z < SIZE; z += step) {
+            int z2 = Math.min(z + step, SIZE);
+            for (int x = 0; x < SIZE; x += step) {
+                int x2 = Math.min(x + step, SIZE);
 
-                    float d00 = getSnowDepthForVertex(x, z, clampedCoverage) * layerT;
-                    float d10 = getSnowDepthForVertex(x2, z, clampedCoverage) * layerT;
-                    float d01 = getSnowDepthForVertex(x, z2, clampedCoverage) * layerT;
-                    float d11 = getSnowDepthForVertex(x2, z2, clampedCoverage) * layerT;
+                float d00 = getSnowDepthForVertex(x, z, clampedCoverage);
+                float d10 = getSnowDepthForVertex(x2, z, clampedCoverage);
+                float d01 = getSnowDepthForVertex(x, z2, clampedCoverage);
+                float d11 = getSnowDepthForVertex(x2, z2, clampedCoverage);
 
-                    if (d00 <= 0.0001f && d10 <= 0.0001f && d01 <= 0.0001f && d11 <= 0.0001f) {
-                        continue;
-                    }
-
-                    float wx = (cx * SIZE + x) * scale;
-                    float wx2 = (cx * SIZE + x2) * scale;
-                    float wz = (cz * SIZE + z) * scale;
-                    float wz2 = (cz * SIZE + z2) * scale;
-
-                    float y00 = heights[x][z] + d00;
-                    float y10 = heights[x2][z] + d10;
-                    float y01 = heights[x][z2] + d01;
-                    float y11 = heights[x2][z2] + d11;
-
-                    glTexCoord2f(wx * texScale, wz * texScale);
-                    glVertex3f(wx, y00, wz);
-                    glTexCoord2f(wx2 * texScale, wz * texScale);
-                    glVertex3f(wx2, y10, wz);
-                    glTexCoord2f(wx * texScale, wz2 * texScale);
-                    glVertex3f(wx, y01, wz2);
-
-                    glTexCoord2f(wx2 * texScale, wz * texScale);
-                    glVertex3f(wx2, y10, wz);
-                    glTexCoord2f(wx2 * texScale, wz2 * texScale);
-                    glVertex3f(wx2, y11, wz2);
-                    glTexCoord2f(wx * texScale, wz2 * texScale);
-                    glVertex3f(wx, y01, wz2);
+                if (d00 <= 0.0001f && d10 <= 0.0001f && d01 <= 0.0001f && d11 <= 0.0001f) {
+                    continue;
                 }
-            }
-            glEnd();
-        }
 
-        glDisable(GL_BLEND);
+                float wx = (cx * SIZE + x) * scale;
+                float wx2 = (cx * SIZE + x2) * scale;
+                float wz = (cz * SIZE + z) * scale;
+                float wz2 = (cz * SIZE + z2) * scale;
+
+                float y00 = heights[x][z] + d00;
+                float y10 = heights[x2][z] + d10;
+                float y01 = heights[x][z2] + d01;
+                float y11 = heights[x2][z2] + d11;
+
+                glTexCoord2f(wx * texScale, wz * texScale);
+                glVertex3f(wx, y00, wz);
+                glTexCoord2f(wx2 * texScale, wz * texScale);
+                glVertex3f(wx2, y10, wz);
+                glTexCoord2f(wx * texScale, wz2 * texScale);
+                glVertex3f(wx, y01, wz2);
+
+                glTexCoord2f(wx2 * texScale, wz * texScale);
+                glVertex3f(wx2, y10, wz);
+                glTexCoord2f(wx2 * texScale, wz2 * texScale);
+                glVertex3f(wx2, y11, wz2);
+                glTexCoord2f(wx * texScale, wz2 * texScale);
+                glVertex3f(wx, y01, wz2);
+            }
+        }
+        glEnd();
+
+        glDisable(GL_POLYGON_OFFSET_FILL);
         glEnable(GL_LIGHTING);
     }
 
