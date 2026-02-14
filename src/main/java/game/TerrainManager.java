@@ -1221,28 +1221,19 @@ public class TerrainManager {
 
     private void renderDistantTerrainBackdrop(float wx, float wz) {
         float chunkSpan = Chunk.SIZE * scale;
-        float nearRadius = Math.max(0f, (renderDist - 1) * chunkSpan);
-        float farRadius = Math.max(nearRadius + chunkSpan * 4f,
+        float nearRadius = Math.max(0f, (renderDist + 0.5f) * chunkSpan);
+        float farRadius = Math.max(nearRadius + chunkSpan * 3f,
                 (cacheRenderDist + DISTANT_TERRAIN_EXTRA_CHUNKS) * chunkSpan);
 
-        float time = skyRenderer.getTimeOfDay();
-        float brightness = Math.max(0.15f, getFogBrightness(time));
-        float baseR = 0.34f * brightness;
-        float baseG = 0.44f * brightness;
-        float baseB = 0.56f * brightness;
-
         glDisable(GL_TEXTURE_2D);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glDepthMask(false);
+        glDisable(GL_BLEND);
+        glDepthMask(true);
 
         for (int ring = 0; ring < DISTANT_TERRAIN_RADIAL_STEPS; ring++) {
             float t0 = (float) ring / DISTANT_TERRAIN_RADIAL_STEPS;
             float t1 = (float) (ring + 1) / DISTANT_TERRAIN_RADIAL_STEPS;
             float r0 = nearRadius + (farRadius - nearRadius) * t0;
             float r1 = nearRadius + (farRadius - nearRadius) * t1;
-            float alpha0 = 0.55f * (1f - t0);
-            float alpha1 = 0.55f * (1f - t1);
 
             glBegin(GL_TRIANGLE_STRIP);
             for (int i = 0; i <= DISTANT_TERRAIN_ANGULAR_STEPS; i++) {
@@ -1258,24 +1249,101 @@ public class TerrainManager {
                 float z1 = wz + s * r1;
                 float y1 = sampleDistantHeight(x1, z1);
 
-                glColor4f(baseR, baseG, baseB, alpha0);
+                float[] c0 = sampleDistantBiomeColor(x0, z0, t0);
+                float[] c1 = sampleDistantBiomeColor(x1, z1, t1);
+                glColor4f(c0[0], c0[1], c0[2], 1f);
                 glVertex3f(x0, y0, z0);
-                glColor4f(baseR, baseG, baseB, alpha1);
+                glColor4f(c1[0], c1[1], c1[2], 1f);
                 glVertex3f(x1, y1, z1);
             }
             glEnd();
         }
 
-        glDepthMask(true);
-        glDisable(GL_BLEND);
         glColor4f(1f, 1f, 1f, 1f);
     }
 
     private float sampleDistantHeight(float wx, float wz) {
-        double macro = terrainNoise.eval(wx * 0.00045, wz * 0.00045) * 36.0;
-        double mid = terrainNoise.eval(wx * 0.00125 + 1200.0, wz * 0.00125 - 900.0) * 16.0;
-        double detail = terrainNoise.eval(wx * 0.0035 - 400.0, wz * 0.0035 + 250.0) * 5.0;
-        return (float) (macro + mid + detail + 6.0);
+        final int octaves = 2;
+        final double persistence = 0.35;
+        final double macroFreq = 0.002;
+        final double macroAmp = 2.0;
+
+        Map<Biome, Float> weights = getBiomeWeights(wx, wz);
+        double elevationOffset = terrainNoise.eval(wx * macroFreq, wz * macroFreq) * macroAmp;
+        double blended = 0.0;
+        double totalWeight = 0.0;
+
+        for (Map.Entry<Biome, Float> entry : weights.entrySet()) {
+            Biome biome = entry.getKey();
+            double weight = entry.getValue();
+            if (weight <= 0.00001) {
+                continue;
+            }
+            double freq = biome.frequency;
+            double amp = biome.amplitude * 0.5;
+            double sum = 0.0;
+            for (int o = 0; o < octaves; o++) {
+                double offset = o * 100.0;
+                double val = terrainNoise.eval((wx + offset) * freq, (wz - offset) * freq);
+                val = (val * val * val) * 1.2;
+                sum += val * amp;
+                freq *= 1.7;
+                amp *= persistence;
+            }
+            blended += (biome.baseHeight + sum + elevationOffset) * weight;
+            totalWeight += weight;
+        }
+
+        if (totalWeight <= 0.00001) {
+            return 0f;
+        }
+        return (float) (blended / totalWeight);
+    }
+
+    private float[] sampleDistantBiomeColor(float wx, float wz, float ringT) {
+        Map<Biome, Float> weights = getBiomeWeights(wx, wz);
+        float r = 0f;
+        float g = 0f;
+        float b = 0f;
+        float total = 0f;
+        for (Map.Entry<Biome, Float> entry : weights.entrySet()) {
+            float w = entry.getValue();
+            if (w <= 0f) {
+                continue;
+            }
+            Biome biome = entry.getKey();
+            float[] base;
+            switch (biome) {
+                case SAND:
+                case OCEAN:
+                    base = new float[] {0.66f, 0.61f, 0.47f};
+                    break;
+                case HIGH_MOUNTAINS:
+                case MOUNTAINS:
+                    base = new float[] {0.45f, 0.47f, 0.50f};
+                    break;
+                case SWAMP:
+                    base = new float[] {0.22f, 0.28f, 0.20f};
+                    break;
+                case BLOOM:
+                    base = new float[] {0.35f, 0.50f, 0.29f};
+                    break;
+                default:
+                    base = new float[] {0.28f, 0.40f, 0.25f};
+                    break;
+            }
+            r += base[0] * w;
+            g += base[1] * w;
+            b += base[2] * w;
+            total += w;
+        }
+        if (total > 0.00001f) {
+            r /= total;
+            g /= total;
+            b /= total;
+        }
+        float fade = 1.0f - 0.35f * ringT;
+        return new float[] {r * fade, g * fade, b * fade};
     }
 
 
