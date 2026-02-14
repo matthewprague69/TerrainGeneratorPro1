@@ -713,7 +713,7 @@ public class Main {
             player.applyView();
             Frustum frustum = Frustum.fromOpenGL();
 
-            terrain.update(player.getX(), player.getZ(), frustum, dt);
+            terrain.update(player.getX(), player.getY(), player.getZ(), frustum, dt);
             sky.update(dt);
 
             float[] shadowDir = sky.getShadowDirection();

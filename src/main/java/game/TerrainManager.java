@@ -119,11 +119,11 @@ public class TerrainManager {
     private static final int MAX_INFLIGHT_CHUNK_BUILDS = CHUNK_GENERATOR_THREADS * 8;
     private static final int MAX_INFLIGHT_FEATURE_BUILDS = FEATURE_GENERATOR_THREADS * 32;
 
-    private static final float SNOW_DENT_MIN_STEP_DISTANCE = 0.16f;
+    private static final float SNOW_DENT_MIN_STEP_DISTANCE = 0.24f;
     private static final float SNOW_DENT_RADIUS = 1.15f;
     private static final float SNOW_DENT_DEPTH = 6.0f;
-    private static final float SNOW_DENT_LIFETIME_SECONDS = 120f;
-    private static final int MAX_SNOW_DENTS = 4096;
+    private static final float SNOW_DENT_LIFETIME_SECONDS = 45f;
+    private static final int MAX_SNOW_DENTS = 1024;
 
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
@@ -287,10 +287,10 @@ public class TerrainManager {
         return results;
     }
 
-    public void update(float wx, float wz, Frustum frustum, float dt) {
+    public void update(float wx, float wy, float wz, Frustum frustum, float dt) {
         resetPerformanceFrame();
         weatherSystem.update(dt, skyRenderer.getTimeOfDay());
-        updateSnowDents(wx, wz, dt);
+        updateSnowDents(wx, wy, wz, dt);
         long updateStart = System.nanoTime();
         lastCameraFrustum = frustum;
 
@@ -1492,7 +1492,7 @@ public class TerrainManager {
         return Math.max(0f, depth);
     }
 
-    private void updateSnowDents(float wx, float wz, float dt) {
+    private void updateSnowDents(float wx, float wy, float wz, float dt) {
         if (dt <= 0f) {
             return;
         }
@@ -1508,6 +1508,12 @@ public class TerrainManager {
         }
 
         if (weatherSystem.getWeatherType() != WeatherType.SNOWY || snowCoverage <= 0.03f) {
+            return;
+        }
+
+        float terrainY = getHeight(wx, wz);
+        if (wy > terrainY + 0.6f || wy < terrainY - 2.5f) {
+            // Player is not actually stepping on the snow-covered ground.
             return;
         }
 
