@@ -1135,7 +1135,10 @@ public class TerrainManager {
         if (!fogEnabled) {
             float time = skyRenderer.getTimeOfDay();
             float brightness = getFogBrightness(time);
-            return new float[] { 0f, 0f, 0.6f * brightness, 0.75f * brightness, 1.0f * brightness };
+            float chunkSpan = Chunk.SIZE * scale;
+            float noFogStart = Math.max(10_000f, (cacheRenderDist + DISTANT_TERRAIN_EXTRA_CHUNKS + 64) * chunkSpan);
+            return new float[] { noFogStart, noFogStart + 1_000f,
+                    0.6f * brightness, 0.75f * brightness, 1.0f * brightness };
         }
         float[] fogRange = computeFogRange();
         float time = skyRenderer.getTimeOfDay();
