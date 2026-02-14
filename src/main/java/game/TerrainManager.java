@@ -186,6 +186,7 @@ public class TerrainManager {
     private Frustum lastCameraFrustum = null;
     private float smoothedFogStart = -1f;
     private float smoothedFogEnd = -1f;
+    private boolean fogEnabled = false;
 
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
         this(seed, scale, renderDist, renderDist - 1,  skyRenderer);
@@ -1098,6 +1099,10 @@ public class TerrainManager {
     }
 
     private void enableFogDynamic() {
+        if (!fogEnabled) {
+            glDisable(GL_FOG);
+            return;
+        }
         float[] fogRange = computeFogRange();
         if (fogRange == null) {
             glDisable(GL_FOG);
@@ -1127,6 +1132,11 @@ public class TerrainManager {
     }
 
     public float[] getFogSettings() {
+        if (!fogEnabled) {
+            float time = skyRenderer.getTimeOfDay();
+            float brightness = getFogBrightness(time);
+            return new float[] { 0f, 0f, 0.6f * brightness, 0.75f * brightness, 1.0f * brightness };
+        }
         float[] fogRange = computeFogRange();
         float time = skyRenderer.getTimeOfDay();
         float brightness = getFogBrightness(time);
@@ -1263,6 +1273,19 @@ public class TerrainManager {
         double mid = terrainNoise.eval(wx * 0.00125 + 1200.0, wz * 0.00125 - 900.0) * 16.0;
         double detail = terrainNoise.eval(wx * 0.0035 - 400.0, wz * 0.0035 + 250.0) * 5.0;
         return (float) (macro + mid + detail + 6.0);
+    }
+
+
+    public void setFogEnabled(boolean enabled) {
+        fogEnabled = enabled;
+        if (!fogEnabled) {
+            smoothedFogStart = -1f;
+            smoothedFogEnd = -1f;
+        }
+    }
+
+    public boolean isFogEnabled() {
+        return fogEnabled;
     }
 
     private void disableFog() {

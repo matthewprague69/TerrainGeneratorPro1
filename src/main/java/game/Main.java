@@ -190,6 +190,10 @@ public class Main {
         return vsyncEnabled ? "ON" : "OFF";
     }
 
+    private String getFogLabel() {
+        return terrain.isFogEnabled() ? "ON" : "OFF";
+    }
+
     private String getResolutionLabel() {
         int[] resolution = RESOLUTION_OPTIONS[resolutionIndex];
         int w = resolution[0];
@@ -318,7 +322,7 @@ public class Main {
     private void drawMenuOverlay(int width, int height, double mouseX, double mouseY) {
         UIRenderer.begin2D(width, height);
         float panelWidth = 520f;
-        float panelHeight = 620f;
+        float panelHeight = 660f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
 
@@ -360,6 +364,8 @@ public class Main {
         drawMenuRowText("Resolution", getResolutionLabel(), panelX + 20, rowY, mouseX, mouseY);
         rowY -= 40;
         drawMenuRowText("VSync", getVsyncLabel(), panelX + 20, rowY, mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("Fog", getFogLabel(), panelX + 20, rowY, mouseX, mouseY);
 
         PixelTextRenderer.drawText("Time: " + String.format("%.2f", sky.getTimeOfDay()),
                 panelX + 20, panelY + 30, 1.0f);
@@ -412,7 +418,7 @@ public class Main {
 
     private void handleMenuClick(double mouseX, double mouseY, int width, int height) {
         float panelWidth = 520f;
-        float panelHeight = 620f;
+        float panelHeight = 660f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
         float rowY = panelY + panelHeight - 80;
@@ -457,7 +463,11 @@ public class Main {
             return;
         }
         rowY -= 40;
-        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 10);
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 10)) {
+            return;
+        }
+        rowY -= 40;
+        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 11);
     }
 
     private boolean handleRowClick(double mouseX, double mouseY, float x, float y, int rowIndex) {
@@ -510,6 +520,9 @@ public class Main {
             case 10:
                 vsyncEnabled = !vsyncEnabled;
                 applyVSync();
+                break;
+            case 11:
+                terrain.setFogEnabled(!terrain.isFogEnabled());
                 break;
             default:
                 break;
