@@ -462,7 +462,10 @@ public class Chunk {
                 glEnable(GL_TEXTURE_2D);
                 glBindTexture(GL_TEXTURE_2D, iceTexture);
             }
-            glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+            float[] lightColor = manager.getLightColor();
+            float lightLuma = (lightColor[0] + lightColor[1] + lightColor[2]) / 3f;
+            float iceBrightness = Math.max(0.16f, Math.min(1f, lightLuma * 1.1f));
+            glColor4f(iceBrightness, iceBrightness, iceBrightness, 1.0f);
             if (waterDisplayList != -1) {
                 glCallList(waterDisplayList);
             }

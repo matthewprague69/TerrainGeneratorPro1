@@ -63,12 +63,13 @@ public class WeatherSystem {
             waterSnowCoverage = Math.max(0f, waterSnowCoverage - dt * 0.030f);
         }
 
-        if (isWaterFrozen()) {
+        boolean freezingConditions = temperatureC <= -0.5f || (snowCoverage > 0.3f && temperatureC < 1.5f);
+        if (freezingConditions) {
             float growth = 0.010f + snowCoverage * 0.030f;
             iceThickness = Math.min(0.85f, iceThickness + dt * growth);
         } else {
-            // Ice melts slower and lasts longer than snow.
-            iceThickness = Math.max(0f, iceThickness - dt * 0.008f);
+            // Ice melts slower and lasts longer than snow, but always eventually melts when warm.
+            iceThickness = Math.max(0f, iceThickness - dt * 0.006f);
         }
 
         precipitationTime += dt;
