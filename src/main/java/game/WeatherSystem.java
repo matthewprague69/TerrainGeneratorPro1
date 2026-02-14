@@ -3,10 +3,30 @@ package game;
 import static org.lwjgl.opengl.GL11.*;
 
 public class WeatherSystem {
+    private static final float PRECIPITATION_TILE_RADIUS = 9f;
     private static final int SNOW_PARTICLES_NEAR = 900;
-    private static final int SNOW_PARTICLES_MID = 1400;
-    private static final int SNOW_PARTICLES_FAR = 1700;
-    private static final int RAIN_PARTICLES = 1500;
+    private static final int SNOW_PARTICLES_MID = 1000;
+    private static final int SNOW_PARTICLES_FAR = 800;
+    private static final int RAIN_PARTICLES = 1200;
+    private static final int MAX_SNOW_PARTICLES = SNOW_PARTICLES_NEAR + SNOW_PARTICLES_MID + SNOW_PARTICLES_FAR;
+    private static final ParticleTemplate[] SNOW_PARTICLE_TEMPLATES = buildTemplates(MAX_SNOW_PARTICLES, 0x51A9E31D);
+    private static final ParticleTemplate[] RAIN_PARTICLE_TEMPLATES = buildTemplates(RAIN_PARTICLES, 0x39C2B47F);
+
+    private static final class ParticleTemplate {
+        private final float xNorm;
+        private final float zNorm;
+        private final float phase;
+        private final float speed;
+        private final float sway;
+
+        private ParticleTemplate(float xNorm, float zNorm, float phase, float speed, float sway) {
+            this.xNorm = xNorm;
+            this.zNorm = zNorm;
+            this.phase = phase;
+            this.speed = speed;
+            this.sway = sway;
+        }
+    }
 
     private WeatherType weatherType = WeatherType.SUNNY;
     private float temperatureC = 8f;
@@ -58,45 +78,80 @@ public class WeatherSystem {
     }
 
     private void renderSnowParticles(float camX, float camY, float camZ) {
-        renderSnowPass(camX, camY, camZ, SNOW_PARTICLES_FAR, 85f, 3.2f, 0.9f, 0.30f);
-        renderSnowPass(camX, camY, camZ, SNOW_PARTICLES_MID, 62f, 4.2f, 1.7f, 0.48f);
-        renderSnowPass(camX, camY, camZ, SNOW_PARTICLES_NEAR, 42f, 5.1f, 2.7f, 0.72f);
+        int start = 0;
+        start = renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_FAR,
+                PRECIPITATION_TILE_RADIUS, 2.8f, 0.8f, 0.26f, 24f, 18f);
+        start = renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_MID,
+                PRECIPITATION_TILE_RADIUS, 3.8f, 1.5f, 0.45f, 22f, 17f);
+        renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_NEAR,
+                PRECIPITATION_TILE_RADIUS, 4.8f, 2.4f, 0.68f, 20f, 16f);
     }
 
-    private void renderSnowPass(float camX, float camY, float camZ, int count, float radius,
-                                float baseSpeed, float pointSize, float alpha) {
-        final float top = camY + 34f;
+    private int renderSnowPass(float camX, float camY, float camZ, int startIndex, int count,
+                               float radius, float baseSpeed, float pointSize, float alpha,
+                               float topOffset, float verticalSpan) {
+        final float top = camY + topOffset;
+        final float effectiveRadius = radius * (0.9f + precipitationStrength * 0.1f);
         glPointSize(pointSize);
         glColor4f(1f, 1f, 1f, alpha * precipitationStrength);
         glBegin(GL_POINTS);
-        for (int i = 0; i < count; i++) {
-            float seed = i * 13.37f + radius * 0.123f;
-            float x = camX + hash(seed) * radius;
-            float z = camZ + hash(seed + 31.7f) * radius;
-            float yCycle = 34f + hash(seed + 6.3f) * 8f;
-            float speed = baseSpeed + hash(seed + 13.2f) * 2.4f;
-            float sway = hash(seed + precipitationTime * 0.33f) * 0.16f;
-            float y = top - ((precipitationTime * speed + hash(seed + 7.3f) * yCycle) % yCycle);
-            glVertex3f(x + sway, y, z - sway * 0.6f);
+        int end = Math.min(startIndex + count, SNOW_PARTICLE_TEMPLATES.length);
+        float time = precipitationTime;
+        for (int i = startIndex; i < end; i++) {
+            ParticleTemplate p = SNOW_PARTICLE_TEMPLATES[i];
+            float speed = baseSpeed + p.speed * 2.2f;
+            float y = top - ((time * speed + p.phase * verticalSpan) % verticalSpan);
+            float drift = (float) Math.sin((time + p.phase) * 0.8f) * p.sway;
+            float x = camX + p.xNorm * effectiveRadius + drift;
+            float z = camZ + p.zNorm * effectiveRadius - drift * 0.5f;
+            glVertex3f(x, y, z);
         }
         glEnd();
+        return end;
     }
 
     private void renderRainParticles(float camX, float camY, float camZ) {
-        final float radius = 62f;
-        final float top = camY + 34f;
+        final float radius = PRECIPITATION_TILE_RADIUS;
+        final float top = camY + 20f;
+        final float dropHeight = 18f;
         glColor4f(0.72f, 0.82f, 0.95f, 0.7f * precipitationStrength);
         glBegin(GL_LINES);
         for (int i = 0; i < RAIN_PARTICLES; i++) {
-            float seed = i * 7.1352f;
-            float x = camX + hash(seed) * radius;
-            float z = camZ + hash(seed + 19.1f) * radius;
-            float fallSpeed = 18f + hash(seed + 4.6f) * 8f;
-            float y = top - ((precipitationTime * fallSpeed + hash(seed + 2.4f) * 36f) % 36f);
+            ParticleTemplate p = RAIN_PARTICLE_TEMPLATES[i];
+            float x = camX + p.xNorm * radius;
+            float z = camZ + p.zNorm * radius;
+            float fallSpeed = 16f + p.speed * 8f;
+            float y = top - ((precipitationTime * fallSpeed + p.phase * dropHeight) % dropHeight);
             glVertex3f(x, y, z);
             glVertex3f(x + 0.07f, y - 1.55f, z + 0.07f);
         }
         glEnd();
+    }
+
+    private static ParticleTemplate[] buildTemplates(int count, int seed) {
+        ParticleTemplate[] templates = new ParticleTemplate[count];
+        int state = seed;
+        for (int i = 0; i < count; i++) {
+            state = lcg(state);
+            float angle = ((state >>> 8) & 0xFFFF) / 65535f * ((float) Math.PI * 2f);
+            state = lcg(state);
+            float radius = (float) Math.sqrt(((state >>> 8) & 0xFFFF) / 65535f);
+            state = lcg(state);
+            float phase = ((state >>> 8) & 0xFFFF) / 65535f;
+            state = lcg(state);
+            float speed = ((state >>> 8) & 0xFFFF) / 65535f;
+            state = lcg(state);
+            float sway = 0.05f + (((state >>> 8) & 0xFFFF) / 65535f) * 0.24f;
+
+            float xNorm = (float) Math.cos(angle) * radius;
+            float zNorm = (float) Math.sin(angle) * radius;
+            templates[i] = new ParticleTemplate(xNorm, zNorm, phase, speed, sway);
+        }
+        return templates;
+    }
+
+    private static int lcg(int state) {
+        return state * 1664525 + 1013904223;
     }
 
     private float getBaseTemperatureForWeather(WeatherType type) {
@@ -108,11 +163,6 @@ public class WeatherSystem {
             default:
                 return 14f;
         }
-    }
-
-    private float hash(float v) {
-        float s = (float) Math.sin(v * 12.9898f + 78.233f) * 43758.5453f;
-        return (s - (float) Math.floor(s)) * 2f - 1f;
     }
 
     public WeatherType getWeatherType() {
