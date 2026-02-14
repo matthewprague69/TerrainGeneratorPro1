@@ -101,7 +101,9 @@ public class Chunk {
     public static final float FEATURE_SLOPE_SPAWN_THRESHOLD = DIRT_SLOPE_START;
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
 
-    private static final Map<String, ImpostorEntry> IMPOSTOR_TEXTURES = new HashMap<>();
+    private static final int MAX_IMPOSTOR_CACHE_ENTRIES = 512;
+    private static final LinkedHashMap<String, ImpostorEntry> IMPOSTOR_TEXTURES =
+            new LinkedHashMap<>(256, 0.75f, true);
 
     public static class ChunkBuildData {
         public final int cx;
@@ -1123,12 +1125,40 @@ public class Chunk {
         float finalCanopyBucket = canopyBucket;
         float finalLakeRadiusBucket = lakeRadiusBucket;
         float finalWidthBucket = widthBucket;
-        return IMPOSTOR_TEXTURES.computeIfAbsent(key, ignored -> {
+        synchronized (IMPOSTOR_TEXTURES) {
+            ImpostorEntry cached = IMPOSTOR_TEXTURES.get(key);
+            if (cached != null) {
+                return cached;
+            }
+
             ImpostorSize size = getImpostorSize(feature, finalHeightBucket, finalCanopyBucket, finalLakeRadiusBucket,
                     finalWidthBucket);
             int[] textureIds = renderImpostorTextures(feature, size, angleCount, textureSize);
-            return new ImpostorEntry(textureIds, size);
-        });
+            ImpostorEntry created = new ImpostorEntry(textureIds, size);
+            IMPOSTOR_TEXTURES.put(key, created);
+
+            while (IMPOSTOR_TEXTURES.size() > MAX_IMPOSTOR_CACHE_ENTRIES) {
+                Iterator<Map.Entry<String, ImpostorEntry>> iterator = IMPOSTOR_TEXTURES.entrySet().iterator();
+                if (!iterator.hasNext()) {
+                    break;
+                }
+                Map.Entry<String, ImpostorEntry> eldest = iterator.next();
+                disposeImpostorEntry(eldest.getValue());
+                iterator.remove();
+            }
+            return created;
+        }
+    }
+
+    private static void disposeImpostorEntry(ImpostorEntry entry) {
+        if (entry == null || entry.textureIds == null) {
+            return;
+        }
+        for (int textureId : entry.textureIds) {
+            if (textureId > 0) {
+                glDeleteTextures(textureId);
+            }
+        }
     }
 
     private int[] renderImpostorTextures(Feature feature, ImpostorSize size, int angleCount, int textureSize) {
