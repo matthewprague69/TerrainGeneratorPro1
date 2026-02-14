@@ -1086,7 +1086,7 @@ public class TerrainManager {
             if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
                 continue;
             }
-            c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getSnowCoverage());
+            c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getSnowCoverage(), weatherSystem.getIceThickness());
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;
@@ -1540,8 +1540,13 @@ public class TerrainManager {
     }
 
     public void renderWeatherEffects(float camX, float camY, float camZ) {
-        float groundY = getHeight(camX, camZ);
-        weatherSystem.renderPrecipitation(camX, camY, camZ, groundY);
+        float surfaceY = getHeight(camX, camZ);
+        float minSurface = Chunk.WATER_LEVEL;
+        if (weatherSystem.isWaterFrozen()) {
+            minSurface += weatherSystem.getIceThickness();
+        }
+        surfaceY = Math.max(surfaceY, minSurface);
+        weatherSystem.renderPrecipitation(camX, camY, camZ, surfaceY);
     }
 
     public int getSnowTexture() {

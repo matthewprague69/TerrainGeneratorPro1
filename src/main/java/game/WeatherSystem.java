@@ -35,6 +35,7 @@ public class WeatherSystem {
     private float snowCoverage = 0f;
     private float precipitationStrength = 0f;
     private float precipitationTime = 0f;
+    private float iceThickness = 0f;
 
     public void update(float dt, float timeOfDay) {
         float targetTemp = getBaseTemperatureForWeather(weatherType);
@@ -57,10 +58,17 @@ public class WeatherSystem {
             snowCoverage = Math.max(0f, snowCoverage - dt * 0.010f);
         }
 
+        if (isWaterFrozen()) {
+            float growth = 0.010f + snowCoverage * 0.030f;
+            iceThickness = Math.min(0.85f, iceThickness + dt * growth);
+        } else {
+            iceThickness = Math.max(0f, iceThickness - dt * 0.040f);
+        }
+
         precipitationTime += dt;
     }
 
-    public void renderPrecipitation(float camX, float camY, float camZ, float groundY) {
+    public void renderPrecipitation(float camX, float camY, float camZ, float surfaceY) {
         if (precipitationStrength <= 0.01f || weatherType == WeatherType.SUNNY) {
             return;
         }
@@ -71,7 +79,7 @@ public class WeatherSystem {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         if (weatherType == WeatherType.SNOWY) {
-            renderSnowParticles(camX, camY, camZ, groundY);
+            renderSnowParticles(camX, camY, camZ, surfaceY);
         } else {
             renderRainParticles(camX, camY, camZ);
         }
@@ -79,8 +87,8 @@ public class WeatherSystem {
         glDisable(GL_BLEND);
     }
 
-    private void renderSnowParticles(float camX, float camY, float camZ, float groundY) {
-        float snappedGroundY = (float) Math.floor(groundY * 0.5f) * 2f;
+    private void renderSnowParticles(float camX, float camY, float camZ, float surfaceY) {
+        float snappedGroundY = (float) Math.floor(surfaceY * 0.5f) * 2f;
         float snowSpan = 32f;
         float topY = snappedGroundY + snowSpan;
 
@@ -199,5 +207,9 @@ public class WeatherSystem {
 
     public boolean isWaterFrozen() {
         return temperatureC <= -0.5f || (snowCoverage > 0.3f && temperatureC < 1.5f);
+    }
+
+    public float getIceThickness() {
+        return iceThickness;
     }
 }

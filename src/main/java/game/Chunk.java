@@ -442,7 +442,7 @@ public class Chunk {
 
     }
 
-    public void drawWater(boolean frozen, float snowCoverage) {
+    public void drawWater(boolean frozen, float snowCoverage, float iceThickness) {
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
         glDisable(GL_TEXTURE_2D);
         glDepthFunc(GL_LEQUAL);
@@ -450,11 +450,25 @@ public class Chunk {
         glEnable(GL_FOG);
         if (frozen) {
             glDisable(GL_BLEND);
+            glDepthMask(true);
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(-1.0f, -2.0f);
             float iceTint = Math.max(0.2f, Math.min(1f, 0.35f + snowCoverage * 0.4f));
-            glColor4f(0.78f * iceTint, 0.88f * iceTint, 0.96f, 0.95f);
+            float iceLift = Math.max(0f, iceThickness);
+            glPushMatrix();
+            glTranslatef(0f, iceLift, 0f);
+            glColor4f(0.78f * iceTint, 0.88f * iceTint, 0.96f, 1.0f);
             if (waterDisplayList != -1) {
                 glCallList(waterDisplayList);
             }
+            if (snowCoverage > 0.02f && waterDisplayList != -1) {
+                float snowCapAlpha = Math.max(0.25f, Math.min(0.95f, snowCoverage * 0.95f));
+                glTranslatef(0f, 0.015f, 0f);
+                glColor4f(0.96f, 0.98f, 1.0f, snowCapAlpha);
+                glCallList(waterDisplayList);
+            }
+            glPopMatrix();
+            glDisable(GL_POLYGON_OFFSET_FILL);
         } else {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
