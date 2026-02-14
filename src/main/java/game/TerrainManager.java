@@ -121,6 +121,8 @@ public class TerrainManager {
     private static final int DISTANT_TERRAIN_EXTRA_CHUNKS = 120;
     private static final int DISTANT_TERRAIN_RADIAL_STEPS = 18;
     private static final int DISTANT_TERRAIN_ANGULAR_STEPS = 56;
+    private static final float FOG_SMOOTHING = 0.14f;
+    private static final float FOG_MIN_BAND_CHUNKS = 2.0f;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final ArrayDeque<Long> pendingChunks = new ArrayDeque<>();
@@ -182,6 +184,8 @@ public class TerrainManager {
     private int perfDepthChunksDrawn = 0;
     private int perfVisibleFeatures = 0;
     private Frustum lastCameraFrustum = null;
+    private float smoothedFogStart = -1f;
+    private float smoothedFogEnd = -1f;
 
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
         this(seed, scale, renderDist, renderDist - 1,  skyRenderer);
@@ -1144,15 +1148,11 @@ public class TerrainManager {
         }
 
         int nearestMissingDist = Integer.MAX_VALUE;
-        Frustum frustum = lastCameraFrustum;
         for (long key : neededKeys) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
             int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
             if (dist > cacheRenderDist) {
-                continue;
-            }
-            if (frustum != null && !isChunkVisible(frustum, cx, cz)) {
                 continue;
             }
             Chunk chunk = chunks.get(key);
@@ -1162,15 +1162,29 @@ public class TerrainManager {
         }
 
         if (nearestMissingDist == Integer.MAX_VALUE) {
+            smoothedFogStart = -1f;
+            smoothedFogEnd = -1f;
             return null;
         }
 
         float chunkSpan = Chunk.SIZE * scale;
-        float fogCenter = nearestMissingDist * chunkSpan;
-        float fogHalfWidth = Math.max(chunkSpan * 1.5f, 8f * scale);
-        float fogStart = Math.max(0f, fogCenter - fogHalfWidth);
-        float fogEnd = Math.max(fogStart + chunkSpan, fogCenter + fogHalfWidth);
-        return new float[] { fogStart, fogEnd };
+        float targetCenter = nearestMissingDist * chunkSpan;
+        float minCenter = Math.max(0f, (renderDist - 2) * chunkSpan);
+        float maxCenter = Math.max(minCenter + chunkSpan, (cacheRenderDist + 1) * chunkSpan);
+        float fogCenter = Math.max(minCenter, Math.min(maxCenter, targetCenter));
+        float fogHalfWidth = Math.max(FOG_MIN_BAND_CHUNKS * chunkSpan, chunkSpan * 1.5f);
+        float targetStart = Math.max(0f, fogCenter - fogHalfWidth);
+        float targetEnd = Math.max(targetStart + chunkSpan, fogCenter + fogHalfWidth);
+
+        if (smoothedFogStart < 0f || smoothedFogEnd < 0f) {
+            smoothedFogStart = targetStart;
+            smoothedFogEnd = targetEnd;
+        } else {
+            smoothedFogStart += (targetStart - smoothedFogStart) * FOG_SMOOTHING;
+            smoothedFogEnd += (targetEnd - smoothedFogEnd) * FOG_SMOOTHING;
+        }
+
+        return new float[] { smoothedFogStart, smoothedFogEnd };
     }
 
     private float getFogBrightness(float time) {
@@ -1194,7 +1208,7 @@ public class TerrainManager {
 
     private void renderDistantTerrainBackdrop(float wx, float wz) {
         float chunkSpan = Chunk.SIZE * scale;
-        float nearRadius = Math.max(0f, (cacheRenderDist + 2) * chunkSpan);
+        float nearRadius = Math.max(0f, (cacheRenderDist + 6) * chunkSpan);
         float farRadius = Math.max(nearRadius + chunkSpan * 4f,
                 (cacheRenderDist + DISTANT_TERRAIN_EXTRA_CHUNKS) * chunkSpan);
 
@@ -1207,6 +1221,7 @@ public class TerrainManager {
         glDisable(GL_TEXTURE_2D);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(false);
 
         for (int ring = 0; ring < DISTANT_TERRAIN_RADIAL_STEPS; ring++) {
             float t0 = (float) ring / DISTANT_TERRAIN_RADIAL_STEPS;
@@ -1238,6 +1253,7 @@ public class TerrainManager {
             glEnd();
         }
 
+        glDepthMask(true);
         glDisable(GL_BLEND);
         glColor4f(1f, 1f, 1f, 1f);
     }
