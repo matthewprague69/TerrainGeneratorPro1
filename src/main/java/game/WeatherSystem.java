@@ -58,7 +58,7 @@ public class WeatherSystem {
         precipitationTime += dt;
     }
 
-    public void renderPrecipitation(float camX, float camY, float camZ) {
+    public void renderPrecipitation(float camX, float camY, float camZ, float groundY) {
         if (precipitationStrength <= 0.01f || weatherType == WeatherType.SUNNY) {
             return;
         }
@@ -69,7 +69,7 @@ public class WeatherSystem {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         if (weatherType == WeatherType.SNOWY) {
-            renderSnowParticles(camX, camY, camZ);
+            renderSnowParticles(camX, camY, camZ, groundY);
         } else {
             renderRainParticles(camX, camY, camZ);
         }
@@ -77,14 +77,17 @@ public class WeatherSystem {
         glDisable(GL_BLEND);
     }
 
-    private void renderSnowParticles(float camX, float camY, float camZ) {
+    private void renderSnowParticles(float camX, float camY, float camZ, float groundY) {
+        float topY = camY + 22f;
+        float snowSpan = Math.max(10f, Math.min(42f, topY - groundY + 1.5f));
+
         int start = 0;
         start = renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_FAR,
-                PRECIPITATION_TILE_RADIUS, 2.8f, 0.8f, 0.26f, 24f, 18f);
+                PRECIPITATION_TILE_RADIUS, 2.8f, 1.6f, 0.26f, 22f, snowSpan);
         start = renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_MID,
-                PRECIPITATION_TILE_RADIUS, 3.8f, 1.5f, 0.45f, 22f, 17f);
+                PRECIPITATION_TILE_RADIUS, 3.8f, 2.8f, 0.45f, 22f, snowSpan);
         renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_NEAR,
-                PRECIPITATION_TILE_RADIUS, 4.8f, 2.4f, 0.68f, 20f, 16f);
+                PRECIPITATION_TILE_RADIUS, 4.8f, 4.0f, 0.68f, 22f, snowSpan);
     }
 
     private int renderSnowPass(float camX, float camY, float camZ, int startIndex, int count,

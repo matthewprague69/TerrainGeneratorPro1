@@ -1540,7 +1540,8 @@ public class TerrainManager {
     }
 
     public void renderWeatherEffects(float camX, float camY, float camZ) {
-        weatherSystem.renderPrecipitation(camX, camY, camZ);
+        float groundY = getHeight(camX, camZ);
+        weatherSystem.renderPrecipitation(camX, camY, camZ, groundY);
     }
 
     public int getSnowTexture() {
