@@ -1560,6 +1560,10 @@ public class TerrainManager {
         return snowTex;
     }
 
+    public float getIceThickness() {
+        return weatherSystem.getIceThickness();
+    }
+
     public int getIceTexture() {
         return iceTex;
     }

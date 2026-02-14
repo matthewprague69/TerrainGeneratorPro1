@@ -466,30 +466,6 @@ public class Chunk {
             if (waterDisplayList != -1) {
                 glCallList(waterDisplayList);
             }
-            if (snowCoverage > 0.05f && waterDisplayList != -1) {
-                int snowTexture = manager.getSnowTexture();
-                if (snowTexture != 0) {
-                    glEnable(GL_TEXTURE_2D);
-                    glBindTexture(GL_TEXTURE_2D, snowTexture);
-                } else {
-                    glDisable(GL_TEXTURE_2D);
-                }
-
-                float clampedSnow = Math.max(0f, Math.min(1f, snowCoverage));
-                float snowDepth = 0.012f + clampedSnow * 0.22f;
-                int snowLayers = 1 + (int) (clampedSnow * 5f);
-                glDisable(GL_BLEND);
-                for (int i = 0; i < snowLayers; i++) {
-                    float t = snowLayers <= 1 ? 1f : (float) i / (float) (snowLayers - 1);
-                    float layerOffset = 0.014f + t * snowDepth;
-                    float brightness = 0.92f + 0.08f * t;
-                    glPushMatrix();
-                    glTranslatef(0f, layerOffset, 0f);
-                    glColor4f(brightness, brightness, brightness, 1.0f);
-                    glCallList(waterDisplayList);
-                    glPopMatrix();
-                }
-            }
             glPopMatrix();
             glDisable(GL_POLYGON_OFFSET_FILL);
         } else {
@@ -649,6 +625,9 @@ public class Chunk {
         glPolygonOffset(-1f, -1f);
         glColor3f(1f, 1f, 1f);
 
+        boolean frozenWater = manager.isWaterFrozen();
+        float iceThickness = frozenWater ? manager.getIceThickness() : 0f;
+
         int step = Math.max(1, (int) Math.pow(2, lod));
         float texScale = 0.14f;
         glBegin(GL_TRIANGLES);
@@ -671,10 +650,15 @@ public class Chunk {
                 float wz = (cz * SIZE + z) * scale;
                 float wz2 = (cz * SIZE + z2) * scale;
 
-                float y00 = heights[x][z] + d00;
-                float y10 = heights[x2][z] + d10;
-                float y01 = heights[x][z2] + d01;
-                float y11 = heights[x2][z2] + d11;
+                float b00 = getSnowBaseHeightAtVertex(x, z, frozenWater, iceThickness);
+                float b10 = getSnowBaseHeightAtVertex(x2, z, frozenWater, iceThickness);
+                float b01 = getSnowBaseHeightAtVertex(x, z2, frozenWater, iceThickness);
+                float b11 = getSnowBaseHeightAtVertex(x2, z2, frozenWater, iceThickness);
+
+                float y00 = b00 + d00;
+                float y10 = b10 + d10;
+                float y01 = b01 + d01;
+                float y11 = b11 + d11;
 
                 glTexCoord2f(wx * texScale, wz * texScale);
                 glVertex3f(wx, y00, wz);
@@ -695,6 +679,24 @@ public class Chunk {
 
         glDisable(GL_POLYGON_OFFSET_FILL);
         glEnable(GL_LIGHTING);
+    }
+
+    private float getSnowBaseHeightAtVertex(int x, int z, boolean frozenWater, float iceThickness) {
+        float base = heights[x][z];
+        if (!frozenWater) {
+            return base;
+        }
+
+        float river = riverSurface[x][z];
+        boolean hasRiverWater = river > Float.NEGATIVE_INFINITY / 2;
+        boolean hasStandingWater = base < WATER_LEVEL;
+        if (!hasRiverWater && !hasStandingWater) {
+            return base;
+        }
+
+        float liquidSurface = hasRiverWater ? river : WATER_LEVEL;
+        float frozenSurface = liquidSurface + Math.max(0f, iceThickness);
+        return Math.max(base, frozenSurface);
     }
 
     private float getSnowDepthForVertex(int x, int z, float snowCoverage) {
@@ -1999,10 +2001,12 @@ public class Chunk {
             return 0f;
 
         float fx = lx - ix, fz = lz - iz;
-        float h00 = heights[ix][iz];
-        float h10 = heights[ix + 1][iz];
-        float h01 = heights[ix][iz + 1];
-        float h11 = heights[ix + 1][iz + 1];
+        boolean frozenWater = manager.isWaterFrozen();
+        float iceThickness = frozenWater ? manager.getIceThickness() : 0f;
+        float h00 = getSnowBaseHeightAtVertex(ix, iz, frozenWater, iceThickness);
+        float h10 = getSnowBaseHeightAtVertex(ix + 1, iz, frozenWater, iceThickness);
+        float h01 = getSnowBaseHeightAtVertex(ix, iz + 1, frozenWater, iceThickness);
+        float h11 = getSnowBaseHeightAtVertex(ix + 1, iz + 1, frozenWater, iceThickness);
 
         float a = h00 + (h10 - h00) * fx;
         float b = h01 + (h11 - h01) * fx;
