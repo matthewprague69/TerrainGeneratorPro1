@@ -705,6 +705,15 @@ public class Chunk {
             return 0f;
         }
 
+        if (manager.isWaterFrozen()) {
+            float river = riverSurface[x][z];
+            boolean hasRiverWater = river > Float.NEGATIVE_INFINITY / 2;
+            boolean hasStandingWater = heights[x][z] < WATER_LEVEL;
+            if (hasRiverWater || hasStandingWater) {
+                clampedCoverage = Math.min(clampedCoverage, manager.getWaterSnowCoverage());
+            }
+        }
+
         float slope = computeSnowSlopeAtVertex(x, z);
         float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
         slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);

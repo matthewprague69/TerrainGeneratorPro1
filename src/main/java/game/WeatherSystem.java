@@ -33,6 +33,7 @@ public class WeatherSystem {
     private WeatherType weatherType = WeatherType.SUNNY;
     private float temperatureC = 8f;
     private float snowCoverage = 0f;
+    private float waterSnowCoverage = 0f;
     private float precipitationStrength = 0f;
     private float precipitationTime = 0f;
     private float iceThickness = 0f;
@@ -54,15 +55,20 @@ public class WeatherSystem {
 
         if (weatherType == WeatherType.SNOWY && temperatureC <= 0f) {
             snowCoverage = Math.min(1f, snowCoverage + dt * 0.045f);
+            waterSnowCoverage = Math.min(1f, waterSnowCoverage + dt * 0.055f);
         } else if (temperatureC > 0f) {
-            snowCoverage = Math.max(0f, snowCoverage - dt * 0.010f);
+            // Land snow melts first.
+            snowCoverage = Math.max(0f, snowCoverage - dt * 0.020f);
+            // Snow on ice melts gradually, revealing ice before the ice itself disappears.
+            waterSnowCoverage = Math.max(0f, waterSnowCoverage - dt * 0.030f);
         }
 
         if (isWaterFrozen()) {
             float growth = 0.010f + snowCoverage * 0.030f;
             iceThickness = Math.min(0.85f, iceThickness + dt * growth);
         } else {
-            iceThickness = Math.max(0f, iceThickness - dt * 0.040f);
+            // Ice melts slower and lasts longer than snow.
+            iceThickness = Math.max(0f, iceThickness - dt * 0.008f);
         }
 
         precipitationTime += dt;
@@ -206,8 +212,12 @@ public class WeatherSystem {
         return snowCoverage;
     }
 
+    public float getWaterSnowCoverage() {
+        return waterSnowCoverage;
+    }
+
     public boolean isWaterFrozen() {
-        return temperatureC <= -0.5f || (snowCoverage > 0.3f && temperatureC < 1.5f);
+        return iceThickness > 0.01f || temperatureC <= -0.5f || (snowCoverage > 0.3f && temperatureC < 1.5f);
     }
 
     public float getIceThickness() {

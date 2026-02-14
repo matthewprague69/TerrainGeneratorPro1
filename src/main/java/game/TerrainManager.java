@@ -1093,7 +1093,7 @@ public class TerrainManager {
             if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
                 continue;
             }
-            c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getSnowCoverage(), weatherSystem.getIceThickness());
+            c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(), weatherSystem.getIceThickness());
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;
@@ -1470,6 +1470,10 @@ public class TerrainManager {
 
     public float getSnowCoverage() {
         return weatherSystem.getSnowCoverage();
+    }
+
+    public float getWaterSnowCoverage() {
+        return weatherSystem.getWaterSnowCoverage();
     }
 
     public boolean isWaterFrozen() {
