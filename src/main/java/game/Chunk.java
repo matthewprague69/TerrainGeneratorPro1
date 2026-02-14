@@ -99,6 +99,8 @@ public class Chunk {
 
     private static final float SNOW_HEIGHT_START = 55f;
     private static final float SNOW_HEIGHT_FULL = 60f;
+    private static final float SNOW_MAX_ACCUMULATION_DEPTH = 1.2f;
+    private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
@@ -600,7 +602,6 @@ public class Chunk {
         }
 
         float alpha = 0.30f + clampedCoverage * 0.70f;
-        float depth = 0.012f + clampedCoverage * 0.085f;
         int layerCount = Math.max(1, Math.min(4, (int) (clampedCoverage * 4f) + 1));
 
         glEnable(GL_TEXTURE_2D);
@@ -613,16 +614,19 @@ public class Chunk {
         int step = Math.max(1, (int) Math.pow(2, lod));
         float texScale = 0.14f;
         for (int layer = 0; layer < layerCount; layer++) {
-            float layerOffset = depth * ((layer + 1f) / layerCount);
+            float layerT = (layer + 1f) / layerCount;
             glBegin(GL_TRIANGLES);
             for (int z = 0; z < SIZE; z += step) {
                 int z2 = Math.min(z + step, SIZE);
                 for (int x = 0; x < SIZE; x += step) {
                     int x2 = Math.min(x + step, SIZE);
 
-                    float avgSlope = (computeSlope(x, z) + computeSlope(x2, z)
-                            + computeSlope(x, z2) + computeSlope(x2, z2)) * 0.25f;
-                    if (avgSlope > 1.15f) {
+                    float d00 = getSnowDepthForVertex(x, z, clampedCoverage) * layerT;
+                    float d10 = getSnowDepthForVertex(x2, z, clampedCoverage) * layerT;
+                    float d01 = getSnowDepthForVertex(x, z2, clampedCoverage) * layerT;
+                    float d11 = getSnowDepthForVertex(x2, z2, clampedCoverage) * layerT;
+
+                    if (d00 <= 0.0001f && d10 <= 0.0001f && d01 <= 0.0001f && d11 <= 0.0001f) {
                         continue;
                     }
 
@@ -631,10 +635,10 @@ public class Chunk {
                     float wz = (cz * SIZE + z) * scale;
                     float wz2 = (cz * SIZE + z2) * scale;
 
-                    float y00 = heights[x][z] + layerOffset;
-                    float y10 = heights[x2][z] + layerOffset;
-                    float y01 = heights[x][z2] + layerOffset;
-                    float y11 = heights[x2][z2] + layerOffset;
+                    float y00 = heights[x][z] + d00;
+                    float y10 = heights[x2][z] + d10;
+                    float y01 = heights[x][z2] + d01;
+                    float y11 = heights[x2][z2] + d11;
 
                     glTexCoord2f(wx * texScale, wz * texScale);
                     glVertex3f(wx, y00, wz);
@@ -656,6 +660,13 @@ public class Chunk {
 
         glDisable(GL_BLEND);
         glEnable(GL_LIGHTING);
+    }
+
+    private float getSnowDepthForVertex(int x, int z, float snowCoverage) {
+        float slope = computeSlope(heights, x, z);
+        float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
+        slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
+        return SNOW_MAX_ACCUMULATION_DEPTH * snowCoverage * slopeFactor;
     }
 
     private void buildWaterDisplayList() {
@@ -1882,7 +1893,22 @@ public class Chunk {
 
         float a = h00 + (h10 - h00) * fx;
         float b = h01 + (h11 - h01) * fx;
-        return a + (b - a) * fz;
+        float baseHeight = a + (b - a) * fz;
+
+        float snowCoverage = manager.getSnowCoverage();
+        if (snowCoverage <= 0.001f) {
+            return baseHeight;
+        }
+
+        float d00 = getSnowDepthForVertex(ix, iz, snowCoverage);
+        float d10 = getSnowDepthForVertex(ix + 1, iz, snowCoverage);
+        float d01 = getSnowDepthForVertex(ix, iz + 1, snowCoverage);
+        float d11 = getSnowDepthForVertex(ix + 1, iz + 1, snowCoverage);
+        float dA = d00 + (d10 - d00) * fx;
+        float dB = d01 + (d11 - d01) * fx;
+        float snowDepth = dA + (dB - dA) * fz;
+
+        return baseHeight + snowDepth;
     }
 
     public BoundingBox getBoundingBox() {
