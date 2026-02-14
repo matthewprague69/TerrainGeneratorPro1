@@ -1512,8 +1512,8 @@ public class TerrainManager {
         }
 
         float terrainY = getHeight(wx, wz);
-        if (wy > terrainY + 0.6f || wy < terrainY - 2.5f) {
-            // Player is not actually stepping on the snow-covered ground.
+        if (Math.abs(wy - terrainY) > 0.22f) {
+            // Player is not intersecting ground/snow surface right now.
             return;
         }
 
