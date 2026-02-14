@@ -21,6 +21,7 @@ import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL14.*;
 import static org.lwjgl.opengl.GL15.*;
 import static org.lwjgl.opengl.GL30.*;
+import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.util.*;
 
@@ -67,6 +68,7 @@ public class Chunk {
     private final boolean[][] lakeMask = new boolean[SIZE][SIZE];
     private boolean featuresGenerated = false;
     private final List<TerrainBatch> terrainBatches = new ArrayList<>();
+    private int terrainVboId = -1;
     private final int[] primaryLayerTextures = new int[3];
     private final float[] primaryLayerAlphas = new float[3];
     private final int[] secondaryLayerTextures = new int[3];
@@ -596,19 +598,23 @@ public class Chunk {
 
         addSkirts(builders, step, texScale);
 
+        FloatBuilder merged = new FloatBuilder();
         for (Map.Entry<BatchKey, FloatBuilder> entry : builders.entrySet()) {
             FloatBuilder builder = entry.getValue();
             if (builder.size == 0) {
                 continue;
             }
-            int vboId = glGenBuffers();
-            glBindBuffer(GL_ARRAY_BUFFER, vboId);
-            glBufferData(GL_ARRAY_BUFFER, builder.toBuffer(), GL_STATIC_DRAW);
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            int firstVertex = merged.size / STRIDE_FLOATS;
+            merged.put(builder.data, builder.size);
             BatchKey key = entry.getKey();
-            terrainBatches.add(new TerrainBatch(key.textureId, vboId, builder.size / STRIDE_FLOATS,
+            terrainBatches.add(new TerrainBatch(key.textureId, firstVertex, builder.size / STRIDE_FLOATS,
                     alphaFromBucket(key.alphaBucket)));
         }
+
+        if (merged.size == 0) {
+            return;
+        }
+        terrainVboId = uploadBufferMapped(merged.toBuffer(), GL_STATIC_DRAW);
     }
 
     private void buildWaterGeometry() {
@@ -678,12 +684,7 @@ public class Chunk {
             return;
         }
 
-        int vboId = glGenBuffers();
-        glBindBuffer(GL_ARRAY_BUFFER, vboId);
-        glBufferData(GL_ARRAY_BUFFER, builder.toBuffer(), GL_STATIC_DRAW);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-        grassBatchVbo = vboId;
+        grassBatchVbo = uploadBufferMapped(builder.toBuffer(), GL_STATIC_DRAW);
         grassBatchVertexCount = vertexCount;
         grassBatchTexture = texture;
     }
@@ -703,12 +704,7 @@ public class Chunk {
             return;
         }
 
-        int vboId = glGenBuffers();
-        glBindBuffer(GL_ARRAY_BUFFER, vboId);
-        glBufferData(GL_ARRAY_BUFFER, builder.toBuffer(), GL_STATIC_DRAW);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-        flowerBatchVbo = vboId;
+        flowerBatchVbo = uploadBufferMapped(builder.toBuffer(), GL_STATIC_DRAW);
         flowerBatchVertexCount = vertexCount;
     }
 
@@ -809,10 +805,10 @@ public class Chunk {
             }
             glBindTexture(GL_TEXTURE_2D, batch.textureId);
             glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, lodBias);
-            glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
-            glVertexPointer(3, GL_FLOAT, strideBytes, 0);
-            glNormalPointer(GL_FLOAT, strideBytes, 3 * Float.BYTES);
-            glTexCoordPointer(2, GL_FLOAT, strideBytes, 6 * Float.BYTES);
+            glBindBuffer(GL_ARRAY_BUFFER, terrainVboId);
+            glVertexPointer(3, GL_FLOAT, strideBytes, (long) batch.firstVertex * strideBytes);
+            glNormalPointer(GL_FLOAT, strideBytes, (long) batch.firstVertex * strideBytes + 3L * Float.BYTES);
+            glTexCoordPointer(2, GL_FLOAT, strideBytes, (long) batch.firstVertex * strideBytes + 6L * Float.BYTES);
             glDrawArrays(GL_TRIANGLES, 0, batch.vertexCount);
         }
 
@@ -828,10 +824,10 @@ public class Chunk {
             glColor4f(1f, 1f, 1f, batch.alpha);
             glBindTexture(GL_TEXTURE_2D, batch.textureId);
             glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, lodBias);
-            glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
-            glVertexPointer(3, GL_FLOAT, strideBytes, 0);
-            glNormalPointer(GL_FLOAT, strideBytes, 3 * Float.BYTES);
-            glTexCoordPointer(2, GL_FLOAT, strideBytes, 6 * Float.BYTES);
+            glBindBuffer(GL_ARRAY_BUFFER, terrainVboId);
+            glVertexPointer(3, GL_FLOAT, strideBytes, (long) batch.firstVertex * strideBytes);
+            glNormalPointer(GL_FLOAT, strideBytes, (long) batch.firstVertex * strideBytes + 3L * Float.BYTES);
+            glTexCoordPointer(2, GL_FLOAT, strideBytes, (long) batch.firstVertex * strideBytes + 6L * Float.BYTES);
             glDrawArrays(GL_TRIANGLES, 0, batch.vertexCount);
         }
         glDisable(GL_POLYGON_OFFSET_FILL);
@@ -869,9 +865,9 @@ public class Chunk {
         glEnableClientState(GL_VERTEX_ARRAY);
         int strideBytes = STRIDE_FLOATS * Float.BYTES;
 
+        glBindBuffer(GL_ARRAY_BUFFER, terrainVboId);
         for (TerrainBatch batch : terrainBatches) {
-            glBindBuffer(GL_ARRAY_BUFFER, batch.vboId);
-            glVertexPointer(3, GL_FLOAT, strideBytes, 0);
+            glVertexPointer(3, GL_FLOAT, strideBytes, (long) batch.firstVertex * strideBytes);
             glDrawArrays(GL_TRIANGLES, 0, batch.vertexCount);
         }
 
@@ -2021,8 +2017,9 @@ public class Chunk {
     }
 
     private void disposeTerrainBuffers() {
-        for (TerrainBatch batch : terrainBatches) {
-            glDeleteBuffers(batch.vboId);
+        if (terrainVboId != -1) {
+            glDeleteBuffers(terrainVboId);
+            terrainVboId = -1;
         }
         terrainBatches.clear();
     }
@@ -2050,6 +2047,23 @@ public class Chunk {
         }
         flowerBatchVertexCount = 0;
     }
+    private int uploadBufferMapped(FloatBuffer data, int usage) {
+        int vboId = glGenBuffers();
+        glBindBuffer(GL_ARRAY_BUFFER, vboId);
+        int bytes = data.remaining() * Float.BYTES;
+        glBufferData(GL_ARRAY_BUFFER, bytes, usage);
+        ByteBuffer mapped = glMapBufferRange(GL_ARRAY_BUFFER, 0, bytes,
+                GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT | GL_MAP_UNSYNCHRONIZED_BIT, null);
+        if (mapped != null) {
+            mapped.asFloatBuffer().put(data.duplicate());
+            glUnmapBuffer(GL_ARRAY_BUFFER);
+        } else {
+            glBufferSubData(GL_ARRAY_BUFFER, 0, data);
+        }
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        return vboId;
+    }
+
 
     private float[] computeNormal(int x1, int z1, int x2, int z2, int x3, int z3) {
         float[] p1 = { (cx * SIZE + x1) * scale, heights[x1][z1], (cz * SIZE + z1) * scale };
@@ -2101,13 +2115,13 @@ public class Chunk {
 
     private static final class TerrainBatch {
         private final int textureId;
-        private final int vboId;
+        private final int firstVertex;
         private final int vertexCount;
         private final float alpha;
 
-        private TerrainBatch(int textureId, int vboId, int vertexCount, float alpha) {
+        private TerrainBatch(int textureId, int firstVertex, int vertexCount, float alpha) {
             this.textureId = textureId;
-            this.vboId = vboId;
+            this.firstVertex = firstVertex;
             this.vertexCount = vertexCount;
             this.alpha = alpha;
         }
@@ -2135,6 +2149,12 @@ public class Chunk {
                 int newSize = Math.max(needed, data.length * 2);
                 data = Arrays.copyOf(data, newSize);
             }
+        }
+
+        private void put(float[] src, int length) {
+            ensureCapacity(length);
+            System.arraycopy(src, 0, data, size, length);
+            size += length;
         }
 
         private java.nio.FloatBuffer toBuffer() {
