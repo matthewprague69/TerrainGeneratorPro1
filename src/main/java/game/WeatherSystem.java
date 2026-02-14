@@ -3,7 +3,9 @@ package game;
 import static org.lwjgl.opengl.GL11.*;
 
 public class WeatherSystem {
-    private static final float PRECIPITATION_TILE_RADIUS = 9f;
+    private static final float PRECIPITATION_DENSE_RADIUS = 9f;
+    private static final float PRECIPITATION_MID_RADIUS = 18f;
+    private static final float PRECIPITATION_FAR_RADIUS = 30f;
     private static final int SNOW_PARTICLES_NEAR = 900;
     private static final int SNOW_PARTICLES_MID = 1000;
     private static final int SNOW_PARTICLES_FAR = 800;
@@ -78,16 +80,17 @@ public class WeatherSystem {
     }
 
     private void renderSnowParticles(float camX, float camY, float camZ, float groundY) {
-        float snowSpan = Math.max(16f, Math.min(42f, (camY - groundY) + 24f));
-        float topY = groundY + snowSpan;
+        float snappedGroundY = (float) Math.floor(groundY * 0.5f) * 2f;
+        float snowSpan = 32f;
+        float topY = snappedGroundY + snowSpan;
 
         int start = 0;
         start = renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_FAR,
-                PRECIPITATION_TILE_RADIUS, 2.8f, 4.0f, 0.26f, topY, snowSpan);
+                PRECIPITATION_FAR_RADIUS, 2.8f, 2.8f, 0.20f, topY, snowSpan);
         start = renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_MID,
-                PRECIPITATION_TILE_RADIUS, 3.8f, 8.0f, 0.45f, topY, snowSpan);
+                PRECIPITATION_MID_RADIUS, 3.8f, 5.5f, 0.38f, topY, snowSpan);
         renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_NEAR,
-                PRECIPITATION_TILE_RADIUS, 4.8f, 12.0f, 0.68f, topY, snowSpan);
+                PRECIPITATION_DENSE_RADIUS, 4.8f, 10.0f, 0.66f, topY, snowSpan);
     }
 
     private int renderSnowPass(float camX, float camY, float camZ, int startIndex, int count,
@@ -95,8 +98,8 @@ public class WeatherSystem {
                                float topOffset, float verticalSpan) {
         final float top = topOffset;
         final float effectiveRadius = radius * (0.9f + precipitationStrength * 0.1f);
-        final float snappedCenterX = (float) Math.floor(camX / 3f) * 3f;
-        final float snappedCenterZ = (float) Math.floor(camZ / 3f) * 3f;
+        final float snappedCenterX = (float) Math.floor(camX / 8f) * 8f;
+        final float snappedCenterZ = (float) Math.floor(camZ / 8f) * 8f;
         glPointSize(pointSize);
         glColor4f(1f, 1f, 1f, alpha * precipitationStrength);
         glBegin(GL_POINTS);
@@ -116,15 +119,17 @@ public class WeatherSystem {
     }
 
     private void renderRainParticles(float camX, float camY, float camZ) {
-        final float radius = PRECIPITATION_TILE_RADIUS;
-        final float top = camY + 20f;
-        final float dropHeight = 18f;
+        final float radius = PRECIPITATION_MID_RADIUS;
+        final float top = (float) Math.floor(camY * 0.5f) * 2f + 28f;
+        final float dropHeight = 24f;
+        final float snappedCenterX = (float) Math.floor(camX / 8f) * 8f;
+        final float snappedCenterZ = (float) Math.floor(camZ / 8f) * 8f;
         glColor4f(0.72f, 0.82f, 0.95f, 0.7f * precipitationStrength);
         glBegin(GL_LINES);
         for (int i = 0; i < RAIN_PARTICLES; i++) {
             ParticleTemplate p = RAIN_PARTICLE_TEMPLATES[i];
-            float x = camX + p.xNorm * radius;
-            float z = camZ + p.zNorm * radius;
+            float x = snappedCenterX + p.xNorm * radius;
+            float z = snappedCenterZ + p.zNorm * radius;
             float fallSpeed = 16f + p.speed * 8f;
             float y = top - ((precipitationTime * fallSpeed + p.phase * dropHeight) % dropHeight);
             glVertex3f(x, y, z);
