@@ -67,6 +67,7 @@ public class Chunk {
     private final boolean[][] featureMask = new boolean[SIZE][SIZE];
     private final boolean[][] lakeMask = new boolean[SIZE][SIZE];
     private boolean featuresGenerated = false;
+    private int heavyFeatureCount = 0;
     private final List<TerrainBatch> terrainBatches = new ArrayList<>();
     private int terrainVboId = -1;
     private final int[] primaryLayerTextures = new int[3];
@@ -91,17 +92,27 @@ public class Chunk {
     private static final int BLEND_STEPS = 8;
     private static final float BLEND_EDGE_START = 0.4f;
     private static final float BLEND_EDGE_END = 0.6f;
+    private static final int HEAVY_FEATURE_OVERLOAD_THRESHOLD = 48;
+    private static final int HEAVY_FEATURES_PER_IMPOSTOR_STEP = 16;
+    private static final int MAX_IMPOSTOR_DISTANCE_REDUCTION = 4;
 
 
     private static final float SNOW_HEIGHT_START = 55f;
     private static final float SNOW_HEIGHT_FULL = 60f;
+    private static final float SNOW_MAX_ACCUMULATION_DEPTH = 0.30f;
+    private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
+    private static final float SNOW_LOW_ALTITUDE_START = WATER_SURROUNDING_LEVEL;
+    private static final float SNOW_HIGH_ALTITUDE_FULL_REDUCTION = 62f;
+    private static final float SNOW_MIN_ALTITUDE_FACTOR = 0.2f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
     public static final float FEATURE_SLOPE_SPAWN_THRESHOLD = DIRT_SLOPE_START;
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
 
-    private static final Map<String, ImpostorEntry> IMPOSTOR_TEXTURES = new HashMap<>();
+    private static final int MAX_IMPOSTOR_CACHE_ENTRIES = 512;
+    private static final LinkedHashMap<String, ImpostorEntry> IMPOSTOR_TEXTURES =
+            new LinkedHashMap<>(256, 0.75f, true);
 
     public static class ChunkBuildData {
         public final int cx;
@@ -426,35 +437,64 @@ public class Chunk {
         stitchEdges();
         buildTerrainBuffers();
         buildWaterDisplayList();
+        recalculateHeavyFeatureCount();
         buildFeatureBatches();
 
     }
 
-    public void drawWater() {
+    public void drawWater(boolean frozen, float snowCoverage, float iceThickness) {
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);
-
-        glDepthMask(false); // Disable depth writing for transparency
         glDepthFunc(GL_LEQUAL);
 
-        glEnable(GL_FOG); // <<< ADD THIS
-        glColor4f(0.2f, 0.5f, 0.8f, 0.55f); // base water color
+        glEnable(GL_FOG);
+        if (frozen) {
+            glDisable(GL_BLEND);
+            glDepthMask(true);
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(-1.0f, -2.0f);
+            float iceLift = Math.max(0f, iceThickness);
+            int iceTexture = manager.getIceTexture();
+            glPushMatrix();
+            glTranslatef(0f, iceLift, 0f);
+            if (iceTexture != 0) {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, iceTexture);
+            }
+            float[] lightColor = manager.getLightColor();
+            float lightLuma = (lightColor[0] + lightColor[1] + lightColor[2]) / 3f;
+            float iceBrightness = Math.max(0.16f, Math.min(1f, lightLuma * 1.1f));
+            glColor4f(iceBrightness, iceBrightness, iceBrightness, 1.0f);
+            if (waterDisplayList != -1) {
+                glCallList(waterDisplayList);
+            }
+            glPopMatrix();
+            glDisable(GL_POLYGON_OFFSET_FILL);
+        } else {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glDepthMask(false);
+            float[] lightColor = manager.getLightColor();
+            float lightLuma = (lightColor[0] + lightColor[1] + lightColor[2]) / 3f;
+            float waterShade = Math.max(0.18f, Math.min(1f, 0.35f + lightLuma * 0.65f));
+            glColor4f(0.20f * waterShade, 0.50f * waterShade, 0.80f * waterShade, 0.55f);
 
-        if (waterDisplayList != -1) {
-            glCallList(waterDisplayList);
+            if (waterDisplayList != -1) {
+                glCallList(waterDisplayList);
+            }
+
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            float sparkleAlpha = 0.02f + 0.08f * lightLuma;
+            glColor4f(0.75f * waterShade, 0.85f * waterShade, 0.95f * waterShade, sparkleAlpha);
+            if (waterDisplayList != -1) {
+                glCallList(waterDisplayList);
+            }
+
+            glDepthMask(true);
         }
 
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-        glColor4f(0.75f, 0.85f, 0.95f, 0.12f); // subtle reflection tint
-        if (waterDisplayList != -1) {
-            glCallList(waterDisplayList);
-        }
-
-        glDepthMask(true); // Re-enable depth writing
-
-        glDisable(GL_FOG); // <<< Disable again after drawing water
+        glDisable(GL_FOG);
         glDepthFunc(GL_LESS);
         glPopAttrib();
     }
@@ -502,6 +542,7 @@ public class Chunk {
             features.add(f);
         }
         featuresGenerated = true;
+        recalculateHeavyFeatureCount();
         buildFeatureBatches();
     }
 
@@ -531,11 +572,15 @@ public class Chunk {
     }
 
     public void drawTerrainAndFeatures(int chunkDistance, int featureImpostorDistance,
-                                       int grassDetailDistance, int featureRenderDist) {
+                                       int grassDetailDistance, int featureRenderDist,
+                                       float snowCoverage) {
         glEnable(GL_TEXTURE_2D);
         glColor3f(1f, 1f, 1f);
 
         renderTerrainBuffers();
+        if (snowCoverage > 0.01f) {
+            renderSnowLayer(snowCoverage);
+        }
         if (chunkDistance <= grassDetailDistance && chunkDistance <= featureRenderDist) {
             renderGrassBatch();
         }
@@ -566,6 +611,189 @@ public class Chunk {
     }
 
 
+
+
+    private void renderSnowLayer(float snowCoverage) {
+        float clampedCoverage = Math.max(0f, Math.min(1f, snowCoverage));
+        if (clampedCoverage <= 0f) {
+            return;
+        }
+
+        int snowTexture = manager.getSnowTexture();
+        if (snowTexture == 0) {
+            return;
+        }
+
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, snowTexture);
+        glDisable(GL_LIGHTING);
+        glDisable(GL_BLEND);
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(-1f, -1f);
+        glColor3f(1f, 1f, 1f);
+
+        boolean frozenWater = manager.isWaterFrozen();
+        float iceThickness = frozenWater ? manager.getIceThickness() : 0f;
+
+        int step = Math.max(1, (int) Math.pow(2, lod));
+        float texScale = 0.14f;
+        glBegin(GL_TRIANGLES);
+        for (int z = 0; z < SIZE; z += step) {
+            int z2 = Math.min(z + step, SIZE);
+            for (int x = 0; x < SIZE; x += step) {
+                int x2 = Math.min(x + step, SIZE);
+
+                float d00 = getSnowDepthForVertex(x, z, clampedCoverage);
+                float d10 = getSnowDepthForVertex(x2, z, clampedCoverage);
+                float d01 = getSnowDepthForVertex(x, z2, clampedCoverage);
+                float d11 = getSnowDepthForVertex(x2, z2, clampedCoverage);
+
+                if (d00 <= 0.0001f && d10 <= 0.0001f && d01 <= 0.0001f && d11 <= 0.0001f) {
+                    continue;
+                }
+
+                float wx = (cx * SIZE + x) * scale;
+                float wx2 = (cx * SIZE + x2) * scale;
+                float wz = (cz * SIZE + z) * scale;
+                float wz2 = (cz * SIZE + z2) * scale;
+
+                float b00 = getSnowBaseHeightAtVertex(x, z, frozenWater, iceThickness);
+                float b10 = getSnowBaseHeightAtVertex(x2, z, frozenWater, iceThickness);
+                float b01 = getSnowBaseHeightAtVertex(x, z2, frozenWater, iceThickness);
+                float b11 = getSnowBaseHeightAtVertex(x2, z2, frozenWater, iceThickness);
+
+                float y00 = b00 + d00;
+                float y10 = b10 + d10;
+                float y01 = b01 + d01;
+                float y11 = b11 + d11;
+
+                glTexCoord2f(wx * texScale, wz * texScale);
+                glVertex3f(wx, y00, wz);
+                glTexCoord2f(wx2 * texScale, wz * texScale);
+                glVertex3f(wx2, y10, wz);
+                glTexCoord2f(wx * texScale, wz2 * texScale);
+                glVertex3f(wx, y01, wz2);
+
+                glTexCoord2f(wx2 * texScale, wz * texScale);
+                glVertex3f(wx2, y10, wz);
+                glTexCoord2f(wx2 * texScale, wz2 * texScale);
+                glVertex3f(wx2, y11, wz2);
+                glTexCoord2f(wx * texScale, wz2 * texScale);
+                glVertex3f(wx, y01, wz2);
+            }
+        }
+        glEnd();
+
+        glDisable(GL_POLYGON_OFFSET_FILL);
+        glEnable(GL_LIGHTING);
+    }
+
+    private float getSnowBaseHeightAtVertex(int x, int z, boolean frozenWater, float iceThickness) {
+        float base = heights[x][z];
+        if (!frozenWater) {
+            return base;
+        }
+
+        float river = riverSurface[x][z];
+        boolean hasRiverWater = river > Float.NEGATIVE_INFINITY / 2;
+        boolean hasStandingWater = base < WATER_LEVEL;
+        if (!hasRiverWater && !hasStandingWater) {
+            return base;
+        }
+
+        float liquidSurface = hasRiverWater ? river : WATER_LEVEL;
+        float frozenSurface = liquidSurface + Math.max(0f, iceThickness);
+        return Math.max(base, frozenSurface);
+    }
+
+    private float getSnowDepthForVertex(int x, int z, float snowCoverage) {
+        float clampedCoverage = Math.max(0f, Math.min(1f, snowCoverage));
+        if (clampedCoverage <= 0f) {
+            return 0f;
+        }
+
+        if (manager.isWaterFrozen()) {
+            float river = riverSurface[x][z];
+            boolean hasRiverWater = river > Float.NEGATIVE_INFINITY / 2;
+            boolean hasStandingWater = heights[x][z] < WATER_LEVEL;
+            if (hasRiverWater || hasStandingWater) {
+                clampedCoverage = Math.min(clampedCoverage, manager.getWaterSnowCoverage());
+            }
+        }
+
+        float slope = computeSnowSlopeAtVertex(x, z);
+        float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
+        slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
+
+        float wx = (cx * SIZE + x) * scale;
+        float wz = (cz * SIZE + z) * scale;
+        float driftNoise = (float) manager.getTerrainNoise().eval(wx * 0.03 + 1337.0, wz * 0.03 - 911.0);
+        float driftFactor = 0.88f + (driftNoise * 0.12f);
+
+        float altitude = heights[x][z];
+        float altitudeT = (altitude - SNOW_LOW_ALTITUDE_START)
+                / Math.max(0.0001f, SNOW_HIGH_ALTITUDE_FULL_REDUCTION - SNOW_LOW_ALTITUDE_START);
+        altitudeT = Math.max(0f, Math.min(1f, altitudeT));
+        float altitudeFactor = 1f - altitudeT * (1f - SNOW_MIN_ALTITUDE_FACTOR);
+
+        float baseDepth = SNOW_MAX_ACCUMULATION_DEPTH * clampedCoverage
+                * slopeFactor * altitudeFactor * driftFactor;
+        float dentDepth = manager.getSnowDentDepth(wx, wz, clampedCoverage);
+        return Math.max(0f, baseDepth - dentDepth);
+    }
+
+    private float computeSnowSlopeAtVertex(int x, int z) {
+        float hL = sampleHeightForSlope(x - 1, z);
+        float hR = sampleHeightForSlope(x + 1, z);
+        float hD = sampleHeightForSlope(x, z - 1);
+        float hU = sampleHeightForSlope(x, z + 1);
+
+        float dx = (hR - hL) * 0.5f;
+        float dz = (hU - hD) * 0.5f;
+        return (float) Math.sqrt(dx * dx + dz * dz);
+    }
+
+    private float sampleHeightForSlope(int x, int z) {
+        if (x >= 0 && x <= SIZE && z >= 0 && z <= SIZE) {
+            return heights[x][z];
+        }
+
+        int neighborCx = cx;
+        int neighborCz = cz;
+        int neighborX = x;
+        int neighborZ = z;
+
+        if (x < 0) {
+            neighborCx = cx - 1;
+            neighborX = SIZE + x;
+        } else if (x > SIZE) {
+            neighborCx = cx + 1;
+            neighborX = x - SIZE;
+        }
+
+        if (z < 0) {
+            neighborCz = cz - 1;
+            neighborZ = SIZE + z;
+        } else if (z > SIZE) {
+            neighborCz = cz + 1;
+            neighborZ = z - SIZE;
+        }
+
+        if (neighborX < 0 || neighborX > SIZE || neighborZ < 0 || neighborZ > SIZE) {
+            neighborX = Math.max(0, Math.min(SIZE, neighborX));
+            neighborZ = Math.max(0, Math.min(SIZE, neighborZ));
+            return heights[neighborX][neighborZ];
+        }
+
+        Chunk neighbor = manager.getChunk(neighborCx, neighborCz);
+        if (neighbor != null) {
+            return neighbor.heights[neighborX][neighborZ];
+        }
+
+        int clampedX = Math.max(0, Math.min(SIZE, x));
+        int clampedZ = Math.max(0, Math.min(SIZE, z));
+        return heights[clampedX][clampedZ];
+    }
 
     private void buildWaterDisplayList() {
         waterDisplayList = glGenLists(1);
@@ -619,6 +847,7 @@ public class Chunk {
 
     private void buildWaterGeometry() {
         int step = (int) Math.pow(2, lod);
+        float texScale = 0.12f;
 
         for (int z = 0; z < SIZE; z += step) {
             int z2 = Math.min(z + step, SIZE);
@@ -656,9 +885,13 @@ public class Chunk {
 
                     glBegin(GL_QUADS);
                     glNormal3f(0f, 1f, 0f);
+                    glTexCoord2f(wx1 * texScale, wz1 * texScale);
                     glVertex3f(wx1, wy1, wz1);
+                    glTexCoord2f(wx2 * texScale, wz1 * texScale);
                     glVertex3f(wx2, wy2, wz1);
+                    glTexCoord2f(wx2 * texScale, wz2 * texScale);
                     glVertex3f(wx2, wy3, wz2);
+                    glTexCoord2f(wx1 * texScale, wz2 * texScale);
                     glVertex3f(wx1, wy4, wz2);
                     glEnd();
                 }
@@ -914,11 +1147,24 @@ public class Chunk {
                     return FeatureLod.CULLED;
                 }
             }
+        } else {
+            impostorStart = getAdaptiveImpostorStart(impostorStart);
         }
         if (chunkDistance >= impostorStart) {
             return FeatureLod.IMPOSTOR;
         }
         return FeatureLod.FULL;
+    }
+
+    private int getAdaptiveImpostorStart(int impostorStart) {
+        int adjusted = Math.max(0, impostorStart);
+        if (heavyFeatureCount <= HEAVY_FEATURE_OVERLOAD_THRESHOLD) {
+            return adjusted;
+        }
+        int overload = heavyFeatureCount - HEAVY_FEATURE_OVERLOAD_THRESHOLD;
+        int reduction = 1 + overload / HEAVY_FEATURES_PER_IMPOSTOR_STEP;
+        reduction = Math.min(MAX_IMPOSTOR_DISTANCE_REDUCTION, reduction);
+        return Math.max(0, adjusted - reduction);
     }
 
     private boolean shouldDrawFeatureForLod(Feature feature, FeatureLod lod) {
@@ -1123,12 +1369,40 @@ public class Chunk {
         float finalCanopyBucket = canopyBucket;
         float finalLakeRadiusBucket = lakeRadiusBucket;
         float finalWidthBucket = widthBucket;
-        return IMPOSTOR_TEXTURES.computeIfAbsent(key, ignored -> {
+        synchronized (IMPOSTOR_TEXTURES) {
+            ImpostorEntry cached = IMPOSTOR_TEXTURES.get(key);
+            if (cached != null) {
+                return cached;
+            }
+
             ImpostorSize size = getImpostorSize(feature, finalHeightBucket, finalCanopyBucket, finalLakeRadiusBucket,
                     finalWidthBucket);
             int[] textureIds = renderImpostorTextures(feature, size, angleCount, textureSize);
-            return new ImpostorEntry(textureIds, size);
-        });
+            ImpostorEntry created = new ImpostorEntry(textureIds, size);
+            IMPOSTOR_TEXTURES.put(key, created);
+
+            while (IMPOSTOR_TEXTURES.size() > MAX_IMPOSTOR_CACHE_ENTRIES) {
+                Iterator<Map.Entry<String, ImpostorEntry>> iterator = IMPOSTOR_TEXTURES.entrySet().iterator();
+                if (!iterator.hasNext()) {
+                    break;
+                }
+                Map.Entry<String, ImpostorEntry> eldest = iterator.next();
+                disposeImpostorEntry(eldest.getValue());
+                iterator.remove();
+            }
+            return created;
+        }
+    }
+
+    private static void disposeImpostorEntry(ImpostorEntry entry) {
+        if (entry == null || entry.textureIds == null) {
+            return;
+        }
+        for (int textureId : entry.textureIds) {
+            if (textureId > 0) {
+                glDeleteTextures(textureId);
+            }
+        }
     }
 
     private int[] renderImpostorTextures(Feature feature, ImpostorSize size, int angleCount, int textureSize) {
@@ -1554,6 +1828,7 @@ public class Chunk {
             // Remove only non-lake features
             features.removeIf(f -> !(f instanceof Lake));
             featuresGenerated = false;
+            recalculateHeavyFeatureCount();
             disposeGrassBatch();
             disposeFlowerBatch();
 
@@ -1742,14 +2017,31 @@ public class Chunk {
             return 0f;
 
         float fx = lx - ix, fz = lz - iz;
-        float h00 = heights[ix][iz];
-        float h10 = heights[ix + 1][iz];
-        float h01 = heights[ix][iz + 1];
-        float h11 = heights[ix + 1][iz + 1];
+        boolean frozenWater = manager.isWaterFrozen();
+        float iceThickness = frozenWater ? manager.getIceThickness() : 0f;
+        float h00 = getSnowBaseHeightAtVertex(ix, iz, frozenWater, iceThickness);
+        float h10 = getSnowBaseHeightAtVertex(ix + 1, iz, frozenWater, iceThickness);
+        float h01 = getSnowBaseHeightAtVertex(ix, iz + 1, frozenWater, iceThickness);
+        float h11 = getSnowBaseHeightAtVertex(ix + 1, iz + 1, frozenWater, iceThickness);
 
         float a = h00 + (h10 - h00) * fx;
         float b = h01 + (h11 - h01) * fx;
-        return a + (b - a) * fz;
+        float baseHeight = a + (b - a) * fz;
+
+        float snowCoverage = manager.getSnowCoverage();
+        if (snowCoverage <= 0.001f) {
+            return baseHeight;
+        }
+
+        float d00 = getSnowDepthForVertex(ix, iz, snowCoverage);
+        float d10 = getSnowDepthForVertex(ix + 1, iz, snowCoverage);
+        float d01 = getSnowDepthForVertex(ix, iz + 1, snowCoverage);
+        float d11 = getSnowDepthForVertex(ix + 1, iz + 1, snowCoverage);
+        float dA = d00 + (d10 - d00) * fx;
+        float dB = d01 + (d11 - d01) * fx;
+        float snowDepth = dA + (dB - dA) * fz;
+
+        return baseHeight + snowDepth;
     }
 
     public BoundingBox getBoundingBox() {
@@ -1803,6 +2095,7 @@ public class Chunk {
         stitchEdges();
         buildTerrainBuffers();
         buildWaterDisplayList();
+        recalculateHeavyFeatureCount();
         buildFeatureBatches();
         renderResourcesBuilt = true;
     }
@@ -1827,7 +2120,19 @@ public class Chunk {
         if (data.lakes != null) {
             features.addAll(data.lakes);
         }
+        recalculateHeavyFeatureCount();
         featuresGenerated = false;
+    }
+
+
+    private void recalculateHeavyFeatureCount() {
+        int count = 0;
+        for (Feature feature : features) {
+            if (!(feature instanceof Grass) && !(feature instanceof ColorBatchableFeature)) {
+                count++;
+            }
+        }
+        heavyFeatureCount = count;
     }
 
     private static float[][] copyHeights(float[][] source) {
