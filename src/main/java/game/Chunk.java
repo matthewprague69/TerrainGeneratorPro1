@@ -97,7 +97,7 @@ public class Chunk {
     private static final int MAX_IMPOSTOR_DISTANCE_REDUCTION = 4;
 
 
-    private static final float SNOW_MAX_ACCUMULATION_DEPTH = 0.30f;
+    private static final float SNOW_MAX_ACCUMULATION_DEPTH = 1.00f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
     private static final float SNOW_ALTITUDE_START = 55f;
     private static final float SNOW_ALTITUDE_FULL = 85f;
@@ -575,7 +575,7 @@ public class Chunk {
         glColor3f(1f, 1f, 1f);
 
         renderTerrainBuffers();
-        if (snowCoverage > 0.01f) {
+        if (snowCoverage > 0.01f || hasAlpineSnowSurface()) {
             renderSnowLayer(snowCoverage);
         }
         if (chunkDistance <= grassDetailDistance && chunkDistance <= featureRenderDist) {
@@ -685,6 +685,17 @@ public class Chunk {
         glEnable(GL_LIGHTING);
     }
 
+    private boolean hasAlpineSnowSurface() {
+        for (int z = 0; z <= SIZE; z++) {
+            for (int x = 0; x <= SIZE; x++) {
+                if (heights[x][z] >= SNOW_ALTITUDE_START) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private float getSnowBaseHeightAtVertex(int x, int z, boolean frozenWater, float iceThickness) {
         float base = heights[x][z];
         if (!frozenWater) {
@@ -719,7 +730,7 @@ public class Chunk {
                 weatherCoverage = Math.min(weatherCoverage, manager.getWaterSnowCoverage());
             }
         }
-        float alpineBaseCoverage = altitudeFactor * 0.65f;
+        float alpineBaseCoverage = altitude >= SNOW_ALTITUDE_START ? Math.max(0.15f, altitudeFactor) : 0f;
         float effectiveCoverage = Math.max(alpineBaseCoverage, weatherCoverage);
         if (effectiveCoverage <= 0f) {
             return 0f;
@@ -737,6 +748,10 @@ public class Chunk {
         float altitudeDepthFactor = 0.35f + 0.65f * altitudeFactor;
         float baseDepth = SNOW_MAX_ACCUMULATION_DEPTH * effectiveCoverage
                 * slopeFactor * altitudeDepthFactor * driftFactor;
+        if (altitude >= SNOW_ALTITUDE_START) {
+            float minAlpineDepth = 0.15f + 0.85f * altitudeFactor;
+            baseDepth = Math.max(baseDepth, minAlpineDepth);
+        }
         float dentDepth = manager.getSnowDentDepth(wx, wz, effectiveCoverage);
         return Math.max(0f, baseDepth - dentDepth);
     }
