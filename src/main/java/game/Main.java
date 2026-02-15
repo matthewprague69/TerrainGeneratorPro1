@@ -145,12 +145,13 @@ public class Main {
         float dirLen = (float) Math.sqrt(lookDir[0] * lookDir[0] + lookDir[2] * lookDir[2]);
         float dirX = dirLen > 0.0001f ? lookDir[0] / dirLen : 1f;
         float dirZ = dirLen > 0.0001f ? lookDir[2] / dirLen : 0f;
+        float digSlope = dirLen > 0.0001f ? lookDir[1] / dirLen : 0f;
 
         float halfWidth = rectangular ? 0.75f : 1.8f;
-        float halfLength = rectangular ? 3.6f : 1.8f;
+        float halfLength = rectangular ? 4.2f : 1.8f;
         float depth = rectangular ? 0.70f : 0.52f;
         float floorY = targetY - depth;
-        return terrain.digTerrain(targetX, targetZ, halfWidth, halfLength, depth, rectangular, dirX, dirZ, floorY);
+        return terrain.digTerrain(targetX, targetZ, halfWidth, halfLength, depth, rectangular, dirX, dirZ, digSlope, floorY);
     }
 
     private void setupProjection() {

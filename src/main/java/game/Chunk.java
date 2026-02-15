@@ -2089,7 +2089,7 @@ public class Chunk {
     }
 
     public float digArea(float centerWx, float centerWz, float halfWidth, float halfLength, float depth,
-                         boolean rectangular, float dirX, float dirZ, float floorHeight) {
+                         boolean rectangular, float dirX, float dirZ, float digSlope, float floorHeight) {
         float appliedDepth = Math.max(0f, depth);
         float appliedHalfWidth = Math.max(0.25f, halfWidth);
         float appliedHalfLength = Math.max(appliedHalfWidth, halfLength);
@@ -2115,22 +2115,27 @@ public class Chunk {
                 float dz = wz - centerWz;
 
                 float shapeFactor;
+                float localFloor = floorHeight;
                 if (rectangular) {
                     float forward = dx * nx + dz * nz;
                     float side = dx * tx + dz * tz;
-                    float ax = Math.abs(forward) / appliedHalfLength;
+                    if (forward < 0f || forward > appliedHalfLength) {
+                        continue;
+                    }
+                    float ax = forward / appliedHalfLength;
                     float az = Math.abs(side) / appliedHalfWidth;
                     float edge = Math.max(ax, az);
                     if (edge > 1f) {
                         continue;
                     }
-                    float hardCore = 0.94f;
+                    float hardCore = 0.90f;
                     if (edge <= hardCore) {
                         shapeFactor = 1f;
                     } else {
                         float t = (edge - hardCore) / Math.max(0.0001f, 1f - hardCore);
                         shapeFactor = 1f - (float) smoothstep(0f, 1f, t);
                     }
+                    localFloor = floorHeight + forward * digSlope;
                 } else {
                     float distSq = dx * dx + dz * dz;
                     if (distSq > radiusSq) {
@@ -2152,7 +2157,7 @@ public class Chunk {
                 }
 
                 float current = heights[x][z];
-                float blendedTarget = current + (floorHeight - current) * shapeFactor;
+                float blendedTarget = current + (localFloor - current) * shapeFactor;
                 float lowered = Math.min(current - appliedDepth * shapeFactor, blendedTarget);
                 if (lowered >= current - 0.0001f) {
                     continue;
