@@ -103,6 +103,10 @@ public class Chunk {
     private static final float SNOW_MAX_ACCUMULATION_DEPTH = 3.5f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
     private static final float SNOW_ALTITUDE_ACCUMULATION_BOOST = 0.85f;
+    private static final float SNOW_STEEP_SLOPE_FADE_START = 1.15f;
+    private static final float SNOW_STEEP_SLOPE_NO_ACCUMULATION = 1.65f;
+    private static final float SNOW_SUN_WARMING_C = 7.5f;
+    private static final float SNOW_SHADE_COOLING_C = 7.5f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
@@ -717,32 +721,44 @@ public class Chunk {
         float dz = (hU - hD) * 0.5f;
 
         float slope = (float) Math.sqrt(dx * dx + dz * dz);
-        float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
-        slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
+        if (slope >= SNOW_STEEP_SLOPE_NO_ACCUMULATION) {
+            return 0f;
+        }
 
-        if (manager.getTemperatureC() > 0f && manager.getWeatherType() != WeatherType.SNOWY) {
-            float[] sunDir = manager.getLightDirection();
-            float sunLen = (float) Math.sqrt(sunDir[0] * sunDir[0] + sunDir[1] * sunDir[1] + sunDir[2] * sunDir[2]);
-            float sx = sunLen > 0.0001f ? sunDir[0] / sunLen : 0f;
-            float sy = sunLen > 0.0001f ? sunDir[1] / sunLen : 1f;
-            float sz = sunLen > 0.0001f ? sunDir[2] / sunLen : 0f;
+        float baseSlopeFactor = 1f - Math.min(1f, slope / 1.2f);
+        baseSlopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, baseSlopeFactor);
+        float steepFade = 1f - (float) smoothstep(SNOW_STEEP_SLOPE_FADE_START, SNOW_STEEP_SLOPE_NO_ACCUMULATION, slope);
+        float slopeFactor = Math.max(0f, baseSlopeFactor * steepFade);
+        if (slopeFactor <= 0.0001f) {
+            return 0f;
+        }
 
-            float normalLen = (float) Math.sqrt(dx * dx + 1f + dz * dz);
-            float nx = -dx / normalLen;
-            float ny = 1f / normalLen;
-            float nz = -dz / normalLen;
+        float[] sunDir = manager.getLightDirection();
+        float sunLen = (float) Math.sqrt(sunDir[0] * sunDir[0] + sunDir[1] * sunDir[1] + sunDir[2] * sunDir[2]);
+        float sx = sunLen > 0.0001f ? sunDir[0] / sunLen : 0f;
+        float sy = sunLen > 0.0001f ? sunDir[1] / sunLen : 1f;
+        float sz = sunLen > 0.0001f ? sunDir[2] / sunLen : 0f;
 
-            float directSun = Math.max(0f, nx * sx + ny * sy + nz * sz);
-            float daylight = Math.max(0f, sy);
-            float sunExposure = directSun * daylight;
+        float normalLen = (float) Math.sqrt(dx * dx + 1f + dz * dz);
+        float nx = -dx / normalLen;
+        float ny = 1f / normalLen;
+        float nz = -dz / normalLen;
 
-            float warmT = Math.max(0f, Math.min(1f, manager.getTemperatureC() / 10f));
-            float meltMultiplier = 1f + sunExposure; // sunlit spots melt up to ~2x shaded spots.
-            float meltAmount = warmT * 0.45f * meltMultiplier;
-            float retention = Math.max(0.25f, 1f - meltAmount);
+        float directSun = Math.max(0f, nx * sx + ny * sy + nz * sz);
+        float daylight = Math.max(0f, sy);
+        float sunExposure = directSun * daylight;
 
-            weatherCoverage *= retention;
-            altitudeCoverage *= retention;
+        if (manager.getWeatherType() != WeatherType.SNOWY) {
+            float shade = 1f - sunExposure;
+            float localTempC = manager.getTemperatureC()
+                    + sunExposure * SNOW_SUN_WARMING_C
+                    - shade * SNOW_SHADE_COOLING_C;
+            if (localTempC > 0f) {
+                float meltStrength = Math.max(0f, Math.min(1f, localTempC / 5.5f));
+                float retention = Math.max(0.02f, 1f - meltStrength * 0.95f);
+                weatherCoverage *= retention;
+                altitudeCoverage *= retention;
+            }
         }
 
         float clampedCoverage = Math.max(weatherCoverage, altitudeCoverage);
