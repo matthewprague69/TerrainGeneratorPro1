@@ -82,6 +82,11 @@ public class Chunk {
     private int flowerBatchVbo = -1;
     private int flowerBatchVertexCount = 0;
     private boolean renderResourcesBuilt = false;
+    private boolean hasDigEdits = false;
+    private int digMinX = SIZE;
+    private int digMaxX = 0;
+    private int digMinZ = SIZE;
+    private int digMaxZ = 0;
     public static final float WATER_LEVEL = 4.0f;
     public static final float WATER_SURROUNDING_LEVEL = 5.5f;
     public static final float ABSOLUTE_WATER_BOTTOM_HEIGHT = 1.0f;
@@ -888,6 +893,12 @@ public class Chunk {
             for (int x = 0; x < SIZE; x += step) {
                 int x2 = Math.min(x + step, SIZE);
 
+                boolean refineDig = shouldRefineDigCell(x, z, x2, z2);
+                if (refineDig) {
+                    addRefinedDigCell(builders, x, z, x2, z2, texScale);
+                    continue;
+                }
+
                 float y00 = heights[x][z];
                 float y10 = heights[x2][z];
                 float y01 = heights[x][z2];
@@ -917,6 +928,60 @@ public class Chunk {
             return;
         }
         terrainVboId = uploadBufferMapped(merged.toBuffer(), GL_STATIC_DRAW);
+    }
+
+    private boolean shouldRefineDigCell(int x1, int z1, int x2, int z2) {
+        if (!hasDigEdits) {
+            return false;
+        }
+        int pad = 1;
+        int minX = Math.min(x1, x2);
+        int maxX = Math.max(x1, x2);
+        int minZ = Math.min(z1, z2);
+        int maxZ = Math.max(z1, z2);
+        return maxX >= digMinX - pad && minX <= digMaxX + pad
+                && maxZ >= digMinZ - pad && minZ <= digMaxZ + pad;
+    }
+
+    private void addRefinedDigCell(Map<BatchKey, FloatBuilder> builders, int x1, int z1, int x2, int z2,
+                                   float texScale) {
+        final int subDiv = 3;
+        float dx = (x2 - x1) / (float) subDiv;
+        float dz = (z2 - z1) / (float) subDiv;
+        for (int sz = 0; sz < subDiv; sz++) {
+            for (int sx = 0; sx < subDiv; sx++) {
+                float fx0 = x1 + sx * dx;
+                float fz0 = z1 + sz * dz;
+                float fx1 = x1 + (sx + 1) * dx;
+                float fz1 = z1 + (sz + 1) * dz;
+
+                float y00 = sampleHeightInterpolated(fx0, fz0);
+                float y10 = sampleHeightInterpolated(fx1, fz0);
+                float y01 = sampleHeightInterpolated(fx0, fz1);
+                float y11 = sampleHeightInterpolated(fx1, fz1);
+
+                addTriangleFloat(builders, fx0, fz0, fx1, fz0, fx0, fz1, y00, y10, y01, texScale);
+                addTriangleFloat(builders, fx1, fz0, fx1, fz1, fx0, fz1, y10, y11, y01, texScale);
+            }
+        }
+    }
+
+    private float sampleHeightInterpolated(float fx, float fz) {
+        int x0 = Math.max(0, Math.min(SIZE - 1, (int) Math.floor(fx)));
+        int z0 = Math.max(0, Math.min(SIZE - 1, (int) Math.floor(fz)));
+        int x1 = Math.min(SIZE, x0 + 1);
+        int z1 = Math.min(SIZE, z0 + 1);
+        float tx = Math.max(0f, Math.min(1f, fx - x0));
+        float tz = Math.max(0f, Math.min(1f, fz - z0));
+
+        float h00 = heights[x0][z0];
+        float h10 = heights[x1][z0];
+        float h01 = heights[x0][z1];
+        float h11 = heights[x1][z1];
+
+        float a = h00 + (h10 - h00) * tx;
+        float b = h01 + (h11 - h01) * tx;
+        return a + (b - a) * tz;
     }
 
     private void buildWaterGeometry() {
@@ -1697,6 +1762,44 @@ public class Chunk {
         }
     }
 
+    private void addTriangleFloat(Map<BatchKey, FloatBuilder> builders,
+                                  float x1, float z1, float x2, float z2, float x3, float z3,
+                                  float y1, float y2, float y3, float texScale) {
+        float centroidX = (x1 + x2 + x3) / 3f;
+        float centroidZ = (z1 + z2 + z3) / 3f;
+        float wx = (cx * SIZE + centroidX) * scale;
+        float wz = (cz * SIZE + centroidZ) * scale;
+
+        float hL = sampleHeightInterpolated(centroidX - 0.5f, centroidZ);
+        float hR = sampleHeightInterpolated(centroidX + 0.5f, centroidZ);
+        float hD = sampleHeightInterpolated(centroidX, centroidZ - 0.5f);
+        float hU = sampleHeightInterpolated(centroidX, centroidZ + 0.5f);
+        float dx = (hR - hL) * 0.5f;
+        float dz = (hU - hD) * 0.5f;
+        float slope = (float) Math.sqrt(dx * dx + dz * dz);
+        float height = Math.max(y1, Math.max(y2, y3));
+
+        BiomeBlend blend = getBiomeBlend(wx, wz, manager);
+        int primaryCount = buildTerrainLayers(blend.primary, height, slope, manager,
+                primaryLayerTextures, primaryLayerAlphas);
+        for (int i = 0; i < primaryCount; i++) {
+            addTriangleToBuilderFloat(builders, primaryLayerTextures[i], primaryLayerAlphas[i],
+                    x1, z1, x2, z2, x3, z3, y1, y2, y3, texScale);
+        }
+        if (blend.blend > 0.0f && blend.secondary != null) {
+            int secondaryCount = buildTerrainLayers(blend.secondary, height, slope, manager,
+                    secondaryLayerTextures, secondaryLayerAlphas);
+            for (int i = 0; i < secondaryCount; i++) {
+                float alpha = secondaryLayerAlphas[i] * blend.blend;
+                if (alpha <= 0f) {
+                    continue;
+                }
+                addTriangleToBuilderFloat(builders, secondaryLayerTextures[i], alpha,
+                        x1, z1, x2, z2, x3, z3, y1, y2, y3, texScale);
+            }
+        }
+    }
+
     private int buildTerrainLayers(Biome targetBiome, float height, float slope, TerrainManager manager,
                                    int[] textures, float[] alphas) {
         if (height <= ABSOLUTE_WATER_BOTTOM_HEIGHT) {
@@ -1802,6 +1905,27 @@ public class Chunk {
         float wx3 = (cx * SIZE + x3) * scale;
         float wz3 = (cz * SIZE + z3) * scale;
 
+        builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
+        builder.putVertex(wx2, y2, wz2, normal, x2 * texScale, z2 * texScale);
+        builder.putVertex(wx3, y3, wz3, normal, x3 * texScale, z3 * texScale);
+    }
+
+    private void addTriangleToBuilderFloat(Map<BatchKey, FloatBuilder> builders, int tex, float alpha,
+                                           float x1, float z1, float x2, float z2, float x3, float z3,
+                                           float y1, float y2, float y3, float texScale) {
+        FloatBuilder builder = getBuilder(builders, tex, alpha);
+        if (builder == null) {
+            return;
+        }
+
+        float wx1 = (cx * SIZE + x1) * scale;
+        float wz1 = (cz * SIZE + z1) * scale;
+        float wx2 = (cx * SIZE + x2) * scale;
+        float wz2 = (cz * SIZE + z2) * scale;
+        float wx3 = (cx * SIZE + x3) * scale;
+        float wz3 = (cz * SIZE + z3) * scale;
+
+        float[] normal = computeNormalFromWorldPoints(wx1, y1, wz1, wx2, y2, wz2, wx3, y3, wz3);
         builder.putVertex(wx1, y1, wz1, normal, x1 * texScale, z1 * texScale);
         builder.putVertex(wx2, y2, wz2, normal, x2 * texScale, z2 * texScale);
         builder.putVertex(wx3, y3, wz3, normal, x3 * texScale, z3 * texScale);
@@ -2165,6 +2289,11 @@ public class Chunk {
                 heights[x][z] = lowered;
                 removedHeightSum += (current - lowered);
                 changed = true;
+                hasDigEdits = true;
+                digMinX = Math.min(digMinX, x);
+                digMaxX = Math.max(digMaxX, x);
+                digMinZ = Math.min(digMinZ, z);
+                digMaxZ = Math.max(digMaxZ, z);
             }
         }
 
@@ -2520,6 +2649,26 @@ public class Chunk {
         float ny = u[2] * v[0] - u[0] * v[2];
         float nz = u[0] * v[1] - u[1] * v[0];
 
+        float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (len == 0f) {
+            return new float[] { 0f, 1f, 0f };
+        }
+        return new float[] { nx / len, ny / len, nz / len };
+    }
+
+    private float[] computeNormalFromWorldPoints(float x1, float y1, float z1,
+                                                 float x2, float y2, float z2,
+                                                 float x3, float y3, float z3) {
+        float ux = x2 - x1;
+        float uy = y2 - y1;
+        float uz = z2 - z1;
+        float vx = x3 - x1;
+        float vy = y3 - y1;
+        float vz = z3 - z1;
+
+        float nx = uy * vz - uz * vy;
+        float ny = uz * vx - ux * vz;
+        float nz = ux * vy - uy * vx;
         float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
         if (len == 0f) {
             return new float[] { 0f, 1f, 0f };

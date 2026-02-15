@@ -1047,34 +1047,24 @@ public class TerrainManager {
             return 0f;
         }
 
-        int slices = rectangular ? 8 : 4;
-        float sliceSpacing = rectangular ? (l * 0.24f) : (w * 0.35f);
+        int minCx = (int) Math.floor((wx - reach) / (Chunk.SIZE * scale));
+        int maxCx = (int) Math.floor((wx + reach) / (Chunk.SIZE * scale));
+        int minCz = (int) Math.floor((wz - reach) / (Chunk.SIZE * scale));
+        int maxCz = (int) Math.floor((wz + reach) / (Chunk.SIZE * scale));
 
         float totalMass = 0f;
         List<Chunk> changed = new ArrayList<>();
-        for (int s = 0; s < slices; s++) {
-            float offset = s * sliceSpacing;
-            float sliceX = wx + dirX * offset;
-            float sliceZ = wz + dirZ * offset;
-            float sliceFloorY = floorY + offset * digSlope;
-
-            int minCx = (int) Math.floor((sliceX - reach) / (Chunk.SIZE * scale));
-            int maxCx = (int) Math.floor((sliceX + reach) / (Chunk.SIZE * scale));
-            int minCz = (int) Math.floor((sliceZ - reach) / (Chunk.SIZE * scale));
-            int maxCz = (int) Math.floor((sliceZ + reach) / (Chunk.SIZE * scale));
-
-            for (int cz = minCz; cz <= maxCz; cz++) {
-                for (int cx = minCx; cx <= maxCx; cx++) {
-                    Chunk chunk = chunks.get(key(cx, cz));
-                    if (chunk == null) {
-                        continue;
-                    }
-                    float mass = chunk.digArea(sliceX / scale, sliceZ / scale, w / scale, l / scale, d,
-                            rectangular, dirX, dirZ, digSlope, sliceFloorY / scale);
-                    if (mass > 0f) {
-                        totalMass += mass;
-                        changed.add(chunk);
-                    }
+        for (int cz = minCz; cz <= maxCz; cz++) {
+            for (int cx = minCx; cx <= maxCx; cx++) {
+                Chunk chunk = chunks.get(key(cx, cz));
+                if (chunk == null) {
+                    continue;
+                }
+                float mass = chunk.digArea(wx / scale, wz / scale, w / scale, l / scale, d,
+                        rectangular, dirX, dirZ, digSlope, floorY / scale);
+                if (mass > 0f) {
+                    totalMass += mass;
+                    changed.add(chunk);
                 }
             }
         }
