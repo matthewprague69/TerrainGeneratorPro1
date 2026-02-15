@@ -64,6 +64,7 @@ public class Chunk {
     private final float[][] heights = new float[SIZE + 1][SIZE + 1];
     private final float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
     private float cachedMaxAltitudeSnowCoverage = -1f;
+    private TerrainVolume terrainVolume;
     private final List<Feature> features = new ArrayList<>();
     private final boolean[][] featureMask = new boolean[SIZE][SIZE];
     private final boolean[][] lakeMask = new boolean[SIZE][SIZE];
@@ -108,6 +109,9 @@ public class Chunk {
     private static final float SNOW_SUN_WARMING_C = 3.0f;
     private static final float SNOW_SHADE_COOLING_C = 3.0f;
     private static final float SNOW_MIN_RENDERABLE_DEPTH = 0.035f;
+    private static final int VOLUME_HORIZONTAL_RES = 40;
+    private static final int VOLUME_VERTICAL_RES = 96;
+    private static final float VOLUME_VERTICAL_MARGIN = 20f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
@@ -438,6 +442,7 @@ public class Chunk {
         LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, features, manager);
         if (generateFeatures)
             generateFeatures();
+        rebuildTerrainVolumeFromHeights();
         stitchEdges();
         buildTerrainBuffers();
         buildWaterDisplayList();
@@ -2173,6 +2178,10 @@ public class Chunk {
         }
 
         cachedMaxAltitudeSnowCoverage = -1f;
+        if (terrainVolume != null) {
+            terrainVolume.carveDirectionalTunnel(centerWx, floorHeight, centerWz,
+                    appliedHalfWidth, appliedHalfLength, nx, nz, digSlope, rectangular);
+        }
         buildTerrainBuffers();
         buildWaterDisplayList();
         renderResourcesBuilt = true;
@@ -2180,6 +2189,39 @@ public class Chunk {
         // Approximate dug mass from displaced height over terrain grid area.
         float displacedVolume = removedHeightSum * scale * scale * 0.45f;
         return Math.max(0f, displacedVolume);
+    }
+
+    private void rebuildTerrainVolumeFromHeights() {
+        float minY = Float.MAX_VALUE;
+        float maxY = -Float.MAX_VALUE;
+        for (int z = 0; z <= SIZE; z++) {
+            for (int x = 0; x <= SIZE; x++) {
+                float h = heights[x][z];
+                minY = Math.min(minY, h);
+                maxY = Math.max(maxY, h);
+            }
+        }
+
+        float minX = cx * SIZE;
+        float maxX = (cx + 1) * SIZE;
+        float minZ = cz * SIZE;
+        float maxZ = (cz + 1) * SIZE;
+
+        terrainVolume = new TerrainVolume(
+                VOLUME_HORIZONTAL_RES,
+                VOLUME_VERTICAL_RES,
+                VOLUME_HORIZONTAL_RES,
+                minX,
+                maxX,
+                minY - VOLUME_VERTICAL_MARGIN,
+                maxY + VOLUME_VERTICAL_MARGIN,
+                minZ,
+                maxZ);
+        terrainVolume.fillFromHeightField(heights, cx, cz, SIZE);
+    }
+
+    public TerrainVolume getTerrainVolume() {
+        return terrainVolume;
     }
 
     public BoundingBox getBoundingBox() {
@@ -2213,6 +2255,7 @@ public class Chunk {
 
     public void refreshAfterNeighborUpdate() {
         stitchEdges();
+        rebuildTerrainVolumeFromHeights();
         buildTerrainBuffers();
         buildWaterDisplayList();
         renderResourcesBuilt = true;
@@ -2258,6 +2301,7 @@ public class Chunk {
         if (data.lakes != null) {
             features.addAll(data.lakes);
         }
+        rebuildTerrainVolumeFromHeights();
         recalculateHeavyFeatureCount();
         featuresGenerated = false;
     }
