@@ -63,6 +63,7 @@ public class Chunk {
 
     private final float[][] heights = new float[SIZE + 1][SIZE + 1];
     private final float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
+    private float cachedMaxAltitudeSnowCoverage = -1f;
     private final List<Feature> features = new ArrayList<>();
     private final boolean[][] featureMask = new boolean[SIZE][SIZE];
     private final boolean[][] lakeMask = new boolean[SIZE][SIZE];
@@ -707,6 +708,43 @@ public class Chunk {
     private float getSnowDepthForVertex(int x, int z, float snowCoverage) {
         float weatherCoverage = Math.max(0f, Math.min(1f, snowCoverage));
         float altitudeCoverage = getAltitudeSnowCoverage(heights[x][z]);
+
+        float hL = sampleHeightForSlope(x - 1, z);
+        float hR = sampleHeightForSlope(x + 1, z);
+        float hD = sampleHeightForSlope(x, z - 1);
+        float hU = sampleHeightForSlope(x, z + 1);
+        float dx = (hR - hL) * 0.5f;
+        float dz = (hU - hD) * 0.5f;
+
+        float slope = (float) Math.sqrt(dx * dx + dz * dz);
+        float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
+        slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
+
+        if (manager.getTemperatureC() > 0f && manager.getWeatherType() != WeatherType.SNOWY) {
+            float[] sunDir = manager.getLightDirection();
+            float sunLen = (float) Math.sqrt(sunDir[0] * sunDir[0] + sunDir[1] * sunDir[1] + sunDir[2] * sunDir[2]);
+            float sx = sunLen > 0.0001f ? sunDir[0] / sunLen : 0f;
+            float sy = sunLen > 0.0001f ? sunDir[1] / sunLen : 1f;
+            float sz = sunLen > 0.0001f ? sunDir[2] / sunLen : 0f;
+
+            float normalLen = (float) Math.sqrt(dx * dx + 1f + dz * dz);
+            float nx = -dx / normalLen;
+            float ny = 1f / normalLen;
+            float nz = -dz / normalLen;
+
+            float directSun = Math.max(0f, nx * sx + ny * sy + nz * sz);
+            float daylight = Math.max(0f, sy);
+            float sunExposure = directSun * daylight;
+
+            float warmT = Math.max(0f, Math.min(1f, manager.getTemperatureC() / 10f));
+            float meltMultiplier = 1f + sunExposure; // sunlit spots melt up to ~2x shaded spots.
+            float meltAmount = warmT * 0.45f * meltMultiplier;
+            float retention = Math.max(0.25f, 1f - meltAmount);
+
+            weatherCoverage *= retention;
+            altitudeCoverage *= retention;
+        }
+
         float clampedCoverage = Math.max(weatherCoverage, altitudeCoverage);
         if (clampedCoverage <= 0.0001f) {
             return 0f;
@@ -720,10 +758,6 @@ public class Chunk {
                 clampedCoverage = Math.min(clampedCoverage, manager.getWaterSnowCoverage());
             }
         }
-
-        float slope = computeSnowSlopeAtVertex(x, z);
-        float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
-        slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
 
         float wx = (cx * SIZE + x) * scale;
         float wz = (cz * SIZE + z) * scale;
@@ -747,6 +781,10 @@ public class Chunk {
     }
 
     private float getChunkMaxAltitudeSnowCoverage() {
+        if (cachedMaxAltitudeSnowCoverage >= 0f) {
+            return cachedMaxAltitudeSnowCoverage;
+        }
+
         float maxCoverage = 0f;
         for (int z = 0; z <= SIZE; z++) {
             for (int x = 0; x <= SIZE; x++) {
@@ -754,23 +792,14 @@ public class Chunk {
                 if (coverage > maxCoverage) {
                     maxCoverage = coverage;
                     if (maxCoverage >= 0.999f) {
+                        cachedMaxAltitudeSnowCoverage = 1f;
                         return 1f;
                     }
                 }
             }
         }
+        cachedMaxAltitudeSnowCoverage = maxCoverage;
         return maxCoverage;
-    }
-
-    private float computeSnowSlopeAtVertex(int x, int z) {
-        float hL = sampleHeightForSlope(x - 1, z);
-        float hR = sampleHeightForSlope(x + 1, z);
-        float hD = sampleHeightForSlope(x, z - 1);
-        float hU = sampleHeightForSlope(x, z + 1);
-
-        float dx = (hR - hL) * 0.5f;
-        float dz = (hU - hD) * 0.5f;
-        return (float) Math.sqrt(dx * dx + dz * dz);
     }
 
     private float sampleHeightForSlope(int x, int z) {
