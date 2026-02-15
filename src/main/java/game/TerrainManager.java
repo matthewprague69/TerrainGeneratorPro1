@@ -125,6 +125,7 @@ public class TerrainManager {
     private static final float SNOW_DENT_MAX_ACCUMULATED_DEPTH = 0.30f;
     private static final float SNOW_DENT_LIFETIME_SECONDS = 45f;
     private static final int MAX_SNOW_DENTS = 1024;
+    private static final float ALPINE_SNOW_START = 55f;
 
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
@@ -1521,11 +1522,11 @@ public class TerrainManager {
             }
         }
 
-        if (weatherSystem.getWeatherType() != WeatherType.SNOWY || snowCoverage <= 0.03f) {
+        float terrainY = getHeight(wx, wz);
+        boolean alpineSnow = terrainY >= ALPINE_SNOW_START;
+        if ((!alpineSnow && weatherSystem.getWeatherType() != WeatherType.SNOWY) || (!alpineSnow && snowCoverage <= 0.03f)) {
             return;
         }
-
-        float terrainY = getHeight(wx, wz);
         if (Math.abs(wy - terrainY) > 0.22f) {
             // Player is not intersecting ground/snow surface right now.
             return;
