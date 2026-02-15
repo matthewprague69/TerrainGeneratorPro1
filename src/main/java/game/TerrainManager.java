@@ -1037,6 +1037,52 @@ public class TerrainManager {
         }
     }
 
+    public float digTerrain(float wx, float wz, float radius, float depth, boolean rectangular) {
+        float r = Math.max(0.25f, radius);
+        float d = Math.max(0f, depth);
+        if (d <= 0.0001f) {
+            return 0f;
+        }
+
+        int minCx = (int) Math.floor((wx - r) / (Chunk.SIZE * scale));
+        int maxCx = (int) Math.floor((wx + r) / (Chunk.SIZE * scale));
+        int minCz = (int) Math.floor((wz - r) / (Chunk.SIZE * scale));
+        int maxCz = (int) Math.floor((wz + r) / (Chunk.SIZE * scale));
+
+        float totalMass = 0f;
+        List<Chunk> changed = new ArrayList<>();
+        for (int cz = minCz; cz <= maxCz; cz++) {
+            for (int cx = minCx; cx <= maxCx; cx++) {
+                Chunk chunk = chunks.get(key(cx, cz));
+                if (chunk == null) {
+                    continue;
+                }
+                float mass = chunk.digArea(wx / scale, wz / scale, r / scale, d, rectangular);
+                if (mass > 0f) {
+                    totalMass += mass;
+                    changed.add(chunk);
+                }
+            }
+        }
+
+        if (changed.isEmpty()) {
+            return 0f;
+        }
+
+        for (Chunk chunk : changed) {
+            for (int nz = -1; nz <= 1; nz++) {
+                for (int nx = -1; nx <= 1; nx++) {
+                    Chunk neighbor = getChunk(chunk.cx + nx, chunk.cz + nz);
+                    if (neighbor != null) {
+                        neighbor.refreshAfterNeighborUpdate();
+                    }
+                }
+            }
+        }
+
+        return totalMass;
+    }
+
     public float getHeight(float wx, float wz) {
         int cx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int cz = (int) Math.floor(wz / (Chunk.SIZE * scale));

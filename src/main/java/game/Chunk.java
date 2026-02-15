@@ -2088,6 +2088,73 @@ public class Chunk {
         return baseHeight + snowDepth;
     }
 
+    public float digArea(float centerWx, float centerWz, float radius, float depth, boolean rectangular) {
+        float appliedDepth = Math.max(0f, depth);
+        float appliedRadius = Math.max(0.25f, radius);
+        if (appliedDepth <= 0.0001f) {
+            return 0f;
+        }
+
+        float radiusSq = appliedRadius * appliedRadius;
+        boolean changed = false;
+        float removedHeightSum = 0f;
+
+        for (int z = 0; z <= SIZE; z++) {
+            for (int x = 0; x <= SIZE; x++) {
+                float wx = (cx * SIZE + x) * scale;
+                float wz = (cz * SIZE + z) * scale;
+                float dx = wx - centerWx;
+                float dz = wz - centerWz;
+
+                float shapeFactor;
+                if (rectangular) {
+                    float ax = Math.abs(dx) / appliedRadius;
+                    float az = Math.abs(dz) / appliedRadius;
+                    float edge = Math.max(ax, az);
+                    if (edge > 1f) {
+                        continue;
+                    }
+                    shapeFactor = 1f - edge;
+                } else {
+                    float distSq = dx * dx + dz * dz;
+                    if (distSq > radiusSq) {
+                        continue;
+                    }
+                    float dist = (float) Math.sqrt(Math.max(0f, distSq));
+                    shapeFactor = 1f - (dist / appliedRadius);
+                }
+
+                shapeFactor = Math.max(0f, Math.min(1f, shapeFactor));
+                shapeFactor = (float) smoothstep(0f, 1f, shapeFactor);
+                if (shapeFactor <= 0.0001f) {
+                    continue;
+                }
+
+                float current = heights[x][z];
+                float lowered = current - appliedDepth * shapeFactor;
+                if (lowered >= current - 0.0001f) {
+                    continue;
+                }
+                heights[x][z] = lowered;
+                removedHeightSum += (current - lowered);
+                changed = true;
+            }
+        }
+
+        if (!changed) {
+            return 0f;
+        }
+
+        cachedMaxAltitudeSnowCoverage = -1f;
+        buildTerrainBuffers();
+        buildWaterDisplayList();
+        renderResourcesBuilt = true;
+
+        // Approximate dug mass from displaced height over terrain grid area.
+        float displacedVolume = removedHeightSum * scale * scale * 0.45f;
+        return Math.max(0f, displacedVolume);
+    }
+
     public BoundingBox getBoundingBox() {
         float minX = cx * SIZE * scale;
         float minZ = cz * SIZE * scale;

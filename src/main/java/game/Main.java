@@ -50,7 +50,10 @@ public class Main {
     private boolean vsyncEnabled = false;
     private boolean menuOpen = false;
     private boolean debugMenuOpen = false;
+    private boolean inventoryOpen = false;
     private boolean prevMouseDown = false;
+    private float dugMassInventory = 0f;
+    private double lastDigTime = 0.0;
     private String debugExportStatus = "";
     private static final DateTimeFormatter DEBUG_EXPORT_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
@@ -91,10 +94,10 @@ public class Main {
         player = new Player(half, half, terrain);
 
 
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        updateCursorMode();
         glfwSetCursorPos(window, 400, 300);
         glfwSetCursorPosCallback(window, (win, xpos, ypos) -> {
-            if (!menuOpen) {
+            if (!menuOpen && !inventoryOpen) {
                 player.onMouseMove(xpos, ypos);
             }
         });
@@ -103,6 +106,43 @@ public class Main {
         glfwShowWindow(window);
 
         shadowRenderer = new ShadowRenderer(2048);
+    }
+
+    private void updateCursorMode() {
+        glfwSetInputMode(window, GLFW_CURSOR,
+                (menuOpen || inventoryOpen) ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+    }
+
+    private float performDigAction(boolean rectangular) {
+        float[] lookDir = player.getLookDirection();
+        float originX = player.getX();
+        float originY = player.getY();
+        float originZ = player.getZ();
+
+        float maxDistance = 18f;
+        float step = 0.35f;
+        float targetX = Float.NaN;
+        float targetZ = Float.NaN;
+
+        for (float t = 1.0f; t <= maxDistance; t += step) {
+            float sx = originX + lookDir[0] * t;
+            float sy = originY + lookDir[1] * t;
+            float sz = originZ + lookDir[2] * t;
+            float surfaceY = terrain.getHeight(sx, sz);
+            if (sy <= surfaceY + 0.08f) {
+                targetX = sx;
+                targetZ = sz;
+                break;
+            }
+        }
+
+        if (Float.isNaN(targetX)) {
+            return 0f;
+        }
+
+        float radius = rectangular ? 1.8f : 2.0f;
+        float depth = rectangular ? 0.55f : 0.45f;
+        return terrain.digTerrain(targetX, targetZ, radius, depth, rectangular);
     }
 
     private void setupProjection() {
@@ -312,6 +352,28 @@ public class Main {
         if (!debugExportStatus.isEmpty()) {
             PixelTextRenderer.drawText(debugExportStatus, panelX + 12f, panelY + 10f, 0.9f);
         }
+        UIRenderer.end2D();
+    }
+
+    private void drawInventoryOverlay(int width, int height) {
+        UIRenderer.begin2D(width, height);
+        float panelWidth = 420f;
+        float panelHeight = 220f;
+        float panelX = (width - panelWidth) * 0.5f;
+        float panelY = (height - panelHeight) * 0.5f;
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(0f, 0f, 0f, 0.72f);
+        drawRect(panelX, panelY, panelWidth, panelHeight);
+        glDisable(GL_BLEND);
+
+        glColor3f(1f, 1f, 1f);
+        PixelTextRenderer.drawText("INVENTORY (I to close)", panelX + 18f, panelY + panelHeight - 30f, 1.2f);
+        PixelTextRenderer.drawText(String.format(Locale.US, "Dug soil mass: %.2f", dugMassInventory),
+                panelX + 18f, panelY + panelHeight - 70f, 1.1f);
+        PixelTextRenderer.drawText("Left mouse = dig circle", panelX + 18f, panelY + panelHeight - 104f, 1.0f);
+        PixelTextRenderer.drawText("Shift + Left mouse = dig rectangle", panelX + 18f, panelY + panelHeight - 126f, 1.0f);
         UIRenderer.end2D();
     }
 
@@ -600,6 +662,7 @@ public class Main {
         boolean prev6 = false;
         boolean prevK = false;
         boolean prevO = false;
+        boolean prevI = false;
 
         while (!glfwWindowShouldClose(window)) {
             double now = glfwGetTime();
@@ -629,13 +692,27 @@ public class Main {
             if (menuOpen && mouseDown && !prevMouseDown) {
                 handleMenuClick(mouseX, mouseY, fbWidth, fbHeight);
             }
+            if (!menuOpen && !inventoryOpen && mouseDown) {
+                boolean shiftHeldForDig = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
+                        || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+                double digNow = glfwGetTime();
+                if (digNow - lastDigTime >= 0.10) {
+                    float dugMass = performDigAction(shiftHeldForDig);
+                    if (dugMass > 0f) {
+                        dugMassInventory += dugMass;
+                    }
+                    lastDigTime = digNow;
+                }
+            }
             prevMouseDown = mouseDown;
 
             boolean currEsc = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
             if (currEsc && !prevEsc) {
                 menuOpen = !menuOpen;
-                glfwSetInputMode(window, GLFW_CURSOR,
-                        menuOpen ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+                if (menuOpen) {
+                    inventoryOpen = false;
+                }
+                updateCursorMode();
             }
             prevEsc = currEsc;
 
@@ -656,6 +733,12 @@ public class Main {
                 exportDebugReport();
             }
             prevO = currO;
+            boolean currI = glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS;
+            if (currI && !prevI && !menuOpen) {
+                inventoryOpen = !inventoryOpen;
+                updateCursorMode();
+            }
+            prevI = currI;
             // --- Key toggles ---
             boolean currT = glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS;
             boolean currZ = glfwGetKey(window, GLFW_KEY_Y) == GLFW_PRESS;
@@ -713,7 +796,7 @@ public class Main {
             prevT = currT;
             prevZ = currZ;
 
-            if (!menuOpen) {
+            if (!menuOpen && !inventoryOpen) {
                 player.update(window, dt);
             }
 
@@ -770,6 +853,8 @@ public class Main {
             sky.renderSunAndMoon(player.getX(), player.getY(), player.getZ());
             if (menuOpen) {
                 drawMenuOverlay(fbWidth, fbHeight, mouseX, mouseY);
+            } else if (inventoryOpen) {
+                drawInventoryOverlay(fbWidth, fbHeight);
             } else {
                 drawInfoOverlay(fbWidth, fbHeight);
             }
