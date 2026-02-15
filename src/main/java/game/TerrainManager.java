@@ -1557,7 +1557,8 @@ public class TerrainManager {
             minSurface += weatherSystem.getIceThickness();
         }
         surfaceY = Math.max(surfaceY, minSurface);
-        weatherSystem.renderPrecipitation(camX, camY, camZ, surfaceY);
+        float altitudeSnowStrength = Chunk.getAltitudeSnowCoverage(surfaceY);
+        weatherSystem.renderPrecipitation(camX, camY, camZ, surfaceY, altitudeSnowStrength);
     }
 
     public int getSnowTexture() {

@@ -101,9 +101,7 @@ public class Chunk {
     private static final float SNOW_HEIGHT_FULL = 60f;
     private static final float SNOW_MAX_ACCUMULATION_DEPTH = 3.5f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
-    private static final float SNOW_LOW_ALTITUDE_START = WATER_SURROUNDING_LEVEL;
-    private static final float SNOW_HIGH_ALTITUDE_FULL_REDUCTION = 62f;
-    private static final float SNOW_MIN_ALTITUDE_FACTOR = 0.2f;
+    private static final float SNOW_ALTITUDE_ACCUMULATION_BOOST = 0.85f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
@@ -574,9 +572,7 @@ public class Chunk {
         glColor3f(1f, 1f, 1f);
 
         renderTerrainBuffers();
-        if (snowCoverage > 0.01f) {
-            renderSnowLayer(snowCoverage);
-        }
+        renderSnowLayer(snowCoverage);
         if (chunkDistance <= grassDetailDistance && chunkDistance <= featureRenderDist) {
             renderGrassBatch();
         }
@@ -611,9 +607,6 @@ public class Chunk {
 
     private void renderSnowLayer(float snowCoverage) {
         float clampedCoverage = Math.max(0f, Math.min(1f, snowCoverage));
-        if (clampedCoverage <= 0f) {
-            return;
-        }
 
         int snowTexture = manager.getSnowTexture();
         if (snowTexture == 0) {
@@ -703,8 +696,10 @@ public class Chunk {
     }
 
     private float getSnowDepthForVertex(int x, int z, float snowCoverage) {
-        float clampedCoverage = Math.max(0f, Math.min(1f, snowCoverage));
-        if (clampedCoverage <= 0f) {
+        float weatherCoverage = Math.max(0f, Math.min(1f, snowCoverage));
+        float altitudeCoverage = getAltitudeSnowCoverage(heights[x][z]);
+        float clampedCoverage = Math.max(weatherCoverage, altitudeCoverage);
+        if (clampedCoverage <= 0.0001f) {
             return 0f;
         }
 
@@ -726,16 +721,20 @@ public class Chunk {
         float driftNoise = (float) manager.getTerrainNoise().eval(wx * 0.03 + 1337.0, wz * 0.03 - 911.0);
         float driftFactor = 0.88f + (driftNoise * 0.12f);
 
-        float altitude = heights[x][z];
-        float altitudeT = (altitude - SNOW_LOW_ALTITUDE_START)
-                / Math.max(0.0001f, SNOW_HIGH_ALTITUDE_FULL_REDUCTION - SNOW_LOW_ALTITUDE_START);
-        altitudeT = Math.max(0f, Math.min(1f, altitudeT));
-        float altitudeFactor = 1f - altitudeT * (1f - SNOW_MIN_ALTITUDE_FACTOR);
+        float altitudeFactor = 1f + altitudeCoverage * SNOW_ALTITUDE_ACCUMULATION_BOOST;
 
         float baseDepth = SNOW_MAX_ACCUMULATION_DEPTH * clampedCoverage
                 * slopeFactor * altitudeFactor * driftFactor;
         float dentDepth = manager.getSnowDentDepth(wx, wz, clampedCoverage);
         return Math.max(0f, baseDepth - dentDepth);
+    }
+
+    public static float getAltitudeSnowCoverage(float height) {
+        if (height < SNOW_HEIGHT_START) {
+            return 0f;
+        }
+        float snowCoverage = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
+        return Math.max(0f, Math.min(1f, snowCoverage));
     }
 
     private float computeSnowSlopeAtVertex(int x, int z) {
@@ -1664,19 +1663,6 @@ public class Chunk {
             blendAlpha = 0f;
         }
 
-        float snowBlend = 0f;
-        if (height >= SNOW_HEIGHT_START) {
-            snowBlend = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
-            snowBlend = Math.max(0f, Math.min(1f, snowBlend));
-        }
-
-        if (snowBlend >= 0.999f) {
-            textures[0] = manager.getSnowTexture();
-            alphas[0] = 1f;
-            return 1;
-        }
-
-        float exposedGround = 1f - snowBlend;
         int count = 0;
 
         // Keep a fully opaque base layer so terrain always writes depth and never turns see-through.
@@ -1684,16 +1670,9 @@ public class Chunk {
         alphas[count] = 1f;
         count++;
 
-        float weightedBlendAlpha = blendAlpha * exposedGround;
-        if (blendTex != -1 && blendTex != baseTex && weightedBlendAlpha > 0.001f) {
+        if (blendTex != -1 && blendTex != baseTex && blendAlpha > 0.001f) {
             textures[count] = blendTex;
-            alphas[count] = weightedBlendAlpha;
-            count++;
-        }
-
-        if (snowBlend > 0.001f) {
-            textures[count] = manager.getSnowTexture();
-            alphas[count] = snowBlend;
+            alphas[count] = blendAlpha;
             count++;
         }
 
@@ -1974,13 +1953,6 @@ public class Chunk {
             return manager.getWaterBottomTexture();
         }
 
-        if (height >= SNOW_HEIGHT_START) {
-            float snowBlend = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
-            if (snowBlend >= 0.5f) {
-                return manager.getSnowTexture();
-            }
-        }
-
         if (slope >= ROCK_SLOPE_START) {
             return manager.getTexture(targetBiome.rockTex);
         }
@@ -2025,9 +1997,6 @@ public class Chunk {
         float baseHeight = a + (b - a) * fz;
 
         float snowCoverage = manager.getSnowCoverage();
-        if (snowCoverage <= 0.001f) {
-            return baseHeight;
-        }
 
         float d00 = getSnowDepthForVertex(ix, iz, snowCoverage);
         float d10 = getSnowDepthForVertex(ix + 1, iz, snowCoverage);
