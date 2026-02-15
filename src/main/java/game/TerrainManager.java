@@ -1508,21 +1508,24 @@ public class TerrainManager {
             return;
         }
 
-        float snowCoverage = weatherSystem.getSnowCoverage();
+        float terrainY = getHeight(wx, wz);
+        float weatherCoverage = weatherSystem.getSnowCoverage();
+        float altitudeCoverage = Chunk.getAltitudeSnowCoverage(terrainY);
+        float effectiveCoverage = Math.max(weatherCoverage, altitudeCoverage);
+
         Iterator<SnowDent> iterator = snowDents.iterator();
         while (iterator.hasNext()) {
             SnowDent dent = iterator.next();
             dent.ageSeconds += dt;
-            if (dent.ageSeconds >= SNOW_DENT_LIFETIME_SECONDS || snowCoverage <= 0.001f) {
+            if (dent.ageSeconds >= SNOW_DENT_LIFETIME_SECONDS || effectiveCoverage <= 0.001f) {
                 iterator.remove();
             }
         }
 
-        if (weatherSystem.getWeatherType() != WeatherType.SNOWY || snowCoverage <= 0.03f) {
+        if (effectiveCoverage <= 0.03f) {
             return;
         }
 
-        float terrainY = getHeight(wx, wz);
         if (Math.abs(wy - terrainY) > 0.22f) {
             // Player is not intersecting ground/snow surface right now.
             return;

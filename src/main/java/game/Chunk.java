@@ -615,7 +615,7 @@ public class Chunk {
 
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, snowTexture);
-        glDisable(GL_LIGHTING);
+        glEnable(GL_LIGHTING);
         glDisable(GL_BLEND);
         glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(-1f, -1f);
@@ -656,6 +656,7 @@ public class Chunk {
                 float y01 = b01 + d01;
                 float y11 = b11 + d11;
 
+                applyTriangleNormal(wx, y00, wz, wx2, y10, wz, wx, y01, wz2);
                 glTexCoord2f(wx * texScale, wz * texScale);
                 glVertex3f(wx, y00, wz);
                 glTexCoord2f(wx2 * texScale, wz * texScale);
@@ -663,6 +664,7 @@ public class Chunk {
                 glTexCoord2f(wx * texScale, wz2 * texScale);
                 glVertex3f(wx, y01, wz2);
 
+                applyTriangleNormal(wx2, y10, wz, wx2, y11, wz2, wx, y01, wz2);
                 glTexCoord2f(wx2 * texScale, wz * texScale);
                 glVertex3f(wx2, y10, wz);
                 glTexCoord2f(wx2 * texScale, wz2 * texScale);
@@ -2352,6 +2354,29 @@ public class Chunk {
             return new float[] { 0f, 1f, 0f };
         }
         return new float[] { nx / len, ny / len, nz / len };
+    }
+
+    private static void applyTriangleNormal(float ax, float ay, float az,
+                                            float bx, float by, float bz,
+                                            float cx, float cy, float cz) {
+        float ux = bx - ax;
+        float uy = by - ay;
+        float uz = bz - az;
+        float vx = cx - ax;
+        float vy = cy - ay;
+        float vz = cz - az;
+
+        float nx = uy * vz - uz * vy;
+        float ny = uz * vx - ux * vz;
+        float nz = ux * vy - uy * vx;
+
+        float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (len <= 0.00001f) {
+            glNormal3f(0f, 1f, 0f);
+            return;
+        }
+        float invLen = 1f / len;
+        glNormal3f(nx * invLen, ny * invLen, nz * invLen);
     }
 
     private static final int STRIDE_FLOATS = 8;
