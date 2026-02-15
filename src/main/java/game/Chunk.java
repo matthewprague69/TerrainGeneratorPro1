@@ -101,6 +101,7 @@ public class Chunk {
     private static final float SNOW_HEIGHT_FULL = 60f;
     private static final float SNOW_MAX_ACCUMULATION_DEPTH = 3.5f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
+    private static final float SNOW_BASELINE_COVERAGE = 0.35f;
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
     public static final float FEATURE_SLOPE_SPAWN_THRESHOLD = DIRT_SLOPE_START;
@@ -697,13 +698,15 @@ public class Chunk {
         }
 
         float altitudeFactor = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, altitude);
+        float weatherCoverage = Math.max(0f, Math.min(1f, manager.getSnowCoverage()));
+        float coverage = Math.max(SNOW_BASELINE_COVERAGE, weatherCoverage) * altitudeFactor;
 
         if (manager.isWaterFrozen()) {
             float river = riverSurface[x][z];
             boolean hasRiverWater = river > Float.NEGATIVE_INFINITY / 2;
             boolean hasStandingWater = heights[x][z] < WATER_LEVEL;
             if (hasRiverWater || hasStandingWater) {
-                altitudeFactor *= Math.max(0f, Math.min(1f, manager.getWaterSnowCoverage()));
+                coverage = Math.min(coverage, Math.max(0f, Math.min(1f, manager.getWaterSnowCoverage())));
             }
         }
 
@@ -716,8 +719,8 @@ public class Chunk {
         float driftNoise = (float) manager.getTerrainNoise().eval(wx * 0.03 + 1337.0, wz * 0.03 - 911.0);
         float driftFactor = 0.88f + (driftNoise * 0.12f);
 
-        float baseDepth = SNOW_MAX_ACCUMULATION_DEPTH * altitudeFactor * slopeFactor * driftFactor;
-        float dentDepth = manager.getSnowDentDepth(wx, wz, altitudeFactor);
+        float baseDepth = SNOW_MAX_ACCUMULATION_DEPTH * coverage * slopeFactor * driftFactor;
+        float dentDepth = manager.getSnowDentDepth(wx, wz, coverage);
         return Math.max(0f, baseDepth - dentDepth);
     }
 
