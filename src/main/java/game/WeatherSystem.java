@@ -56,12 +56,18 @@ public class WeatherSystem {
         if (altitudeSnowing) {
             float altBias = Math.min(20f, Math.max(0f, localAltitudeY - ALTITUDE_SNOW_START) * 0.55f + 8f);
             targetTemp -= altBias;
+            // Above snowline should stay sub-zero even during daytime.
+            targetTemp = Math.min(targetTemp, -2f);
         }
         if (timeOfDay < 0.23f || timeOfDay > 0.78f) {
             targetTemp -= 4f;
         }
         float tempBlend = Math.min(1f, dt * 0.25f);
         temperatureC += (targetTemp - temperatureC) * tempBlend;
+
+        if (altitudeSnowing && temperatureC > -1.0f) {
+            temperatureC = Math.max(-8f, temperatureC - dt * 8f);
+        }
 
         if (weatherType == WeatherType.SNOWY && temperatureC > -0.25f) {
             temperatureC = Math.max(-8f, temperatureC - dt * 12f);
