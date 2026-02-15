@@ -11,6 +11,7 @@ public class WeatherSystem {
     private static final int SNOW_PARTICLES_FAR = 800;
     private static final int RAIN_PARTICLES = 1200;
     private static final int MAX_SNOW_PARTICLES = SNOW_PARTICLES_NEAR + SNOW_PARTICLES_MID + SNOW_PARTICLES_FAR;
+    private static final float SNOW_PARTICLE_MIN_SURFACE_HEIGHT = 55f;
     private static final ParticleTemplate[] SNOW_PARTICLE_TEMPLATES = buildTemplates(MAX_SNOW_PARTICLES, 0x51A9E31D);
     private static final ParticleTemplate[] RAIN_PARTICLE_TEMPLATES = buildTemplates(RAIN_PARTICLES, 0x39C2B47F);
 
@@ -86,6 +87,10 @@ public class WeatherSystem {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         if (weatherType == WeatherType.SNOWY) {
+            if (surfaceY < SNOW_PARTICLE_MIN_SURFACE_HEIGHT) {
+                glDisable(GL_BLEND);
+                return;
+            }
             renderSnowParticles(camX, camY, camZ, surfaceY);
         } else {
             renderRainParticles(camX, camY, camZ);

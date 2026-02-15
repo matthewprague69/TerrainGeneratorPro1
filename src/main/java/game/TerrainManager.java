@@ -1069,7 +1069,7 @@ public class TerrainManager {
                 continue;
             }
             c.drawTerrainAndFeatures(dist, impostorDistance, grassDetailDistance,
-                    featureRenderDist, weatherSystem.getSnowCoverage());
+                    featureRenderDist);
             renderedTerrainChunks++;
             renderedFeatures += c.getFeatures().size();
         }
