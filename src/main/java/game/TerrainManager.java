@@ -1088,7 +1088,7 @@ public class TerrainManager {
                 for (int nx = -1; nx <= 1; nx++) {
                     Chunk neighbor = getChunk(chunk.cx + nx, chunk.cz + nz);
                     if (neighbor != null) {
-                        neighbor.refreshAfterNeighborUpdate();
+                        neighbor.refreshAfterNeighborEdit();
                     }
                 }
             }

@@ -2116,9 +2116,13 @@ public class Chunk {
 
         if (terrainVolume != null) {
             float[][] before = copyHeights(heights);
+            int previousVolumeVertexCount = volumeSurfaceVertexCount;
+
             terrainVolume.carveDirectionalTunnel(centerWx, floorHeight, centerWz,
                     appliedHalfWidth, appliedHalfLength, nx, nz, digSlope, rectangular);
-            applyVolumeSurfaceToPortalHeights(centerWx, centerWz, nx, nz, appliedHalfWidth * 1.15f);
+            applyVolumeSurfaceToPortalHeights(centerWx, centerWz, nx, nz,
+                    Math.max(appliedHalfWidth * 1.15f, appliedHalfLength * 0.75f));
+            buildVolumeSurfaceBuffers();
 
             for (int z = 0; z <= SIZE; z++) {
                 for (int x = 0; x <= SIZE; x++) {
@@ -2129,7 +2133,7 @@ public class Chunk {
                     }
                 }
             }
-            if (volumeSurfaceVertexCount > 0) {
+            if (volumeSurfaceVertexCount != previousVolumeVertexCount) {
                 changed = true;
             }
         } else {
@@ -2301,6 +2305,14 @@ public class Chunk {
     public void refreshAfterNeighborUpdate() {
         stitchEdges();
         rebuildTerrainVolumeFromHeights();
+        buildTerrainBuffers();
+        buildWaterDisplayList();
+        renderResourcesBuilt = true;
+    }
+
+    public void refreshAfterNeighborEdit() {
+        stitchEdges();
+        cachedMaxAltitudeSnowCoverage = -1f;
         buildTerrainBuffers();
         buildWaterDisplayList();
         renderResourcesBuilt = true;
