@@ -103,10 +103,10 @@ public class Chunk {
     private static final float SNOW_MAX_ACCUMULATION_DEPTH = 3.5f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
     private static final float SNOW_ALTITUDE_ACCUMULATION_BOOST = 0.85f;
-    private static final float SNOW_STEEP_SLOPE_FADE_START = 1.15f;
-    private static final float SNOW_STEEP_SLOPE_NO_ACCUMULATION = 1.65f;
-    private static final float SNOW_SUN_WARMING_C = 7.5f;
-    private static final float SNOW_SHADE_COOLING_C = 7.5f;
+    private static final float SNOW_STEEP_SLOPE_FADE_START = 1.55f;
+    private static final float SNOW_STEEP_SLOPE_NO_ACCUMULATION = 2.25f;
+    private static final float SNOW_SUN_WARMING_C = 3.0f;
+    private static final float SNOW_SHADE_COOLING_C = 3.0f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
@@ -725,10 +725,12 @@ public class Chunk {
             return 0f;
         }
 
-        float baseSlopeFactor = 1f - Math.min(1f, slope / 1.2f);
-        baseSlopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, baseSlopeFactor);
-        float steepFade = 1f - (float) smoothstep(SNOW_STEEP_SLOPE_FADE_START, SNOW_STEEP_SLOPE_NO_ACCUMULATION, slope);
-        float slopeFactor = Math.max(0f, baseSlopeFactor * steepFade);
+        float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
+        slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
+
+        float steepFade = 1f - (float) smoothstep(SNOW_STEEP_SLOPE_FADE_START,
+                SNOW_STEEP_SLOPE_NO_ACCUMULATION, slope);
+        slopeFactor *= steepFade;
         if (slopeFactor <= 0.0001f) {
             return 0f;
         }
@@ -754,10 +756,12 @@ public class Chunk {
                     + sunExposure * SNOW_SUN_WARMING_C
                     - shade * SNOW_SHADE_COOLING_C;
             if (localTempC > 0f) {
-                float meltStrength = Math.max(0f, Math.min(1f, localTempC / 5.5f));
-                float retention = Math.max(0.02f, 1f - meltStrength * 0.95f);
-                weatherCoverage *= retention;
-                altitudeCoverage *= retention;
+                float meltStrength = Math.max(0f, Math.min(1f, localTempC / 8.0f));
+                float sunMelt = 0.20f + 0.55f * sunExposure;
+                float weatherRetention = Math.max(0.12f, 1f - meltStrength * sunMelt);
+                float altitudeRetention = Math.max(0.55f, 1f - meltStrength * (0.14f + 0.20f * sunExposure));
+                weatherCoverage *= weatherRetention;
+                altitudeCoverage *= altitudeRetention;
             }
         }
 
