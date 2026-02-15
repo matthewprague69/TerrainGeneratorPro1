@@ -123,6 +123,7 @@ public class TerrainManager {
     private static final float SNOW_DENT_RADIUS = 1.15f;
     private static final float SNOW_DENT_DEPTH = 6.0f;
     private static final float SNOW_DENT_LIFETIME_SECONDS = 45f;
+    private static final float SNOW_DENT_MIN_HEIGHT = 55f;
     private static final int MAX_SNOW_DENTS = 1024;
 
 
@@ -1069,7 +1070,7 @@ public class TerrainManager {
                 continue;
             }
             c.drawTerrainAndFeatures(dist, impostorDistance, grassDetailDistance,
-                    featureRenderDist, weatherSystem.getSnowCoverage());
+                    featureRenderDist);
             renderedTerrainChunks++;
             renderedFeatures += c.getFeatures().size();
         }
@@ -1508,21 +1509,24 @@ public class TerrainManager {
             return;
         }
 
-        float snowCoverage = weatherSystem.getSnowCoverage();
         Iterator<SnowDent> iterator = snowDents.iterator();
         while (iterator.hasNext()) {
             SnowDent dent = iterator.next();
             dent.ageSeconds += dt;
-            if (dent.ageSeconds >= SNOW_DENT_LIFETIME_SECONDS || snowCoverage <= 0.001f) {
+            if (dent.ageSeconds >= SNOW_DENT_LIFETIME_SECONDS) {
                 iterator.remove();
             }
         }
 
+        float snowCoverage = weatherSystem.getSnowCoverage();
         if (weatherSystem.getWeatherType() != WeatherType.SNOWY || snowCoverage <= 0.03f) {
             return;
         }
 
         float terrainY = getHeight(wx, wz);
+        if (terrainY < SNOW_DENT_MIN_HEIGHT && snowCoverage <= 0.15f) {
+            return;
+        }
         if (Math.abs(wy - terrainY) > 0.22f) {
             // Player is not intersecting ground/snow surface right now.
             return;
