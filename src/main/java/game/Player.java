@@ -140,6 +140,16 @@ public class Player {
             pitch = -89f;
     }
 
+    public float[] getLookDirection() {
+        float yawRad = (float) Math.toRadians(yaw);
+        float pitchRad = (float) Math.toRadians(pitch);
+        float cosPitch = (float) Math.cos(pitchRad);
+        float xDir = -(float) Math.sin(yawRad) * cosPitch;
+        float yDir = (float) Math.sin(pitchRad);
+        float zDir = -(float) Math.cos(yawRad) * cosPitch;
+        return new float[] { xDir, yDir, zDir };
+    }
+
     // Getters for player position
     public float getX() {
         return x;
