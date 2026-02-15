@@ -2088,14 +2088,22 @@ public class Chunk {
         return baseHeight + snowDepth;
     }
 
-    public float digArea(float centerWx, float centerWz, float radius, float depth, boolean rectangular) {
+    public float digArea(float centerWx, float centerWz, float halfWidth, float halfLength, float depth,
+                         boolean rectangular, float dirX, float dirZ) {
         float appliedDepth = Math.max(0f, depth);
-        float appliedRadius = Math.max(0.25f, radius);
+        float appliedHalfWidth = Math.max(0.25f, halfWidth);
+        float appliedHalfLength = Math.max(appliedHalfWidth, halfLength);
         if (appliedDepth <= 0.0001f) {
             return 0f;
         }
 
-        float radiusSq = appliedRadius * appliedRadius;
+        float radiusSq = appliedHalfWidth * appliedHalfWidth;
+        float dirLen = (float) Math.sqrt(dirX * dirX + dirZ * dirZ);
+        float nx = dirLen > 0.0001f ? dirX / dirLen : 1f;
+        float nz = dirLen > 0.0001f ? dirZ / dirLen : 0f;
+        float tx = -nz;
+        float tz = nx;
+
         boolean changed = false;
         float removedHeightSum = 0f;
 
@@ -2108,24 +2116,37 @@ public class Chunk {
 
                 float shapeFactor;
                 if (rectangular) {
-                    float ax = Math.abs(dx) / appliedRadius;
-                    float az = Math.abs(dz) / appliedRadius;
+                    float forward = dx * nx + dz * nz;
+                    float side = dx * tx + dz * tz;
+                    float ax = Math.abs(forward) / appliedHalfLength;
+                    float az = Math.abs(side) / appliedHalfWidth;
                     float edge = Math.max(ax, az);
                     if (edge > 1f) {
                         continue;
                     }
-                    shapeFactor = 1f - edge;
+                    float hardCore = 0.82f;
+                    if (edge <= hardCore) {
+                        shapeFactor = 1f;
+                    } else {
+                        float t = (edge - hardCore) / Math.max(0.0001f, 1f - hardCore);
+                        shapeFactor = 1f - (float) smoothstep(0f, 1f, t);
+                    }
                 } else {
                     float distSq = dx * dx + dz * dz;
                     if (distSq > radiusSq) {
                         continue;
                     }
                     float dist = (float) Math.sqrt(Math.max(0f, distSq));
-                    shapeFactor = 1f - (dist / appliedRadius);
+                    float t = dist / appliedHalfWidth;
+                    if (t <= 0.70f) {
+                        shapeFactor = 1f;
+                    } else {
+                        float edge = (t - 0.70f) / 0.30f;
+                        shapeFactor = 1f - (float) smoothstep(0f, 1f, edge);
+                    }
                 }
 
                 shapeFactor = Math.max(0f, Math.min(1f, shapeFactor));
-                shapeFactor = (float) smoothstep(0f, 1f, shapeFactor);
                 if (shapeFactor <= 0.0001f) {
                     continue;
                 }

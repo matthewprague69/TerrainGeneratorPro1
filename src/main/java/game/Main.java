@@ -140,9 +140,14 @@ public class Main {
             return 0f;
         }
 
-        float radius = rectangular ? 1.8f : 2.0f;
-        float depth = rectangular ? 0.55f : 0.45f;
-        return terrain.digTerrain(targetX, targetZ, radius, depth, rectangular);
+        float dirLen = (float) Math.sqrt(lookDir[0] * lookDir[0] + lookDir[2] * lookDir[2]);
+        float dirX = dirLen > 0.0001f ? lookDir[0] / dirLen : 1f;
+        float dirZ = dirLen > 0.0001f ? lookDir[2] / dirLen : 0f;
+
+        float halfWidth = rectangular ? 0.75f : 1.8f;
+        float halfLength = rectangular ? 3.6f : 1.8f;
+        float depth = rectangular ? 0.70f : 0.52f;
+        return terrain.digTerrain(targetX, targetZ, halfWidth, halfLength, depth, rectangular, dirX, dirZ);
     }
 
     private void setupProjection() {

@@ -1037,17 +1037,20 @@ public class TerrainManager {
         }
     }
 
-    public float digTerrain(float wx, float wz, float radius, float depth, boolean rectangular) {
-        float r = Math.max(0.25f, radius);
+    public float digTerrain(float wx, float wz, float halfWidth, float halfLength, float depth,
+                            boolean rectangular, float dirX, float dirZ) {
+        float w = Math.max(0.25f, halfWidth);
+        float l = Math.max(w, halfLength);
+        float reach = rectangular ? l : w;
         float d = Math.max(0f, depth);
         if (d <= 0.0001f) {
             return 0f;
         }
 
-        int minCx = (int) Math.floor((wx - r) / (Chunk.SIZE * scale));
-        int maxCx = (int) Math.floor((wx + r) / (Chunk.SIZE * scale));
-        int minCz = (int) Math.floor((wz - r) / (Chunk.SIZE * scale));
-        int maxCz = (int) Math.floor((wz + r) / (Chunk.SIZE * scale));
+        int minCx = (int) Math.floor((wx - reach) / (Chunk.SIZE * scale));
+        int maxCx = (int) Math.floor((wx + reach) / (Chunk.SIZE * scale));
+        int minCz = (int) Math.floor((wz - reach) / (Chunk.SIZE * scale));
+        int maxCz = (int) Math.floor((wz + reach) / (Chunk.SIZE * scale));
 
         float totalMass = 0f;
         List<Chunk> changed = new ArrayList<>();
@@ -1057,7 +1060,8 @@ public class TerrainManager {
                 if (chunk == null) {
                     continue;
                 }
-                float mass = chunk.digArea(wx / scale, wz / scale, r / scale, d, rectangular);
+                float mass = chunk.digArea(wx / scale, wz / scale, w / scale, l / scale, d,
+                        rectangular, dirX, dirZ);
                 if (mass > 0f) {
                     totalMass += mass;
                     changed.add(chunk);
