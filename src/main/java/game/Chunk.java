@@ -2118,7 +2118,7 @@ public class Chunk {
             float[][] before = copyHeights(heights);
             terrainVolume.carveDirectionalTunnel(centerWx, floorHeight, centerWz,
                     appliedHalfWidth, appliedHalfLength, nx, nz, digSlope, rectangular);
-            applyVolumeSurfaceToHeights();
+            applyVolumeSurfaceToPortalHeights(centerWx, centerWz, nx, nz, appliedHalfWidth * 1.15f);
 
             for (int z = 0; z <= SIZE; z++) {
                 for (int x = 0; x <= SIZE; x++) {
@@ -2128,6 +2128,9 @@ public class Chunk {
                         changed = true;
                     }
                 }
+            }
+            if (volumeSurfaceVertexCount > 0) {
+                changed = true;
             }
         } else {
             float radiusSq = appliedHalfWidth * appliedHalfWidth;
@@ -2208,15 +2211,26 @@ public class Chunk {
         return Math.max(0f, displacedVolume);
     }
 
-    private void applyVolumeSurfaceToHeights() {
+    private void applyVolumeSurfaceToPortalHeights(float centerWx, float centerWz,
+                                                 float dirX, float dirZ, float portalRadius) {
         if (terrainVolume == null) {
             return;
         }
+        float rSq = portalRadius * portalRadius;
         for (int z = 0; z <= SIZE; z++) {
             for (int x = 0; x <= SIZE; x++) {
                 float wx = cx * SIZE + x;
                 float wz = cz * SIZE + z;
-                heights[x][z] = terrainVolume.sampleTopSurface(wx, wz, heights[x][z]);
+                float dx = wx - centerWx;
+                float dz = wz - centerWz;
+                float distSq = dx * dx + dz * dz;
+                if (distSq > rSq) {
+                    continue;
+                }
+                float projected = terrainVolume.sampleTopSurface(wx, wz, heights[x][z]);
+                if (projected < heights[x][z]) {
+                    heights[x][z] = projected;
+                }
             }
         }
     }
@@ -2638,7 +2652,7 @@ public class Chunk {
         float czTri = (a[2] + b[2] + c[2]) / 3f;
 
         float base = sampleBaseHeightAtWorld(cxTri / scale, czTri / scale);
-        if (cyTri >= base - 0.12f) {
+        if (cyTri >= base - 0.03f) {
             return;
         }
 
@@ -2705,6 +2719,7 @@ public class Chunk {
 
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, rockTex);
+        glDisable(GL_CULL_FACE);
         glBindBuffer(GL_ARRAY_BUFFER, volumeSurfaceVboId);
         glEnableClientState(GL_VERTEX_ARRAY);
         glEnableClientState(GL_NORMAL_ARRAY);
@@ -2717,6 +2732,7 @@ public class Chunk {
         glDisableClientState(GL_NORMAL_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glEnable(GL_CULL_FACE);
     }
 
     private void disposeVolumeSurfaceBuffers() {
