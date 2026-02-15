@@ -74,12 +74,20 @@ public class WeatherSystem {
         }
 
         boolean forcedSnow = altitudeSnowing;
-        float targetPrecip = (weatherType == WeatherType.SUNNY && !forcedSnow) ? 0f : 1f;
-        precipitationStrength += (targetPrecip - precipitationStrength) * Math.min(1f, dt * 0.8f);
+        float targetPrecip = 0f;
+        if (weatherType == WeatherType.SNOWY) {
+            // Snowy weather should look dense immediately.
+            targetPrecip = 1.35f;
+        } else if (weatherType != WeatherType.SUNNY || forcedSnow) {
+            targetPrecip = 1.0f;
+        }
+        precipitationStrength += (targetPrecip - precipitationStrength) * Math.min(1f, dt * 1.8f);
 
         if ((weatherType == WeatherType.SNOWY || forcedSnow) && temperatureC <= 0f) {
-            snowCoverage = Math.min(1f, snowCoverage + dt * 0.085f);
-            waterSnowCoverage = Math.min(1f, waterSnowCoverage + dt * 0.095f);
+            float landAccumRate = weatherType == WeatherType.SNOWY ? 0.18f : 0.10f;
+            float waterAccumRate = weatherType == WeatherType.SNOWY ? 0.20f : 0.12f;
+            snowCoverage = Math.min(1f, snowCoverage + dt * landAccumRate);
+            waterSnowCoverage = Math.min(1f, waterSnowCoverage + dt * waterAccumRate);
         } else if (temperatureC > 0f) {
             // Land snow melts first.
             snowCoverage = Math.max(0f, snowCoverage - dt * 0.020f);
@@ -142,7 +150,8 @@ public class WeatherSystem {
         final float snappedCenterX = (float) Math.floor(camX / 8f) * 8f;
         final float snappedCenterZ = (float) Math.floor(camZ / 8f) * 8f;
         glPointSize(pointSize);
-        glColor4f(1f, 1f, 1f, alpha * precipitationStrength);
+        float snowAlpha = Math.min(1f, alpha * (0.70f + precipitationStrength));
+        glColor4f(1f, 1f, 1f, snowAlpha);
         glBegin(GL_POINTS);
         int end = Math.min(startIndex + count, SNOW_PARTICLE_TEMPLATES.length);
         float time = precipitationTime;
@@ -165,7 +174,7 @@ public class WeatherSystem {
         final float dropHeight = 30f;
         final float snappedCenterX = (float) Math.floor(camX / 8f) * 8f;
         final float snappedCenterZ = (float) Math.floor(camZ / 8f) * 8f;
-        glColor4f(0.72f, 0.82f, 0.95f, 0.7f * precipitationStrength);
+        glColor4f(0.72f, 0.82f, 0.95f, Math.min(1f, 0.45f + 0.45f * precipitationStrength));
         glBegin(GL_LINES);
         for (int i = 0; i < RAIN_PARTICLES; i++) {
             ParticleTemplate p = RAIN_PARTICLE_TEMPLATES[i];
@@ -225,6 +234,9 @@ public class WeatherSystem {
 
         if (this.weatherType == WeatherType.SNOWY) {
             temperatureC = Math.min(temperatureC, -2f);
+            snowCoverage = Math.max(snowCoverage, 0.45f);
+            waterSnowCoverage = Math.max(waterSnowCoverage, 0.30f);
+            precipitationStrength = Math.max(precipitationStrength, 0.85f);
         } else {
             temperatureC = Math.max(temperatureC, 2f);
         }

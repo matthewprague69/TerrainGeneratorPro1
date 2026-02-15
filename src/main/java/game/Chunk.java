@@ -733,7 +733,7 @@ public class Chunk {
         float alpineBaseCoverage = Math.max(0f, altitudeFactor);
         if (alpineBaseCoverage > 0f) {
             // Alpine snow exists from generation time and should be substantial enough for visible dents.
-            alpineBaseCoverage = Math.max(0.60f, alpineBaseCoverage);
+            alpineBaseCoverage = Math.max(0.80f, alpineBaseCoverage);
         }
         float effectiveCoverage = Math.max(alpineBaseCoverage, weatherCoverage);
         if (effectiveCoverage <= 0f) {
@@ -753,7 +753,7 @@ public class Chunk {
         float baseDepth = SNOW_MAX_ACCUMULATION_DEPTH * effectiveCoverage
                 * slopeFactor * altitudeDepthFactor * driftFactor;
         if (altitude >= SNOW_ALTITUDE_START) {
-            float minAlpineDepth = 0.20f + 0.80f * altitudeFactor;
+            float minAlpineDepth = 0.35f + 0.65f * altitudeFactor;
             baseDepth = Math.max(baseDepth, minAlpineDepth);
         }
         float dentDepth = manager.getSnowDentDepth(wx, wz, effectiveCoverage);
