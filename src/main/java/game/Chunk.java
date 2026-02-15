@@ -99,8 +99,8 @@ public class Chunk {
 
     private static final float SNOW_MAX_ACCUMULATION_DEPTH = 1.00f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
-    private static final float SNOW_ALTITUDE_START = 55f;
-    private static final float SNOW_ALTITUDE_FULL = 85f;
+    private static final float SNOW_ALTITUDE_START = 40f;
+    private static final float SNOW_ALTITUDE_FULL = 90f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = 55f;
@@ -720,6 +720,15 @@ public class Chunk {
         float altitudeFactor = Math.max(0f, Math.min(1f,
                 (altitude - SNOW_ALTITUDE_START) / Math.max(0.001f, SNOW_ALTITUDE_FULL - SNOW_ALTITUDE_START)));
 
+        float biomeSnowFactor = 0f;
+        if (biome == Biome.HIGH_MOUNTAINS) {
+            biomeSnowFactor = 0.90f;
+        } else if (biome == Biome.MOUNTAINS) {
+            biomeSnowFactor = 0.55f;
+        } else if (biome == Biome.SPRUCE_FOREST) {
+            biomeSnowFactor = 0.25f;
+        }
+
         boolean snowyWeatherEverywhere = manager.getWeatherType() == WeatherType.SNOWY;
         float weatherCoverage = snowyWeatherEverywhere ? clampedCoverage : clampedCoverage * altitudeFactor;
         if (manager.isWaterFrozen()) {
@@ -730,7 +739,10 @@ public class Chunk {
                 weatherCoverage = Math.min(weatherCoverage, manager.getWaterSnowCoverage());
             }
         }
-        float alpineBaseCoverage = altitude >= SNOW_ALTITUDE_START ? Math.max(0.15f, altitudeFactor) : 0f;
+        float alpineBaseCoverage = Math.max(0f, Math.max(altitudeFactor, biomeSnowFactor));
+        if (alpineBaseCoverage > 0f) {
+            alpineBaseCoverage = Math.max(0.15f, alpineBaseCoverage);
+        }
         float effectiveCoverage = Math.max(alpineBaseCoverage, weatherCoverage);
         if (effectiveCoverage <= 0f) {
             return 0f;

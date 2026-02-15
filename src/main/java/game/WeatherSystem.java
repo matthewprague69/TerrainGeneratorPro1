@@ -39,8 +39,8 @@ public class WeatherSystem {
     private float iceThickness = 0f;
     private boolean altitudeSnowing = false;
 
-    private static final float ALTITUDE_SNOW_START = 55f;
-    private static final float ALTITUDE_SNOW_STOP = 52f;
+    private static final float ALTITUDE_SNOW_START = 40f;
+    private static final float ALTITUDE_SNOW_STOP = 36f;
 
     public void update(float dt, float timeOfDay, float localAltitudeY) {
         float targetTemp = getBaseTemperatureForWeather(weatherType);
@@ -54,7 +54,7 @@ public class WeatherSystem {
         }
 
         if (altitudeSnowing) {
-            float altBias = Math.min(14f, Math.max(0f, localAltitudeY - ALTITUDE_SNOW_START) * 0.45f + 4f);
+            float altBias = Math.min(20f, Math.max(0f, localAltitudeY - ALTITUDE_SNOW_START) * 0.55f + 8f);
             targetTemp -= altBias;
         }
         if (timeOfDay < 0.23f || timeOfDay > 0.78f) {

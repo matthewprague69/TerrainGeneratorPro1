@@ -125,7 +125,7 @@ public class TerrainManager {
     private static final float SNOW_DENT_MAX_ACCUMULATED_DEPTH = 0.30f;
     private static final float SNOW_DENT_LIFETIME_SECONDS = 45f;
     private static final int MAX_SNOW_DENTS = 1024;
-    private static final float ALPINE_SNOW_START = 55f;
+    private static final float ALPINE_SNOW_START = 40f;
 
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
