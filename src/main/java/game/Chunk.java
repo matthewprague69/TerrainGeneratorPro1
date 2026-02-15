@@ -2089,7 +2089,7 @@ public class Chunk {
     }
 
     public float digArea(float centerWx, float centerWz, float halfWidth, float halfLength, float depth,
-                         boolean rectangular, float dirX, float dirZ) {
+                         boolean rectangular, float dirX, float dirZ, float floorHeight) {
         float appliedDepth = Math.max(0f, depth);
         float appliedHalfWidth = Math.max(0.25f, halfWidth);
         float appliedHalfLength = Math.max(appliedHalfWidth, halfLength);
@@ -2124,7 +2124,7 @@ public class Chunk {
                     if (edge > 1f) {
                         continue;
                     }
-                    float hardCore = 0.82f;
+                    float hardCore = 0.94f;
                     if (edge <= hardCore) {
                         shapeFactor = 1f;
                     } else {
@@ -2138,10 +2138,10 @@ public class Chunk {
                     }
                     float dist = (float) Math.sqrt(Math.max(0f, distSq));
                     float t = dist / appliedHalfWidth;
-                    if (t <= 0.70f) {
+                    if (t <= 0.88f) {
                         shapeFactor = 1f;
                     } else {
-                        float edge = (t - 0.70f) / 0.30f;
+                        float edge = (t - 0.88f) / 0.12f;
                         shapeFactor = 1f - (float) smoothstep(0f, 1f, edge);
                     }
                 }
@@ -2152,7 +2152,8 @@ public class Chunk {
                 }
 
                 float current = heights[x][z];
-                float lowered = current - appliedDepth * shapeFactor;
+                float blendedTarget = current + (floorHeight - current) * shapeFactor;
+                float lowered = Math.min(current - appliedDepth * shapeFactor, blendedTarget);
                 if (lowered >= current - 0.0001f) {
                     continue;
                 }

@@ -122,6 +122,7 @@ public class Main {
         float maxDistance = 18f;
         float step = 0.35f;
         float targetX = Float.NaN;
+        float targetY = Float.NaN;
         float targetZ = Float.NaN;
 
         for (float t = 1.0f; t <= maxDistance; t += step) {
@@ -131,12 +132,13 @@ public class Main {
             float surfaceY = terrain.getHeight(sx, sz);
             if (sy <= surfaceY + 0.08f) {
                 targetX = sx;
+                targetY = sy;
                 targetZ = sz;
                 break;
             }
         }
 
-        if (Float.isNaN(targetX)) {
+        if (Float.isNaN(targetX) || Float.isNaN(targetY)) {
             return 0f;
         }
 
@@ -147,7 +149,8 @@ public class Main {
         float halfWidth = rectangular ? 0.75f : 1.8f;
         float halfLength = rectangular ? 3.6f : 1.8f;
         float depth = rectangular ? 0.70f : 0.52f;
-        return terrain.digTerrain(targetX, targetZ, halfWidth, halfLength, depth, rectangular, dirX, dirZ);
+        float floorY = targetY - depth;
+        return terrain.digTerrain(targetX, targetZ, halfWidth, halfLength, depth, rectangular, dirX, dirZ, floorY);
     }
 
     private void setupProjection() {

@@ -1038,7 +1038,7 @@ public class TerrainManager {
     }
 
     public float digTerrain(float wx, float wz, float halfWidth, float halfLength, float depth,
-                            boolean rectangular, float dirX, float dirZ) {
+                            boolean rectangular, float dirX, float dirZ, float floorY) {
         float w = Math.max(0.25f, halfWidth);
         float l = Math.max(w, halfLength);
         float reach = rectangular ? l : w;
@@ -1061,7 +1061,7 @@ public class TerrainManager {
                     continue;
                 }
                 float mass = chunk.digArea(wx / scale, wz / scale, w / scale, l / scale, d,
-                        rectangular, dirX, dirZ);
+                        rectangular, dirX, dirZ, floorY / scale);
                 if (mass > 0f) {
                     totalMass += mass;
                     changed.add(chunk);
