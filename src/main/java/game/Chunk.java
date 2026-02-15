@@ -2102,74 +2102,91 @@ public class Chunk {
             return 0f;
         }
 
-        float radiusSq = appliedHalfWidth * appliedHalfWidth;
         float dirLen = (float) Math.sqrt(dirX * dirX + dirZ * dirZ);
         float nx = dirLen > 0.0001f ? dirX / dirLen : 1f;
         float nz = dirLen > 0.0001f ? dirZ / dirLen : 0f;
-        float tx = -nz;
-        float tz = nx;
 
-        boolean changed = false;
         float removedHeightSum = 0f;
+        boolean changed = false;
 
-        for (int z = 0; z <= SIZE; z++) {
-            for (int x = 0; x <= SIZE; x++) {
-                float wx = (cx * SIZE + x) * scale;
-                float wz = (cz * SIZE + z) * scale;
-                float dx = wx - centerWx;
-                float dz = wz - centerWz;
+        if (terrainVolume != null) {
+            float[][] before = copyHeights(heights);
+            terrainVolume.carveDirectionalTunnel(centerWx, floorHeight, centerWz,
+                    appliedHalfWidth, appliedHalfLength, nx, nz, digSlope, rectangular);
+            applyVolumeSurfaceToHeights();
 
-                float shapeFactor;
-                float localFloor = floorHeight;
-                if (rectangular) {
-                    float forward = dx * nx + dz * nz;
-                    float side = dx * tx + dz * tz;
-                    if (forward < 0f || forward > appliedHalfLength) {
-                        continue;
+            for (int z = 0; z <= SIZE; z++) {
+                for (int x = 0; x <= SIZE; x++) {
+                    float delta = before[x][z] - heights[x][z];
+                    if (delta > 0.0001f) {
+                        removedHeightSum += delta;
+                        changed = true;
                     }
-                    float ax = forward / appliedHalfLength;
-                    float az = Math.abs(side) / appliedHalfWidth;
-                    float edge = Math.max(ax, az);
-                    if (edge > 1f) {
-                        continue;
-                    }
-                    float hardCore = 0.90f;
-                    if (edge <= hardCore) {
-                        shapeFactor = 1f;
+                }
+            }
+        } else {
+            float radiusSq = appliedHalfWidth * appliedHalfWidth;
+            float tx = -nz;
+            float tz = nx;
+            for (int z = 0; z <= SIZE; z++) {
+                for (int x = 0; x <= SIZE; x++) {
+                    float wx = (cx * SIZE + x) * scale;
+                    float wz = (cz * SIZE + z) * scale;
+                    float dx = wx - centerWx;
+                    float dz = wz - centerWz;
+
+                    float shapeFactor;
+                    float localFloor = floorHeight;
+                    if (rectangular) {
+                        float forward = dx * nx + dz * nz;
+                        float side = dx * tx + dz * tz;
+                        if (forward < 0f || forward > appliedHalfLength) {
+                            continue;
+                        }
+                        float ax = forward / appliedHalfLength;
+                        float az = Math.abs(side) / appliedHalfWidth;
+                        float edge = Math.max(ax, az);
+                        if (edge > 1f) {
+                            continue;
+                        }
+                        float hardCore = 0.90f;
+                        if (edge <= hardCore) {
+                            shapeFactor = 1f;
+                        } else {
+                            float tt = (edge - hardCore) / Math.max(0.0001f, 1f - hardCore);
+                            shapeFactor = 1f - (float) smoothstep(0f, 1f, tt);
+                        }
+                        localFloor = floorHeight + forward * digSlope;
                     } else {
-                        float t = (edge - hardCore) / Math.max(0.0001f, 1f - hardCore);
-                        shapeFactor = 1f - (float) smoothstep(0f, 1f, t);
+                        float distSq = dx * dx + dz * dz;
+                        if (distSq > radiusSq) {
+                            continue;
+                        }
+                        float dist = (float) Math.sqrt(Math.max(0f, distSq));
+                        float tt = dist / appliedHalfWidth;
+                        if (tt <= 0.88f) {
+                            shapeFactor = 1f;
+                        } else {
+                            float edge = (tt - 0.88f) / 0.12f;
+                            shapeFactor = 1f - (float) smoothstep(0f, 1f, edge);
+                        }
                     }
-                    localFloor = floorHeight + forward * digSlope;
-                } else {
-                    float distSq = dx * dx + dz * dz;
-                    if (distSq > radiusSq) {
+
+                    shapeFactor = Math.max(0f, Math.min(1f, shapeFactor));
+                    if (shapeFactor <= 0.0001f) {
                         continue;
                     }
-                    float dist = (float) Math.sqrt(Math.max(0f, distSq));
-                    float t = dist / appliedHalfWidth;
-                    if (t <= 0.88f) {
-                        shapeFactor = 1f;
-                    } else {
-                        float edge = (t - 0.88f) / 0.12f;
-                        shapeFactor = 1f - (float) smoothstep(0f, 1f, edge);
+
+                    float current = heights[x][z];
+                    float blendedTarget = current + (localFloor - current) * shapeFactor;
+                    float lowered = Math.min(current - appliedDepth * shapeFactor, blendedTarget);
+                    if (lowered >= current - 0.0001f) {
+                        continue;
                     }
+                    heights[x][z] = lowered;
+                    removedHeightSum += (current - lowered);
+                    changed = true;
                 }
-
-                shapeFactor = Math.max(0f, Math.min(1f, shapeFactor));
-                if (shapeFactor <= 0.0001f) {
-                    continue;
-                }
-
-                float current = heights[x][z];
-                float blendedTarget = current + (localFloor - current) * shapeFactor;
-                float lowered = Math.min(current - appliedDepth * shapeFactor, blendedTarget);
-                if (lowered >= current - 0.0001f) {
-                    continue;
-                }
-                heights[x][z] = lowered;
-                removedHeightSum += (current - lowered);
-                changed = true;
             }
         }
 
@@ -2178,17 +2195,25 @@ public class Chunk {
         }
 
         cachedMaxAltitudeSnowCoverage = -1f;
-        if (terrainVolume != null) {
-            terrainVolume.carveDirectionalTunnel(centerWx, floorHeight, centerWz,
-                    appliedHalfWidth, appliedHalfLength, nx, nz, digSlope, rectangular);
-        }
         buildTerrainBuffers();
         buildWaterDisplayList();
         renderResourcesBuilt = true;
 
-        // Approximate dug mass from displaced height over terrain grid area.
         float displacedVolume = removedHeightSum * scale * scale * 0.45f;
         return Math.max(0f, displacedVolume);
+    }
+
+    private void applyVolumeSurfaceToHeights() {
+        if (terrainVolume == null) {
+            return;
+        }
+        for (int z = 0; z <= SIZE; z++) {
+            for (int x = 0; x <= SIZE; x++) {
+                float wx = cx * SIZE + x;
+                float wz = cz * SIZE + z;
+                heights[x][z] = terrainVolume.sampleTopSurface(wx, wz, heights[x][z]);
+            }
+        }
     }
 
     private void rebuildTerrainVolumeFromHeights() {

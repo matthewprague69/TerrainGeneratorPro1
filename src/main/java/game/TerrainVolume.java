@@ -35,7 +35,6 @@ public class TerrainVolume {
     public void fillFromHeightField(float[][] heights, int chunkCx, int chunkCz, int chunkSize) {
         for (int z = 0; z < sizeZ; z++) {
             float wz = lerp(minZ, maxZ, z / (float) (sizeZ - 1));
-            float hx = 0f;
             for (int x = 0; x < sizeX; x++) {
                 float wx = lerp(minX, maxX, x / (float) (sizeX - 1));
                 float groundY = sampleHeight(heights, chunkCx, chunkCz, chunkSize, wx, wz);
@@ -104,6 +103,27 @@ public class TerrainVolume {
                 }
             }
         }
+    }
+
+    public float sampleTopSurface(float wx, float wz, float fallbackHeight) {
+        float xNorm = (wx - minX) / Math.max(0.0001f, maxX - minX);
+        float zNorm = (wz - minZ) / Math.max(0.0001f, maxZ - minZ);
+        int ix = clamp(Math.round(xNorm * (sizeX - 1)), 0, sizeX - 1);
+        int iz = clamp(Math.round(zNorm * (sizeZ - 1)), 0, sizeZ - 1);
+
+        for (int y = sizeY - 2; y >= 0; y--) {
+            float d0 = density[idx(ix, y, iz)];
+            float d1 = density[idx(ix, y + 1, iz)];
+            if (d0 >= 0f && d1 < 0f) {
+                float wy0 = lerp(minY, maxY, y / (float) (sizeY - 1));
+                float wy1 = lerp(minY, maxY, (y + 1) / (float) (sizeY - 1));
+                float denom = d0 - d1;
+                float t = denom <= 0.0001f ? 0f : d0 / denom;
+                t = Math.max(0f, Math.min(1f, t));
+                return wy0 + (wy1 - wy0) * t;
+            }
+        }
+        return fallbackHeight;
     }
 
     private float sampleHeight(float[][] heights, int chunkCx, int chunkCz, int chunkSize, float wx, float wz) {
