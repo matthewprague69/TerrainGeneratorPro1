@@ -114,7 +114,7 @@ public class WeatherSystem {
 
     private void renderSnowParticles(float camX, float camY, float camZ, float surfaceY) {
         float snappedGroundY = (float) Math.floor(surfaceY * 0.5f) * 2f;
-        float desiredTop = Math.max(snappedGroundY + 32f, camY + 14f);
+        float desiredTop = Math.max(snappedGroundY + 36f, camY + 20f);
         float topY = (float) Math.ceil(desiredTop / 4f) * 4f;
         float snowSpan = Math.max(32f, Math.min(96f, topY - snappedGroundY));
 
@@ -154,7 +154,7 @@ public class WeatherSystem {
 
     private void renderRainParticles(float camX, float camY, float camZ) {
         final float radius = PRECIPITATION_MID_RADIUS;
-        final float top = (float) Math.ceil((camY + 14f) / 4f) * 4f;
+        final float top = (float) Math.ceil((camY + 20f) / 4f) * 4f;
         final float dropHeight = 30f;
         final float snappedCenterX = (float) Math.floor(camX / 8f) * 8f;
         final float snappedCenterZ = (float) Math.floor(camZ / 8f) * 8f;
