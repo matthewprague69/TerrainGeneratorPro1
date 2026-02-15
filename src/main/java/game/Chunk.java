@@ -97,8 +97,6 @@ public class Chunk {
     private static final int MAX_IMPOSTOR_DISTANCE_REDUCTION = 4;
 
 
-    private static final float SNOW_HEIGHT_START = 55f;
-    private static final float SNOW_HEIGHT_FULL = 60f;
     private static final float SNOW_MAX_ACCUMULATION_DEPTH = 0.30f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
     private static final float SNOW_LOW_ALTITUDE_START = WATER_SURROUNDING_LEVEL;
@@ -106,7 +104,7 @@ public class Chunk {
     private static final float SNOW_MIN_ALTITUDE_FACTOR = 0.2f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
-    private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
+    private static final float FEATURE_MAX_HEIGHT = 55f;
     public static final float FEATURE_SLOPE_SPAWN_THRESHOLD = DIRT_SLOPE_START;
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
 
@@ -1668,19 +1666,6 @@ public class Chunk {
             blendAlpha = 0f;
         }
 
-        float snowBlend = 0f;
-        if (height >= SNOW_HEIGHT_START) {
-            snowBlend = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
-            snowBlend = Math.max(0f, Math.min(1f, snowBlend));
-        }
-
-        if (snowBlend >= 0.999f) {
-            textures[0] = manager.getSnowTexture();
-            alphas[0] = 1f;
-            return 1;
-        }
-
-        float exposedGround = 1f - snowBlend;
         int count = 0;
 
         // Keep a fully opaque base layer so terrain always writes depth and never turns see-through.
@@ -1688,16 +1673,10 @@ public class Chunk {
         alphas[count] = 1f;
         count++;
 
-        float weightedBlendAlpha = blendAlpha * exposedGround;
+        float weightedBlendAlpha = blendAlpha;
         if (blendTex != -1 && blendTex != baseTex && weightedBlendAlpha > 0.001f) {
             textures[count] = blendTex;
             alphas[count] = weightedBlendAlpha;
-            count++;
-        }
-
-        if (snowBlend > 0.001f) {
-            textures[count] = manager.getSnowTexture();
-            alphas[count] = snowBlend;
             count++;
         }
 
@@ -1976,13 +1955,6 @@ public class Chunk {
         }
         if (height <= WATER_SURROUNDING_LEVEL) {
             return manager.getWaterBottomTexture();
-        }
-
-        if (height >= SNOW_HEIGHT_START) {
-            float snowBlend = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
-            if (snowBlend >= 0.5f) {
-                return manager.getSnowTexture();
-            }
         }
 
         if (slope >= ROCK_SLOPE_START) {
