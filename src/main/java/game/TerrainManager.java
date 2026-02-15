@@ -121,7 +121,8 @@ public class TerrainManager {
 
     private static final float SNOW_DENT_MIN_STEP_DISTANCE = 0.24f;
     private static final float SNOW_DENT_RADIUS = 1.15f;
-    private static final float SNOW_DENT_DEPTH = 6.0f;
+    private static final float SNOW_DENT_DEPTH = 0.65f;
+    private static final float SNOW_DENT_MAX_ACCUMULATED_DEPTH = 0.30f;
     private static final float SNOW_DENT_LIFETIME_SECONDS = 45f;
     private static final int MAX_SNOW_DENTS = 1024;
 
@@ -1501,7 +1502,8 @@ public class TerrainManager {
             float ageFade = Math.max(0f, 1f - dent.ageSeconds / SNOW_DENT_LIFETIME_SECONDS);
             depth += SNOW_DENT_DEPTH * falloff * ageFade * coverageScale;
         }
-        return Math.max(0f, depth);
+        float maxDepth = SNOW_DENT_MAX_ACCUMULATED_DEPTH * coverageScale;
+        return Math.max(0f, Math.min(depth, maxDepth));
     }
 
     private void updateSnowDents(float wx, float wy, float wz, float dt) {

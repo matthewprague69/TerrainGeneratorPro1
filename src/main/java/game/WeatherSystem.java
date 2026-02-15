@@ -72,8 +72,8 @@ public class WeatherSystem {
         precipitationStrength += (targetPrecip - precipitationStrength) * Math.min(1f, dt * 0.8f);
 
         if ((weatherType == WeatherType.SNOWY || forcedSnow) && temperatureC <= 0f) {
-            snowCoverage = Math.min(1f, snowCoverage + dt * 0.045f);
-            waterSnowCoverage = Math.min(1f, waterSnowCoverage + dt * 0.055f);
+            snowCoverage = Math.min(1f, snowCoverage + dt * 0.085f);
+            waterSnowCoverage = Math.min(1f, waterSnowCoverage + dt * 0.095f);
         } else if (temperatureC > 0f) {
             // Land snow melts first.
             snowCoverage = Math.max(0f, snowCoverage - dt * 0.020f);
