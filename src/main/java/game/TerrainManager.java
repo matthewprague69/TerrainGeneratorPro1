@@ -126,6 +126,7 @@ public class TerrainManager {
     private static final float SNOW_DENT_LIFETIME_SECONDS = 45f;
     private static final int MAX_SNOW_DENTS = 1024;
     private static final float ALPINE_SNOW_START = 40f;
+    private static final float ALPINE_SNOW_FULL = 90f;
 
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
@@ -1513,18 +1514,25 @@ public class TerrainManager {
         }
 
         float snowCoverage = weatherSystem.getSnowCoverage();
+        float terrainY = getHeight(wx, wz);
+        float altitudeFactor = Math.max(0f, Math.min(1f,
+                (terrainY - ALPINE_SNOW_START) / Math.max(0.001f, ALPINE_SNOW_FULL - ALPINE_SNOW_START)));
+        boolean snowyWeatherEverywhere = weatherSystem.getWeatherType() == WeatherType.SNOWY;
+        float localSnowCoverage = snowyWeatherEverywhere ? snowCoverage : snowCoverage * altitudeFactor;
+        localSnowCoverage = Math.max(localSnowCoverage, altitudeFactor > 0f ? Math.max(0.15f, altitudeFactor) : 0f);
+
         Iterator<SnowDent> iterator = snowDents.iterator();
         while (iterator.hasNext()) {
             SnowDent dent = iterator.next();
             dent.ageSeconds += dt;
-            if (dent.ageSeconds >= SNOW_DENT_LIFETIME_SECONDS || snowCoverage <= 0.001f) {
+            if (dent.ageSeconds >= SNOW_DENT_LIFETIME_SECONDS || localSnowCoverage <= 0.001f) {
                 iterator.remove();
             }
         }
 
-        float terrainY = getHeight(wx, wz);
         boolean alpineSnow = terrainY >= ALPINE_SNOW_START;
-        if ((!alpineSnow && weatherSystem.getWeatherType() != WeatherType.SNOWY) || (!alpineSnow && snowCoverage <= 0.03f)) {
+        if ((!alpineSnow && weatherSystem.getWeatherType() != WeatherType.SNOWY)
+                || (!alpineSnow && localSnowCoverage <= 0.03f)) {
             return;
         }
         if (Math.abs(wy - terrainY) > 0.22f) {

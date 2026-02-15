@@ -87,7 +87,8 @@ public class WeatherSystem {
             waterSnowCoverage = Math.max(0f, waterSnowCoverage - dt * 0.030f);
         }
 
-        boolean freezingConditions = temperatureC <= -0.5f || (snowCoverage > 0.3f && temperatureC < 1.5f);
+        boolean freezingConditions = weatherType == WeatherType.SNOWY
+                && (temperatureC <= -0.5f || (snowCoverage > 0.3f && temperatureC < 1.5f));
         if (freezingConditions) {
             float growth = 0.010f + snowCoverage * 0.030f;
             iceThickness = Math.min(0.85f, iceThickness + dt * growth);
@@ -242,7 +243,11 @@ public class WeatherSystem {
     }
 
     public boolean isWaterFrozen() {
-        return iceThickness > 0.01f || temperatureC <= -0.5f || (snowCoverage > 0.3f && temperatureC < 1.5f);
+        if (iceThickness > 0.01f) {
+            return true;
+        }
+        return weatherType == WeatherType.SNOWY
+                && (temperatureC <= -0.5f || (snowCoverage > 0.3f && temperatureC < 1.5f));
     }
 
     public float getIceThickness() {
