@@ -6,6 +6,7 @@ import java.util.Random;
 
 public class SkyRenderer {
     private float timeOfDay = 0.4f;
+    private float timeSpeed = 1.0f;
     private final int cloudSize = 15;
     private final float cloudHeight = 80f;
     private final float spacing = 40f;
@@ -22,14 +23,7 @@ public class SkyRenderer {
     }
 
     public void update(float dt) {
-        boolean rewind = org.lwjgl.glfw.GLFW.glfwGetKey(org.lwjgl.glfw.GLFW.glfwGetCurrentContext(),
-                org.lwjgl.glfw.GLFW.GLFW_KEY_R) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
-
-        if (rewind) {
-            timeOfDay += dt * 0.1f; // Rewind faster than normal
-        } else {
-            timeOfDay += dt * 0.005f; // Normal forward time
-        }
+        timeOfDay += dt * 0.005f * timeSpeed;
 
         if (timeOfDay > 1f)
             timeOfDay -= 1f;
@@ -39,6 +33,14 @@ public class SkyRenderer {
 
     public float getTimeOfDay() {
         return timeOfDay;
+    }
+
+    public float getTimeSpeed() {
+        return timeSpeed;
+    }
+
+    public void setTimeSpeed(float timeSpeed) {
+        this.timeSpeed = Math.max(0f, Math.min(20f, timeSpeed));
     }
 
     public void renderSkybox() {
