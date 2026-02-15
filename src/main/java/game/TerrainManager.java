@@ -1519,7 +1519,7 @@ public class TerrainManager {
                 (terrainY - ALPINE_SNOW_START) / Math.max(0.001f, ALPINE_SNOW_FULL - ALPINE_SNOW_START)));
         boolean snowyWeatherEverywhere = weatherSystem.getWeatherType() == WeatherType.SNOWY;
         float localSnowCoverage = snowyWeatherEverywhere ? snowCoverage : snowCoverage * altitudeFactor;
-        localSnowCoverage = Math.max(localSnowCoverage, altitudeFactor > 0f ? Math.max(0.15f, altitudeFactor) : 0f);
+        localSnowCoverage = Math.max(localSnowCoverage, altitudeFactor > 0f ? Math.max(0.60f, altitudeFactor) : 0f);
 
         Iterator<SnowDent> iterator = snowDents.iterator();
         while (iterator.hasNext()) {
@@ -1535,7 +1535,7 @@ public class TerrainManager {
                 || (!alpineSnow && localSnowCoverage <= 0.03f)) {
             return;
         }
-        if (Math.abs(wy - terrainY) > 0.22f) {
+        if (Math.abs(wy - terrainY) > 0.45f) {
             // Player is not intersecting ground/snow surface right now.
             return;
         }
