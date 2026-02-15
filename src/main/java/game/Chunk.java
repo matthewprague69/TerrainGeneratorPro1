@@ -607,6 +607,11 @@ public class Chunk {
 
     private void renderSnowLayer(float snowCoverage) {
         float clampedCoverage = Math.max(0f, Math.min(1f, snowCoverage));
+        float maxAltitudeCoverage = getChunkMaxAltitudeSnowCoverage();
+        float effectiveCoverage = Math.max(clampedCoverage, maxAltitudeCoverage);
+        if (effectiveCoverage <= 0.0001f) {
+            return;
+        }
 
         int snowTexture = manager.getSnowTexture();
         if (snowTexture == 0) {
@@ -619,12 +624,15 @@ public class Chunk {
         glDisable(GL_BLEND);
         glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(-1f, -1f);
-        glColor3f(1f, 1f, 1f);
+        glColor3f(0.86f, 0.89f, 0.92f);
 
         boolean frozenWater = manager.isWaterFrozen();
         float iceThickness = frozenWater ? manager.getIceThickness() : 0f;
 
         int step = Math.max(1, (int) Math.pow(2, lod));
+        if (effectiveCoverage > 0.45f) {
+            step = Math.max(step, 2);
+        }
         float texScale = 0.14f;
         glBegin(GL_TRIANGLES);
         for (int z = 0; z < SIZE; z += step) {
@@ -664,7 +672,6 @@ public class Chunk {
                 glTexCoord2f(wx * texScale, wz2 * texScale);
                 glVertex3f(wx, y01, wz2);
 
-                applyTriangleNormal(wx2, y10, wz, wx2, y11, wz2, wx, y01, wz2);
                 glTexCoord2f(wx2 * texScale, wz * texScale);
                 glVertex3f(wx2, y10, wz);
                 glTexCoord2f(wx2 * texScale, wz2 * texScale);
@@ -737,6 +744,22 @@ public class Chunk {
         }
         float snowCoverage = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
         return Math.max(0f, Math.min(1f, snowCoverage));
+    }
+
+    private float getChunkMaxAltitudeSnowCoverage() {
+        float maxCoverage = 0f;
+        for (int z = 0; z <= SIZE; z++) {
+            for (int x = 0; x <= SIZE; x++) {
+                float coverage = getAltitudeSnowCoverage(heights[x][z]);
+                if (coverage > maxCoverage) {
+                    maxCoverage = coverage;
+                    if (maxCoverage >= 0.999f) {
+                        return 1f;
+                    }
+                }
+            }
+        }
+        return maxCoverage;
     }
 
     private float computeSnowSlopeAtVertex(int x, int z) {
