@@ -125,8 +125,8 @@ public class TerrainManager {
     private static final float SNOW_DENT_MAX_ACCUMULATED_DEPTH = 0.30f;
     private static final float SNOW_DENT_LIFETIME_SECONDS = 45f;
     private static final int MAX_SNOW_DENTS = 1024;
-    private static final float ALPINE_SNOW_START = 40f;
-    private static final float ALPINE_SNOW_FULL = 90f;
+    private static final float ALPINE_SNOW_START = 130f;
+    private static final float ALPINE_SNOW_FULL = 220f;
 
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
@@ -1519,7 +1519,10 @@ public class TerrainManager {
                 (terrainY - ALPINE_SNOW_START) / Math.max(0.001f, ALPINE_SNOW_FULL - ALPINE_SNOW_START)));
         boolean snowyWeatherEverywhere = weatherSystem.getWeatherType() == WeatherType.SNOWY;
         float localSnowCoverage = snowyWeatherEverywhere ? snowCoverage : snowCoverage * altitudeFactor;
-        localSnowCoverage = Math.max(localSnowCoverage, altitudeFactor > 0f ? Math.max(0.15f, altitudeFactor) : 0f);
+        if (terrainY >= ALPINE_SNOW_START) {
+            float alpineCoverageBaseline = Math.max(0.35f, 0.35f + 0.65f * altitudeFactor);
+            localSnowCoverage = Math.max(localSnowCoverage, alpineCoverageBaseline);
+        }
 
         Iterator<SnowDent> iterator = snowDents.iterator();
         while (iterator.hasNext()) {

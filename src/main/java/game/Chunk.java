@@ -99,8 +99,8 @@ public class Chunk {
 
     private static final float SNOW_MAX_ACCUMULATION_DEPTH = 1.00f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
-    private static final float SNOW_ALTITUDE_START = 40f;
-    private static final float SNOW_ALTITUDE_FULL = 90f;
+    private static final float SNOW_ALTITUDE_START = 130f;
+    private static final float SNOW_ALTITUDE_FULL = 220f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = 55f;
@@ -730,9 +730,9 @@ public class Chunk {
                 weatherCoverage = Math.min(weatherCoverage, manager.getWaterSnowCoverage());
             }
         }
-        float alpineBaseCoverage = Math.max(0f, altitudeFactor);
-        if (alpineBaseCoverage > 0f) {
-            alpineBaseCoverage = Math.max(0.15f, alpineBaseCoverage);
+        float alpineBaseCoverage = 0f;
+        if (altitude >= SNOW_ALTITUDE_START) {
+            alpineBaseCoverage = Math.max(0.35f, 0.35f + 0.65f * altitudeFactor);
         }
         float effectiveCoverage = Math.max(alpineBaseCoverage, weatherCoverage);
         if (effectiveCoverage <= 0f) {

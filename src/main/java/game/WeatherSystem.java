@@ -39,8 +39,8 @@ public class WeatherSystem {
     private float iceThickness = 0f;
     private boolean altitudeSnowing = false;
 
-    private static final float ALTITUDE_SNOW_START = 40f;
-    private static final float ALTITUDE_SNOW_STOP = 36f;
+    private static final float ALTITUDE_SNOW_START = 130f;
+    private static final float ALTITUDE_SNOW_STOP = 124f;
 
     public void update(float dt, float timeOfDay, float localAltitudeY) {
         float targetTemp = getBaseTemperatureForWeather(weatherType);
