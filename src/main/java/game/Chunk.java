@@ -2680,14 +2680,8 @@ public class Chunk {
 
     private void putVolumeVertex(FloatBuilder builder, float[] p, float nx, float ny, float nz) {
         float texScale = 0.10f;
-        builder.put(p[0]);
-        builder.put(p[1]);
-        builder.put(p[2]);
-        builder.put(nx);
-        builder.put(ny);
-        builder.put(nz);
-        builder.put(p[0] * texScale);
-        builder.put(p[2] * texScale);
+        builder.putVertex(p[0], p[1], p[2], new float[] { nx, ny, nz },
+                p[0] * texScale, p[2] * texScale);
     }
 
     private float sampleBaseHeightAtWorld(float wx, float wz) {
