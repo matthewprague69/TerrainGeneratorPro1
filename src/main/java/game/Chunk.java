@@ -103,10 +103,11 @@ public class Chunk {
     private static final float SNOW_MAX_ACCUMULATION_DEPTH = 3.5f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
     private static final float SNOW_ALTITUDE_ACCUMULATION_BOOST = 0.85f;
-    private static final float SNOW_STEEP_SLOPE_FADE_START = 1.55f;
-    private static final float SNOW_STEEP_SLOPE_NO_ACCUMULATION = 2.25f;
+    private static final float SNOW_STEEP_SLOPE_FADE_START = 1.95f;
+    private static final float SNOW_STEEP_SLOPE_NO_ACCUMULATION = 2.90f;
     private static final float SNOW_SUN_WARMING_C = 3.0f;
     private static final float SNOW_SHADE_COOLING_C = 3.0f;
+    private static final float SNOW_MIN_RENDERABLE_DEPTH = 0.035f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
@@ -650,7 +651,8 @@ public class Chunk {
                 float d01 = getSnowDepthForVertex(x, z2, clampedCoverage);
                 float d11 = getSnowDepthForVertex(x2, z2, clampedCoverage);
 
-                if (d00 <= 0.0001f && d10 <= 0.0001f && d01 <= 0.0001f && d11 <= 0.0001f) {
+                if (d00 <= SNOW_MIN_RENDERABLE_DEPTH && d10 <= SNOW_MIN_RENDERABLE_DEPTH
+                        && d01 <= SNOW_MIN_RENDERABLE_DEPTH && d11 <= SNOW_MIN_RENDERABLE_DEPTH) {
                     continue;
                 }
 
@@ -788,6 +790,9 @@ public class Chunk {
 
         float baseDepth = SNOW_MAX_ACCUMULATION_DEPTH * clampedCoverage
                 * slopeFactor * altitudeFactor * driftFactor;
+        if (baseDepth <= SNOW_MIN_RENDERABLE_DEPTH * 0.45f) {
+            return 0f;
+        }
         float dentDepth = manager.getSnowDentDepth(wx, wz, clampedCoverage);
         return Math.max(0f, baseDepth - dentDepth);
     }
