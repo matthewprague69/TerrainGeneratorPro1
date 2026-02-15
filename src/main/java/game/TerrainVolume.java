@@ -126,6 +126,38 @@ public class TerrainVolume {
         return fallbackHeight;
     }
 
+
+    public int getSizeX() {
+        return sizeX;
+    }
+
+    public int getSizeY() {
+        return sizeY;
+    }
+
+    public int getSizeZ() {
+        return sizeZ;
+    }
+
+    public float getDensity(int x, int y, int z) {
+        x = clamp(x, 0, sizeX - 1);
+        y = clamp(y, 0, sizeY - 1);
+        z = clamp(z, 0, sizeZ - 1);
+        return density[idx(x, y, z)];
+    }
+
+    public float getXAt(int x) {
+        return lerp(minX, maxX, clamp(x, 0, sizeX - 1) / (float) (sizeX - 1));
+    }
+
+    public float getYAt(int y) {
+        return lerp(minY, maxY, clamp(y, 0, sizeY - 1) / (float) (sizeY - 1));
+    }
+
+    public float getZAt(int z) {
+        return lerp(minZ, maxZ, clamp(z, 0, sizeZ - 1) / (float) (sizeZ - 1));
+    }
+
     private float sampleHeight(float[][] heights, int chunkCx, int chunkCz, int chunkSize, float wx, float wz) {
         float lx = wx - chunkCx * chunkSize;
         float lz = wz - chunkCz * chunkSize;

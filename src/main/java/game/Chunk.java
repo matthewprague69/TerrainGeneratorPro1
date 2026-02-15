@@ -62,6 +62,7 @@ public class Chunk {
     private final int lod;
 
     private final float[][] heights = new float[SIZE + 1][SIZE + 1];
+    private final float[][] baseHeights = new float[SIZE + 1][SIZE + 1];
     private final float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
     private float cachedMaxAltitudeSnowCoverage = -1f;
     private TerrainVolume terrainVolume;
@@ -72,6 +73,8 @@ public class Chunk {
     private int heavyFeatureCount = 0;
     private final List<TerrainBatch> terrainBatches = new ArrayList<>();
     private int terrainVboId = -1;
+    private int volumeSurfaceVboId = -1;
+    private int volumeSurfaceVertexCount = 0;
     private final int[] primaryLayerTextures = new int[3];
     private final float[] primaryLayerAlphas = new float[3];
     private final int[] secondaryLayerTextures = new int[3];
@@ -435,6 +438,7 @@ public class Chunk {
             }
         }
 
+        copyHeightsInto(heights, baseHeights);
         resetRiverSurface(riverSurface);
         applyCavesAndRavines(heights, riverSurface, cx, cz, scale, terrainNoise, manager.getSeed());
 
@@ -583,6 +587,7 @@ public class Chunk {
         glColor3f(1f, 1f, 1f);
 
         renderTerrainBuffers();
+        renderVolumeSurface();
         renderSnowLayer(snowCoverage);
         if (chunkDistance <= grassDetailDistance && chunkDistance <= featureRenderDist) {
             renderGrassBatch();
@@ -2243,6 +2248,7 @@ public class Chunk {
                 minZ,
                 maxZ);
         terrainVolume.fillFromHeightField(heights, cx, cz, SIZE);
+        buildVolumeSurfaceBuffers();
     }
 
     public TerrainVolume getTerrainVolume() {
@@ -2326,6 +2332,7 @@ public class Chunk {
         if (data.lakes != null) {
             features.addAll(data.lakes);
         }
+        copyHeightsInto(heights, baseHeights);
         rebuildTerrainVolumeFromHeights();
         recalculateHeavyFeatureCount();
         featuresGenerated = false;
@@ -2526,6 +2533,198 @@ public class Chunk {
 
     public int getLOD() {
         return lod;
+    }
+
+    private static final int[][] MC_TETRAS = {
+            { 0, 5, 1, 6 },
+            { 0, 1, 2, 6 },
+            { 0, 2, 3, 6 },
+            { 0, 3, 7, 6 },
+            { 0, 7, 4, 6 },
+            { 0, 4, 5, 6 }
+    };
+
+    private void buildVolumeSurfaceBuffers() {
+        disposeVolumeSurfaceBuffers();
+        if (terrainVolume == null) {
+            return;
+        }
+
+        FloatBuilder builder = new FloatBuilder();
+        int sx = terrainVolume.getSizeX();
+        int sy = terrainVolume.getSizeY();
+        int sz = terrainVolume.getSizeZ();
+
+        float[][] pos = new float[8][3];
+        float[] den = new float[8];
+        for (int z = 0; z < sz - 1; z++) {
+            for (int y = 0; y < sy - 1; y++) {
+                for (int x = 0; x < sx - 1; x++) {
+                    fillCubeSamples(x, y, z, pos, den);
+                    for (int[] tet : MC_TETRAS) {
+                        emitTetra(tet, pos, den, builder);
+                    }
+                }
+            }
+        }
+
+        if (builder.size == 0) {
+            return;
+        }
+        volumeSurfaceVertexCount = builder.size / STRIDE_FLOATS;
+        volumeSurfaceVboId = uploadBufferMapped(builder.toBuffer(), GL_STATIC_DRAW);
+    }
+
+    private void fillCubeSamples(int x, int y, int z, float[][] pos, float[] den) {
+        int[][] c = {
+                { x, y, z }, { x + 1, y, z }, { x + 1, y, z + 1 }, { x, y, z + 1 },
+                { x, y + 1, z }, { x + 1, y + 1, z }, { x + 1, y + 1, z + 1 }, { x, y + 1, z + 1 }
+        };
+        for (int i = 0; i < 8; i++) {
+            int cx = c[i][0];
+            int cy = c[i][1];
+            int cz = c[i][2];
+            pos[i][0] = terrainVolume.getXAt(cx) * scale;
+            pos[i][1] = terrainVolume.getYAt(cy);
+            pos[i][2] = terrainVolume.getZAt(cz) * scale;
+            den[i] = terrainVolume.getDensity(cx, cy, cz);
+        }
+    }
+
+    private void emitTetra(int[] tet, float[][] cubePos, float[] cubeDen, FloatBuilder builder) {
+        int[][] edges = { { 0, 1 }, { 0, 2 }, { 0, 3 }, { 1, 2 }, { 1, 3 }, { 2, 3 } };
+        float[][] p = new float[4][3];
+        float[] d = new float[4];
+        for (int i = 0; i < 4; i++) {
+            int id = tet[i];
+            p[i][0] = cubePos[id][0];
+            p[i][1] = cubePos[id][1];
+            p[i][2] = cubePos[id][2];
+            d[i] = cubeDen[id];
+        }
+
+        float[][] intersections = new float[6][3];
+        int count = 0;
+        for (int[] e : edges) {
+            int a = e[0];
+            int b = e[1];
+            float da = d[a];
+            float db = d[b];
+            if ((da >= 0f && db >= 0f) || (da < 0f && db < 0f)) {
+                continue;
+            }
+            float t = da / (da - db);
+            intersections[count][0] = p[a][0] + (p[b][0] - p[a][0]) * t;
+            intersections[count][1] = p[a][1] + (p[b][1] - p[a][1]) * t;
+            intersections[count][2] = p[a][2] + (p[b][2] - p[a][2]) * t;
+            count++;
+        }
+
+        if (count < 3) {
+            return;
+        }
+
+        if (count == 3) {
+            emitVolumeTriangle(intersections[0], intersections[1], intersections[2], builder);
+        } else {
+            emitVolumeTriangle(intersections[0], intersections[1], intersections[2], builder);
+            emitVolumeTriangle(intersections[0], intersections[2], intersections[3], builder);
+        }
+    }
+
+    private void emitVolumeTriangle(float[] a, float[] b, float[] c, FloatBuilder builder) {
+        float cxTri = (a[0] + b[0] + c[0]) / 3f;
+        float cyTri = (a[1] + b[1] + c[1]) / 3f;
+        float czTri = (a[2] + b[2] + c[2]) / 3f;
+
+        float base = sampleBaseHeightAtWorld(cxTri / scale, czTri / scale);
+        if (cyTri >= base - 0.12f) {
+            return;
+        }
+
+        float ux = b[0] - a[0];
+        float uy = b[1] - a[1];
+        float uz = b[2] - a[2];
+        float vx = c[0] - a[0];
+        float vy = c[1] - a[1];
+        float vz = c[2] - a[2];
+        float nx = uy * vz - uz * vy;
+        float ny = uz * vx - ux * vz;
+        float nz = ux * vy - uy * vx;
+        float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (len <= 0.00001f) {
+            return;
+        }
+        nx /= len;
+        ny /= len;
+        nz /= len;
+
+        putVolumeVertex(builder, a, nx, ny, nz);
+        putVolumeVertex(builder, b, nx, ny, nz);
+        putVolumeVertex(builder, c, nx, ny, nz);
+    }
+
+    private void putVolumeVertex(FloatBuilder builder, float[] p, float nx, float ny, float nz) {
+        float texScale = 0.10f;
+        builder.put(p[0]);
+        builder.put(p[1]);
+        builder.put(p[2]);
+        builder.put(nx);
+        builder.put(ny);
+        builder.put(nz);
+        builder.put(p[0] * texScale);
+        builder.put(p[2] * texScale);
+    }
+
+    private float sampleBaseHeightAtWorld(float wx, float wz) {
+        float lx = wx - cx * SIZE;
+        float lz = wz - cz * SIZE;
+        int x0 = Math.max(0, Math.min(SIZE - 1, (int) Math.floor(lx)));
+        int z0 = Math.max(0, Math.min(SIZE - 1, (int) Math.floor(lz)));
+        int x1 = Math.min(SIZE, x0 + 1);
+        int z1 = Math.min(SIZE, z0 + 1);
+        float fx = lx - x0;
+        float fz = lz - z0;
+        float h00 = baseHeights[x0][z0];
+        float h10 = baseHeights[x1][z0];
+        float h01 = baseHeights[x0][z1];
+        float h11 = baseHeights[x1][z1];
+        float h0 = h00 + (h10 - h00) * fx;
+        float h1 = h01 + (h11 - h01) * fx;
+        return h0 + (h1 - h0) * fz;
+    }
+
+    private void renderVolumeSurface() {
+        if (volumeSurfaceVboId < 0 || volumeSurfaceVertexCount <= 0) {
+            return;
+        }
+        int rockTex = manager.getTexture(biome.rockTex);
+        if (rockTex == 0) {
+            return;
+        }
+
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, rockTex);
+        glBindBuffer(GL_ARRAY_BUFFER, volumeSurfaceVboId);
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glEnableClientState(GL_NORMAL_ARRAY);
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        glVertexPointer(3, GL_FLOAT, STRIDE_FLOATS * Float.BYTES, 0L);
+        glNormalPointer(GL_FLOAT, STRIDE_FLOATS * Float.BYTES, 3L * Float.BYTES);
+        glTexCoordPointer(2, GL_FLOAT, STRIDE_FLOATS * Float.BYTES, 6L * Float.BYTES);
+        glDrawArrays(GL_TRIANGLES, 0, volumeSurfaceVertexCount);
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+        glDisableClientState(GL_NORMAL_ARRAY);
+        glDisableClientState(GL_VERTEX_ARRAY);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
+    private void disposeVolumeSurfaceBuffers() {
+        if (volumeSurfaceVboId >= 0) {
+            glDeleteBuffers(volumeSurfaceVboId);
+            volumeSurfaceVboId = -1;
+        }
+        volumeSurfaceVertexCount = 0;
     }
 
     private void disposeTerrainBuffers() {
