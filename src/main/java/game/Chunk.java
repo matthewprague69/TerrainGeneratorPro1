@@ -102,6 +102,7 @@ public class Chunk {
     private static final float SNOW_MAX_ACCUMULATION_DEPTH = 3.5f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
     private static final float SNOW_BASELINE_COVERAGE = 0.35f;
+    private static final float SNOW_WEATHER_WEIGHT_AT_LOW_ALTITUDE = 0.35f;
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
     public static final float FEATURE_SLOPE_SPAWN_THRESHOLD = DIRT_SLOPE_START;
@@ -699,7 +700,16 @@ public class Chunk {
 
         float altitudeFactor = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, altitude);
         float weatherCoverage = Math.max(0f, Math.min(1f, manager.getSnowCoverage()));
-        float coverage = Math.max(SNOW_BASELINE_COVERAGE, weatherCoverage) * altitudeFactor;
+
+        // Keep some permanent high-altitude snow, but still let snowy weather accumulate everywhere.
+        float baselineCoverage = SNOW_BASELINE_COVERAGE * altitudeFactor;
+        float weatherWeight = SNOW_WEATHER_WEIGHT_AT_LOW_ALTITUDE
+                + (1f - SNOW_WEATHER_WEIGHT_AT_LOW_ALTITUDE) * altitudeFactor;
+        float coverage = Math.max(0f, Math.min(1f, baselineCoverage + weatherCoverage * weatherWeight));
+
+        if (coverage <= 0.0001f) {
+            return 0f;
+        }
 
         if (manager.isWaterFrozen()) {
             float river = riverSurface[x][z];

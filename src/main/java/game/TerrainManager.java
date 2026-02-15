@@ -1518,12 +1518,13 @@ public class TerrainManager {
             }
         }
 
-        if (weatherSystem.getWeatherType() != WeatherType.SNOWY) {
+        float snowCoverage = weatherSystem.getSnowCoverage();
+        if (weatherSystem.getWeatherType() != WeatherType.SNOWY || snowCoverage <= 0.03f) {
             return;
         }
 
         float terrainY = getHeight(wx, wz);
-        if (terrainY < SNOW_DENT_MIN_HEIGHT) {
+        if (terrainY < SNOW_DENT_MIN_HEIGHT && snowCoverage <= 0.15f) {
             return;
         }
         if (Math.abs(wy - terrainY) > 0.22f) {
