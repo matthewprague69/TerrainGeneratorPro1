@@ -2348,12 +2348,17 @@ public class Chunk {
                     if (distSq > radiusSq) {
                         continue;
                     }
+                    float forward = dx * nx + dz * nz;
                     float dist = (float) Math.sqrt(Math.max(0f, distSq));
                     float t = dist / appliedHalfWidth;
                     // Spherical subtraction profile: full effect at center, smoothly fading
                     // toward the brush edge (like subtracting a ball from terrain).
                     float radial = Math.max(0f, 1f - t * t);
                     shapeFactor = (float) Math.sqrt(radial);
+                    // For freeform (non-rectangular) digs, still align the carve floor with
+                    // the look direction so wall digs bias into the wall instead of pulling
+                    // everything downward.
+                    localFloor = floorHeight + forward * digSlope;
                 }
 
                 shapeFactor = Math.max(0f, Math.min(1f, shapeFactor));
@@ -2365,7 +2370,9 @@ public class Chunk {
                 // Carve by subtracting local material each step (incision style) instead of
                 // blending toward an absolute floor target, which can skew the terrain when
                 // the camera angle changes.
-                float lowered = current - appliedDepth * shapeFactor;
+                float loweredByDepth = current - appliedDepth * shapeFactor;
+                float floorLimited = localFloor - appliedDepth * shapeFactor;
+                float lowered = Math.max(loweredByDepth, floorLimited);
                 if (lowered >= current - 0.0001f) {
                     continue;
                 }
