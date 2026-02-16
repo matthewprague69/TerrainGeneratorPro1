@@ -54,11 +54,11 @@ public class Main {
     private boolean prevMouseDown = false;
     private float dugMassInventory = 0f;
     private double lastDigTime = 0.0;
-    private static final double DIG_INTERVAL_SECONDS = 0.14;
+    private static final double DIG_INTERVAL_SECONDS = 0.18;
     private static final float DIG_RAY_STEP = 0.25f;
-    private static final float DIG_HALF_WIDTH = 0.62f;
-    private static final float DIG_HALF_LENGTH = 2.8f;
-    private static final float DIG_DEPTH = 0.20f;
+    private static final float DIG_HALF_WIDTH = 0.40f;
+    private static final float DIG_HALF_LENGTH = 0.40f;
+    private static final float DIG_DEPTH = 0.085f;
     private String debugExportStatus = "";
     private static final DateTimeFormatter DEBUG_EXPORT_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
@@ -157,7 +157,7 @@ public class Main {
         float depth = DIG_DEPTH;
         float floorY = targetY - depth;
         return terrain.digTerrain(targetX, targetZ, halfWidth, halfLength, depth,
-                true, dirX, dirZ, digSlope, floorY);
+                false, dirX, dirZ, digSlope, floorY);
     }
 
     private void setupProjection() {
@@ -387,8 +387,8 @@ public class Main {
         PixelTextRenderer.drawText("INVENTORY (I to close)", panelX + 18f, panelY + panelHeight - 30f, 1.2f);
         PixelTextRenderer.drawText(String.format(Locale.US, "Dug soil mass: %.2f", dugMassInventory),
                 panelX + 18f, panelY + panelHeight - 70f, 1.1f);
-        PixelTextRenderer.drawText("Left mouse = dig tunnel", panelX + 18f, panelY + panelHeight - 104f, 1.0f);
-        PixelTextRenderer.drawText("Hold to carve smoothly", panelX + 18f, panelY + panelHeight - 126f, 1.0f);
+        PixelTextRenderer.drawText("Left mouse = dig small incision", panelX + 18f, panelY + panelHeight - 104f, 1.0f);
+        PixelTextRenderer.drawText("Hold to chip terrain gradually", panelX + 18f, panelY + panelHeight - 126f, 1.0f);
         UIRenderer.end2D();
     }
 
