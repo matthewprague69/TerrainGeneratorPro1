@@ -1047,8 +1047,8 @@ public class TerrainManager {
             return 0f;
         }
 
-        int slices = rectangular ? 4 : 3;
-        float sliceSpacing = rectangular ? (l * 0.18f) : (w * 0.40f);
+        int slices = rectangular ? 6 : 1;
+        float sliceSpacing = rectangular ? (l * 0.22f) : 0f;
 
         float totalMass = 0f;
         Set<Chunk> changed = new HashSet<>();
