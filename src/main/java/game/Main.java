@@ -54,6 +54,11 @@ public class Main {
     private boolean prevMouseDown = false;
     private float dugMassInventory = 0f;
     private double lastDigTime = 0.0;
+    private static final double DIG_INTERVAL_SECONDS = 0.14;
+    private static final float DIG_RAY_STEP = 0.25f;
+    private static final float DIG_HALF_WIDTH = 0.62f;
+    private static final float DIG_HALF_LENGTH = 2.8f;
+    private static final float DIG_DEPTH = 0.20f;
     private String debugExportStatus = "";
     private static final DateTimeFormatter DEBUG_EXPORT_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
@@ -113,14 +118,14 @@ public class Main {
                 (menuOpen || inventoryOpen) ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
     }
 
-    private float performDigAction(boolean rectangular) {
+    private float performDigAction() {
         float[] lookDir = player.getLookDirection();
         float originX = player.getX();
         float originY = player.getY();
         float originZ = player.getZ();
 
         float maxDistance = 18f;
-        float step = 0.35f;
+        float step = DIG_RAY_STEP;
         float targetX = Float.NaN;
         float targetY = Float.NaN;
         float targetZ = Float.NaN;
@@ -147,11 +152,12 @@ public class Main {
         float dirZ = dirLen > 0.0001f ? lookDir[2] / dirLen : 0f;
         float digSlope = dirLen > 0.0001f ? lookDir[1] / dirLen : 0f;
 
-        float halfWidth = rectangular ? 0.75f : 1.8f;
-        float halfLength = rectangular ? 4.2f : 1.8f;
-        float depth = rectangular ? 0.70f : 0.52f;
+        float halfWidth = DIG_HALF_WIDTH;
+        float halfLength = DIG_HALF_LENGTH;
+        float depth = DIG_DEPTH;
         float floorY = targetY - depth;
-        return terrain.digTerrain(targetX, targetZ, halfWidth, halfLength, depth, rectangular, dirX, dirZ, digSlope, floorY);
+        return terrain.digTerrain(targetX, targetZ, halfWidth, halfLength, depth,
+                true, dirX, dirZ, digSlope, floorY);
     }
 
     private void setupProjection() {
@@ -381,8 +387,8 @@ public class Main {
         PixelTextRenderer.drawText("INVENTORY (I to close)", panelX + 18f, panelY + panelHeight - 30f, 1.2f);
         PixelTextRenderer.drawText(String.format(Locale.US, "Dug soil mass: %.2f", dugMassInventory),
                 panelX + 18f, panelY + panelHeight - 70f, 1.1f);
-        PixelTextRenderer.drawText("Left mouse = dig circle", panelX + 18f, panelY + panelHeight - 104f, 1.0f);
-        PixelTextRenderer.drawText("Shift + Left mouse = dig tunnel", panelX + 18f, panelY + panelHeight - 126f, 1.0f);
+        PixelTextRenderer.drawText("Left mouse = dig tunnel", panelX + 18f, panelY + panelHeight - 104f, 1.0f);
+        PixelTextRenderer.drawText("Hold to carve smoothly", panelX + 18f, panelY + panelHeight - 126f, 1.0f);
         UIRenderer.end2D();
     }
 
@@ -702,11 +708,9 @@ public class Main {
                 handleMenuClick(mouseX, mouseY, fbWidth, fbHeight);
             }
             if (!menuOpen && !inventoryOpen && mouseDown) {
-                boolean shiftHeldForDig = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
-                        || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
                 double digNow = glfwGetTime();
-                if (digNow - lastDigTime >= 0.10) {
-                    float dugMass = performDigAction(shiftHeldForDig);
+                if (digNow - lastDigTime >= DIG_INTERVAL_SECONDS) {
+                    float dugMass = performDigAction();
                     if (dugMass > 0f) {
                         dugMassInventory += dugMass;
                     }
