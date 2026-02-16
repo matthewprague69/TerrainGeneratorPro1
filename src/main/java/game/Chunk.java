@@ -62,7 +62,10 @@ public class Chunk {
     private final int lod;
 
     private final float[][] heights = new float[SIZE + 1][SIZE + 1];
+    private final float[][] baseHeights = new float[SIZE + 1][SIZE + 1];
     private final float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
+    private float cachedMaxAltitudeSnowCoverage = -1f;
+    private TerrainVolume terrainVolume;
     private final List<Feature> features = new ArrayList<>();
     private final boolean[][] featureMask = new boolean[SIZE][SIZE];
     private final boolean[][] lakeMask = new boolean[SIZE][SIZE];
@@ -70,6 +73,8 @@ public class Chunk {
     private int heavyFeatureCount = 0;
     private final List<TerrainBatch> terrainBatches = new ArrayList<>();
     private int terrainVboId = -1;
+    private int volumeSurfaceVboId = -1;
+    private int volumeSurfaceVertexCount = 0;
     private final int[] primaryLayerTextures = new int[3];
     private final float[] primaryLayerAlphas = new float[3];
     private final int[] secondaryLayerTextures = new int[3];
@@ -101,9 +106,15 @@ public class Chunk {
     private static final float SNOW_HEIGHT_FULL = 60f;
     private static final float SNOW_MAX_ACCUMULATION_DEPTH = 3.5f;
     private static final float SNOW_MIN_ACCUMULATION_SLOPE_FACTOR = 0.15f;
-    private static final float SNOW_LOW_ALTITUDE_START = WATER_SURROUNDING_LEVEL;
-    private static final float SNOW_HIGH_ALTITUDE_FULL_REDUCTION = 62f;
-    private static final float SNOW_MIN_ALTITUDE_FACTOR = 0.2f;
+    private static final float SNOW_ALTITUDE_ACCUMULATION_BOOST = 0.85f;
+    private static final float SNOW_STEEP_SLOPE_FADE_START = 1.95f;
+    private static final float SNOW_STEEP_SLOPE_NO_ACCUMULATION = 2.90f;
+    private static final float SNOW_SUN_WARMING_C = 3.0f;
+    private static final float SNOW_SHADE_COOLING_C = 3.0f;
+    private static final float SNOW_MIN_RENDERABLE_DEPTH = 0.035f;
+    private static final int VOLUME_HORIZONTAL_RES = 40;
+    private static final int VOLUME_VERTICAL_RES = 96;
+    private static final float VOLUME_VERTICAL_MARGIN = 20f;
 
     private static final float FEATURE_MIN_HEIGHT = WATER_SURROUNDING_LEVEL;
     private static final float FEATURE_MAX_HEIGHT = SNOW_HEIGHT_START;
@@ -427,6 +438,7 @@ public class Chunk {
             }
         }
 
+        copyHeightsInto(heights, baseHeights);
         resetRiverSurface(riverSurface);
         applyCavesAndRavines(heights, riverSurface, cx, cz, scale, terrainNoise, manager.getSeed());
 
@@ -434,6 +446,7 @@ public class Chunk {
         LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, features, manager);
         if (generateFeatures)
             generateFeatures();
+        rebuildTerrainVolumeFromHeights();
         stitchEdges();
         buildTerrainBuffers();
         buildWaterDisplayList();
@@ -574,9 +587,8 @@ public class Chunk {
         glColor3f(1f, 1f, 1f);
 
         renderTerrainBuffers();
-        if (snowCoverage > 0.01f) {
-            renderSnowLayer(snowCoverage);
-        }
+        renderVolumeSurface();
+        renderSnowLayer(snowCoverage);
         if (chunkDistance <= grassDetailDistance && chunkDistance <= featureRenderDist) {
             renderGrassBatch();
         }
@@ -611,7 +623,9 @@ public class Chunk {
 
     private void renderSnowLayer(float snowCoverage) {
         float clampedCoverage = Math.max(0f, Math.min(1f, snowCoverage));
-        if (clampedCoverage <= 0f) {
+        float maxAltitudeCoverage = getChunkMaxAltitudeSnowCoverage();
+        float effectiveCoverage = Math.max(clampedCoverage, maxAltitudeCoverage);
+        if (effectiveCoverage <= 0.0001f) {
             return;
         }
 
@@ -622,16 +636,19 @@ public class Chunk {
 
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, snowTexture);
-        glDisable(GL_LIGHTING);
+        glEnable(GL_LIGHTING);
         glDisable(GL_BLEND);
         glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(-1f, -1f);
-        glColor3f(1f, 1f, 1f);
+        glColor3f(0.86f, 0.89f, 0.92f);
 
         boolean frozenWater = manager.isWaterFrozen();
         float iceThickness = frozenWater ? manager.getIceThickness() : 0f;
 
         int step = Math.max(1, (int) Math.pow(2, lod));
+        if (effectiveCoverage > 0.45f) {
+            step = Math.max(step, 2);
+        }
         float texScale = 0.14f;
         glBegin(GL_TRIANGLES);
         for (int z = 0; z < SIZE; z += step) {
@@ -644,7 +661,8 @@ public class Chunk {
                 float d01 = getSnowDepthForVertex(x, z2, clampedCoverage);
                 float d11 = getSnowDepthForVertex(x2, z2, clampedCoverage);
 
-                if (d00 <= 0.0001f && d10 <= 0.0001f && d01 <= 0.0001f && d11 <= 0.0001f) {
+                if (d00 <= SNOW_MIN_RENDERABLE_DEPTH && d10 <= SNOW_MIN_RENDERABLE_DEPTH
+                        && d01 <= SNOW_MIN_RENDERABLE_DEPTH && d11 <= SNOW_MIN_RENDERABLE_DEPTH) {
                     continue;
                 }
 
@@ -663,6 +681,7 @@ public class Chunk {
                 float y01 = b01 + d01;
                 float y11 = b11 + d11;
 
+                applyTriangleNormal(wx, y00, wz, wx2, y10, wz, wx, y01, wz2);
                 glTexCoord2f(wx * texScale, wz * texScale);
                 glVertex3f(wx, y00, wz);
                 glTexCoord2f(wx2 * texScale, wz * texScale);
@@ -703,8 +722,63 @@ public class Chunk {
     }
 
     private float getSnowDepthForVertex(int x, int z, float snowCoverage) {
-        float clampedCoverage = Math.max(0f, Math.min(1f, snowCoverage));
-        if (clampedCoverage <= 0f) {
+        float weatherCoverage = Math.max(0f, Math.min(1f, snowCoverage));
+        float altitudeCoverage = getAltitudeSnowCoverage(heights[x][z]);
+
+        float hL = sampleHeightForSlope(x - 1, z);
+        float hR = sampleHeightForSlope(x + 1, z);
+        float hD = sampleHeightForSlope(x, z - 1);
+        float hU = sampleHeightForSlope(x, z + 1);
+        float dx = (hR - hL) * 0.5f;
+        float dz = (hU - hD) * 0.5f;
+
+        float slope = (float) Math.sqrt(dx * dx + dz * dz);
+        if (slope >= SNOW_STEEP_SLOPE_NO_ACCUMULATION) {
+            return 0f;
+        }
+
+        float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
+        slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
+
+        float steepFade = 1f - (float) smoothstep(SNOW_STEEP_SLOPE_FADE_START,
+                SNOW_STEEP_SLOPE_NO_ACCUMULATION, slope);
+        slopeFactor *= steepFade;
+        if (slopeFactor <= 0.0001f) {
+            return 0f;
+        }
+
+        float[] sunDir = manager.getLightDirection();
+        float sunLen = (float) Math.sqrt(sunDir[0] * sunDir[0] + sunDir[1] * sunDir[1] + sunDir[2] * sunDir[2]);
+        float sx = sunLen > 0.0001f ? sunDir[0] / sunLen : 0f;
+        float sy = sunLen > 0.0001f ? sunDir[1] / sunLen : 1f;
+        float sz = sunLen > 0.0001f ? sunDir[2] / sunLen : 0f;
+
+        float normalLen = (float) Math.sqrt(dx * dx + 1f + dz * dz);
+        float nx = -dx / normalLen;
+        float ny = 1f / normalLen;
+        float nz = -dz / normalLen;
+
+        float directSun = Math.max(0f, nx * sx + ny * sy + nz * sz);
+        float daylight = Math.max(0f, sy);
+        float sunExposure = directSun * daylight;
+
+        if (manager.getWeatherType() != WeatherType.SNOWY) {
+            float shade = 1f - sunExposure;
+            float localTempC = manager.getTemperatureC()
+                    + sunExposure * SNOW_SUN_WARMING_C
+                    - shade * SNOW_SHADE_COOLING_C;
+            if (localTempC > 0f) {
+                float meltStrength = Math.max(0f, Math.min(1f, localTempC / 8.0f));
+                float sunMelt = 0.20f + 0.55f * sunExposure;
+                float weatherRetention = Math.max(0.12f, 1f - meltStrength * sunMelt);
+                float altitudeRetention = Math.max(0.55f, 1f - meltStrength * (0.14f + 0.20f * sunExposure));
+                weatherCoverage *= weatherRetention;
+                altitudeCoverage *= altitudeRetention;
+            }
+        }
+
+        float clampedCoverage = Math.max(weatherCoverage, altitudeCoverage);
+        if (clampedCoverage <= 0.0001f) {
             return 0f;
         }
 
@@ -717,36 +791,50 @@ public class Chunk {
             }
         }
 
-        float slope = computeSnowSlopeAtVertex(x, z);
-        float slopeFactor = 1f - Math.min(1f, slope / 1.2f);
-        slopeFactor = Math.max(SNOW_MIN_ACCUMULATION_SLOPE_FACTOR, slopeFactor);
-
         float wx = (cx * SIZE + x) * scale;
         float wz = (cz * SIZE + z) * scale;
         float driftNoise = (float) manager.getTerrainNoise().eval(wx * 0.03 + 1337.0, wz * 0.03 - 911.0);
         float driftFactor = 0.88f + (driftNoise * 0.12f);
 
-        float altitude = heights[x][z];
-        float altitudeT = (altitude - SNOW_LOW_ALTITUDE_START)
-                / Math.max(0.0001f, SNOW_HIGH_ALTITUDE_FULL_REDUCTION - SNOW_LOW_ALTITUDE_START);
-        altitudeT = Math.max(0f, Math.min(1f, altitudeT));
-        float altitudeFactor = 1f - altitudeT * (1f - SNOW_MIN_ALTITUDE_FACTOR);
+        float altitudeFactor = 1f + altitudeCoverage * SNOW_ALTITUDE_ACCUMULATION_BOOST;
 
         float baseDepth = SNOW_MAX_ACCUMULATION_DEPTH * clampedCoverage
                 * slopeFactor * altitudeFactor * driftFactor;
+        if (baseDepth <= SNOW_MIN_RENDERABLE_DEPTH * 0.45f) {
+            return 0f;
+        }
         float dentDepth = manager.getSnowDentDepth(wx, wz, clampedCoverage);
         return Math.max(0f, baseDepth - dentDepth);
     }
 
-    private float computeSnowSlopeAtVertex(int x, int z) {
-        float hL = sampleHeightForSlope(x - 1, z);
-        float hR = sampleHeightForSlope(x + 1, z);
-        float hD = sampleHeightForSlope(x, z - 1);
-        float hU = sampleHeightForSlope(x, z + 1);
+    public static float getAltitudeSnowCoverage(float height) {
+        if (height < SNOW_HEIGHT_START) {
+            return 0f;
+        }
+        float snowCoverage = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
+        return Math.max(0f, Math.min(1f, snowCoverage));
+    }
 
-        float dx = (hR - hL) * 0.5f;
-        float dz = (hU - hD) * 0.5f;
-        return (float) Math.sqrt(dx * dx + dz * dz);
+    private float getChunkMaxAltitudeSnowCoverage() {
+        if (cachedMaxAltitudeSnowCoverage >= 0f) {
+            return cachedMaxAltitudeSnowCoverage;
+        }
+
+        float maxCoverage = 0f;
+        for (int z = 0; z <= SIZE; z++) {
+            for (int x = 0; x <= SIZE; x++) {
+                float coverage = getAltitudeSnowCoverage(heights[x][z]);
+                if (coverage > maxCoverage) {
+                    maxCoverage = coverage;
+                    if (maxCoverage >= 0.999f) {
+                        cachedMaxAltitudeSnowCoverage = 1f;
+                        return 1f;
+                    }
+                }
+            }
+        }
+        cachedMaxAltitudeSnowCoverage = maxCoverage;
+        return maxCoverage;
     }
 
     private float sampleHeightForSlope(int x, int z) {
@@ -1664,19 +1752,6 @@ public class Chunk {
             blendAlpha = 0f;
         }
 
-        float snowBlend = 0f;
-        if (height >= SNOW_HEIGHT_START) {
-            snowBlend = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
-            snowBlend = Math.max(0f, Math.min(1f, snowBlend));
-        }
-
-        if (snowBlend >= 0.999f) {
-            textures[0] = manager.getSnowTexture();
-            alphas[0] = 1f;
-            return 1;
-        }
-
-        float exposedGround = 1f - snowBlend;
         int count = 0;
 
         // Keep a fully opaque base layer so terrain always writes depth and never turns see-through.
@@ -1684,16 +1759,9 @@ public class Chunk {
         alphas[count] = 1f;
         count++;
 
-        float weightedBlendAlpha = blendAlpha * exposedGround;
-        if (blendTex != -1 && blendTex != baseTex && weightedBlendAlpha > 0.001f) {
+        if (blendTex != -1 && blendTex != baseTex && blendAlpha > 0.001f) {
             textures[count] = blendTex;
-            alphas[count] = weightedBlendAlpha;
-            count++;
-        }
-
-        if (snowBlend > 0.001f) {
-            textures[count] = manager.getSnowTexture();
-            alphas[count] = snowBlend;
+            alphas[count] = blendAlpha;
             count++;
         }
 
@@ -1974,13 +2042,6 @@ public class Chunk {
             return manager.getWaterBottomTexture();
         }
 
-        if (height >= SNOW_HEIGHT_START) {
-            float snowBlend = (float) smoothstep(SNOW_HEIGHT_START, SNOW_HEIGHT_FULL, height);
-            if (snowBlend >= 0.5f) {
-                return manager.getSnowTexture();
-            }
-        }
-
         if (slope >= ROCK_SLOPE_START) {
             return manager.getTexture(targetBiome.rockTex);
         }
@@ -2025,9 +2086,6 @@ public class Chunk {
         float baseHeight = a + (b - a) * fz;
 
         float snowCoverage = manager.getSnowCoverage();
-        if (snowCoverage <= 0.001f) {
-            return baseHeight;
-        }
 
         float d00 = getSnowDepthForVertex(ix, iz, snowCoverage);
         float d10 = getSnowDepthForVertex(ix + 1, iz, snowCoverage);
@@ -2038,6 +2096,181 @@ public class Chunk {
         float snowDepth = dA + (dB - dA) * fz;
 
         return baseHeight + snowDepth;
+    }
+
+    public float digArea(float centerWx, float centerWz, float halfWidth, float halfLength, float depth,
+                         boolean rectangular, float dirX, float dirZ, float digSlope, float floorHeight) {
+        float appliedDepth = Math.max(0f, depth);
+        float appliedHalfWidth = Math.max(0.25f, halfWidth);
+        float appliedHalfLength = Math.max(appliedHalfWidth, halfLength);
+        if (appliedDepth <= 0.0001f) {
+            return 0f;
+        }
+
+        float dirLen = (float) Math.sqrt(dirX * dirX + dirZ * dirZ);
+        float nx = dirLen > 0.0001f ? dirX / dirLen : 1f;
+        float nz = dirLen > 0.0001f ? dirZ / dirLen : 0f;
+
+        float removedHeightSum = 0f;
+        boolean changed = false;
+
+        if (terrainVolume != null) {
+            float[][] before = copyHeights(heights);
+            int previousVolumeVertexCount = volumeSurfaceVertexCount;
+
+            terrainVolume.carveDirectionalTunnel(centerWx, floorHeight, centerWz,
+                    appliedHalfWidth, appliedHalfLength, nx, nz, digSlope, rectangular);
+            applyVolumeSurfaceToPortalHeights(centerWx, centerWz, nx, nz,
+                    Math.max(appliedHalfWidth * 1.15f, appliedHalfLength * 0.75f));
+            buildVolumeSurfaceBuffers();
+
+            for (int z = 0; z <= SIZE; z++) {
+                for (int x = 0; x <= SIZE; x++) {
+                    float delta = before[x][z] - heights[x][z];
+                    if (delta > 0.0001f) {
+                        removedHeightSum += delta;
+                        changed = true;
+                    }
+                }
+            }
+            if (volumeSurfaceVertexCount != previousVolumeVertexCount) {
+                changed = true;
+            }
+        } else {
+            float radiusSq = appliedHalfWidth * appliedHalfWidth;
+            float tx = -nz;
+            float tz = nx;
+            for (int z = 0; z <= SIZE; z++) {
+                for (int x = 0; x <= SIZE; x++) {
+                    float wx = (cx * SIZE + x) * scale;
+                    float wz = (cz * SIZE + z) * scale;
+                    float dx = wx - centerWx;
+                    float dz = wz - centerWz;
+
+                    float shapeFactor;
+                    float localFloor = floorHeight;
+                    if (rectangular) {
+                        float forward = dx * nx + dz * nz;
+                        float side = dx * tx + dz * tz;
+                        if (forward < 0f || forward > appliedHalfLength) {
+                            continue;
+                        }
+                        float ax = forward / appliedHalfLength;
+                        float az = Math.abs(side) / appliedHalfWidth;
+                        float edge = Math.max(ax, az);
+                        if (edge > 1f) {
+                            continue;
+                        }
+                        float hardCore = 0.90f;
+                        if (edge <= hardCore) {
+                            shapeFactor = 1f;
+                        } else {
+                            float tt = (edge - hardCore) / Math.max(0.0001f, 1f - hardCore);
+                            shapeFactor = 1f - (float) smoothstep(0f, 1f, tt);
+                        }
+                        localFloor = floorHeight + forward * digSlope;
+                    } else {
+                        float distSq = dx * dx + dz * dz;
+                        if (distSq > radiusSq) {
+                            continue;
+                        }
+                        float dist = (float) Math.sqrt(Math.max(0f, distSq));
+                        float tt = dist / appliedHalfWidth;
+                        if (tt <= 0.88f) {
+                            shapeFactor = 1f;
+                        } else {
+                            float edge = (tt - 0.88f) / 0.12f;
+                            shapeFactor = 1f - (float) smoothstep(0f, 1f, edge);
+                        }
+                    }
+
+                    shapeFactor = Math.max(0f, Math.min(1f, shapeFactor));
+                    if (shapeFactor <= 0.0001f) {
+                        continue;
+                    }
+
+                    float current = heights[x][z];
+                    float blendedTarget = current + (localFloor - current) * shapeFactor;
+                    float lowered = Math.min(current - appliedDepth * shapeFactor, blendedTarget);
+                    if (lowered >= current - 0.0001f) {
+                        continue;
+                    }
+                    heights[x][z] = lowered;
+                    removedHeightSum += (current - lowered);
+                    changed = true;
+                }
+            }
+        }
+
+        if (!changed) {
+            return 0f;
+        }
+
+        cachedMaxAltitudeSnowCoverage = -1f;
+        buildTerrainBuffers();
+        buildWaterDisplayList();
+        renderResourcesBuilt = true;
+
+        float displacedVolume = removedHeightSum * scale * scale * 0.45f;
+        return Math.max(0f, displacedVolume);
+    }
+
+    private void applyVolumeSurfaceToPortalHeights(float centerWx, float centerWz,
+                                                 float dirX, float dirZ, float portalRadius) {
+        if (terrainVolume == null) {
+            return;
+        }
+        float rSq = portalRadius * portalRadius;
+        for (int z = 0; z <= SIZE; z++) {
+            for (int x = 0; x <= SIZE; x++) {
+                float wx = cx * SIZE + x;
+                float wz = cz * SIZE + z;
+                float dx = wx - centerWx;
+                float dz = wz - centerWz;
+                float distSq = dx * dx + dz * dz;
+                if (distSq > rSq) {
+                    continue;
+                }
+                float projected = terrainVolume.sampleTopSurface(wx, wz, heights[x][z]);
+                if (projected < heights[x][z]) {
+                    heights[x][z] = projected;
+                }
+            }
+        }
+    }
+
+    private void rebuildTerrainVolumeFromHeights() {
+        float minY = Float.MAX_VALUE;
+        float maxY = -Float.MAX_VALUE;
+        for (int z = 0; z <= SIZE; z++) {
+            for (int x = 0; x <= SIZE; x++) {
+                float h = heights[x][z];
+                minY = Math.min(minY, h);
+                maxY = Math.max(maxY, h);
+            }
+        }
+
+        float minX = cx * SIZE;
+        float maxX = (cx + 1) * SIZE;
+        float minZ = cz * SIZE;
+        float maxZ = (cz + 1) * SIZE;
+
+        terrainVolume = new TerrainVolume(
+                VOLUME_HORIZONTAL_RES,
+                VOLUME_VERTICAL_RES,
+                VOLUME_HORIZONTAL_RES,
+                minX,
+                maxX,
+                minY - VOLUME_VERTICAL_MARGIN,
+                maxY + VOLUME_VERTICAL_MARGIN,
+                minZ,
+                maxZ);
+        terrainVolume.fillFromHeightField(heights, cx, cz, SIZE);
+        buildVolumeSurfaceBuffers();
+    }
+
+    public TerrainVolume getTerrainVolume() {
+        return terrainVolume;
     }
 
     public BoundingBox getBoundingBox() {
@@ -2071,6 +2304,15 @@ public class Chunk {
 
     public void refreshAfterNeighborUpdate() {
         stitchEdges();
+        rebuildTerrainVolumeFromHeights();
+        buildTerrainBuffers();
+        buildWaterDisplayList();
+        renderResourcesBuilt = true;
+    }
+
+    public void refreshAfterNeighborEdit() {
+        stitchEdges();
+        cachedMaxAltitudeSnowCoverage = -1f;
         buildTerrainBuffers();
         buildWaterDisplayList();
         renderResourcesBuilt = true;
@@ -2116,6 +2358,8 @@ public class Chunk {
         if (data.lakes != null) {
             features.addAll(data.lakes);
         }
+        copyHeightsInto(heights, baseHeights);
+        rebuildTerrainVolumeFromHeights();
         recalculateHeavyFeatureCount();
         featuresGenerated = false;
     }
@@ -2317,6 +2561,194 @@ public class Chunk {
         return lod;
     }
 
+    private static final int[][] MC_TETRAS = {
+            { 0, 5, 1, 6 },
+            { 0, 1, 2, 6 },
+            { 0, 2, 3, 6 },
+            { 0, 3, 7, 6 },
+            { 0, 7, 4, 6 },
+            { 0, 4, 5, 6 }
+    };
+
+    private void buildVolumeSurfaceBuffers() {
+        disposeVolumeSurfaceBuffers();
+        if (terrainVolume == null) {
+            return;
+        }
+
+        FloatBuilder builder = new FloatBuilder();
+        int sx = terrainVolume.getSizeX();
+        int sy = terrainVolume.getSizeY();
+        int sz = terrainVolume.getSizeZ();
+
+        float[][] pos = new float[8][3];
+        float[] den = new float[8];
+        for (int z = 0; z < sz - 1; z++) {
+            for (int y = 0; y < sy - 1; y++) {
+                for (int x = 0; x < sx - 1; x++) {
+                    fillCubeSamples(x, y, z, pos, den);
+                    for (int[] tet : MC_TETRAS) {
+                        emitTetra(tet, pos, den, builder);
+                    }
+                }
+            }
+        }
+
+        if (builder.size == 0) {
+            return;
+        }
+        volumeSurfaceVertexCount = builder.size / STRIDE_FLOATS;
+        volumeSurfaceVboId = uploadBufferMapped(builder.toBuffer(), GL_STATIC_DRAW);
+    }
+
+    private void fillCubeSamples(int x, int y, int z, float[][] pos, float[] den) {
+        int[][] c = {
+                { x, y, z }, { x + 1, y, z }, { x + 1, y, z + 1 }, { x, y, z + 1 },
+                { x, y + 1, z }, { x + 1, y + 1, z }, { x + 1, y + 1, z + 1 }, { x, y + 1, z + 1 }
+        };
+        for (int i = 0; i < 8; i++) {
+            int cx = c[i][0];
+            int cy = c[i][1];
+            int cz = c[i][2];
+            pos[i][0] = terrainVolume.getXAt(cx) * scale;
+            pos[i][1] = terrainVolume.getYAt(cy);
+            pos[i][2] = terrainVolume.getZAt(cz) * scale;
+            den[i] = terrainVolume.getDensity(cx, cy, cz);
+        }
+    }
+
+    private void emitTetra(int[] tet, float[][] cubePos, float[] cubeDen, FloatBuilder builder) {
+        int[][] edges = { { 0, 1 }, { 0, 2 }, { 0, 3 }, { 1, 2 }, { 1, 3 }, { 2, 3 } };
+        float[][] p = new float[4][3];
+        float[] d = new float[4];
+        for (int i = 0; i < 4; i++) {
+            int id = tet[i];
+            p[i][0] = cubePos[id][0];
+            p[i][1] = cubePos[id][1];
+            p[i][2] = cubePos[id][2];
+            d[i] = cubeDen[id];
+        }
+
+        float[][] intersections = new float[6][3];
+        int count = 0;
+        for (int[] e : edges) {
+            int a = e[0];
+            int b = e[1];
+            float da = d[a];
+            float db = d[b];
+            if ((da >= 0f && db >= 0f) || (da < 0f && db < 0f)) {
+                continue;
+            }
+            float t = da / (da - db);
+            intersections[count][0] = p[a][0] + (p[b][0] - p[a][0]) * t;
+            intersections[count][1] = p[a][1] + (p[b][1] - p[a][1]) * t;
+            intersections[count][2] = p[a][2] + (p[b][2] - p[a][2]) * t;
+            count++;
+        }
+
+        if (count < 3) {
+            return;
+        }
+
+        if (count == 3) {
+            emitVolumeTriangle(intersections[0], intersections[1], intersections[2], builder);
+        } else {
+            emitVolumeTriangle(intersections[0], intersections[1], intersections[2], builder);
+            emitVolumeTriangle(intersections[0], intersections[2], intersections[3], builder);
+        }
+    }
+
+    private void emitVolumeTriangle(float[] a, float[] b, float[] c, FloatBuilder builder) {
+        float cxTri = (a[0] + b[0] + c[0]) / 3f;
+        float cyTri = (a[1] + b[1] + c[1]) / 3f;
+        float czTri = (a[2] + b[2] + c[2]) / 3f;
+
+        float base = sampleBaseHeightAtWorld(cxTri / scale, czTri / scale);
+        if (cyTri >= base - 0.03f) {
+            return;
+        }
+
+        float ux = b[0] - a[0];
+        float uy = b[1] - a[1];
+        float uz = b[2] - a[2];
+        float vx = c[0] - a[0];
+        float vy = c[1] - a[1];
+        float vz = c[2] - a[2];
+        float nx = uy * vz - uz * vy;
+        float ny = uz * vx - ux * vz;
+        float nz = ux * vy - uy * vx;
+        float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (len <= 0.00001f) {
+            return;
+        }
+        nx /= len;
+        ny /= len;
+        nz /= len;
+
+        putVolumeVertex(builder, a, nx, ny, nz);
+        putVolumeVertex(builder, b, nx, ny, nz);
+        putVolumeVertex(builder, c, nx, ny, nz);
+    }
+
+    private void putVolumeVertex(FloatBuilder builder, float[] p, float nx, float ny, float nz) {
+        float texScale = 0.10f;
+        builder.putVertex(p[0], p[1], p[2], new float[] { nx, ny, nz },
+                p[0] * texScale, p[2] * texScale);
+    }
+
+    private float sampleBaseHeightAtWorld(float wx, float wz) {
+        float lx = wx - cx * SIZE;
+        float lz = wz - cz * SIZE;
+        int x0 = Math.max(0, Math.min(SIZE - 1, (int) Math.floor(lx)));
+        int z0 = Math.max(0, Math.min(SIZE - 1, (int) Math.floor(lz)));
+        int x1 = Math.min(SIZE, x0 + 1);
+        int z1 = Math.min(SIZE, z0 + 1);
+        float fx = lx - x0;
+        float fz = lz - z0;
+        float h00 = baseHeights[x0][z0];
+        float h10 = baseHeights[x1][z0];
+        float h01 = baseHeights[x0][z1];
+        float h11 = baseHeights[x1][z1];
+        float h0 = h00 + (h10 - h00) * fx;
+        float h1 = h01 + (h11 - h01) * fx;
+        return h0 + (h1 - h0) * fz;
+    }
+
+    private void renderVolumeSurface() {
+        if (volumeSurfaceVboId < 0 || volumeSurfaceVertexCount <= 0) {
+            return;
+        }
+        int rockTex = manager.getTexture(biome.rockTex);
+        if (rockTex == 0) {
+            return;
+        }
+
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, rockTex);
+        glDisable(GL_CULL_FACE);
+        glBindBuffer(GL_ARRAY_BUFFER, volumeSurfaceVboId);
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glEnableClientState(GL_NORMAL_ARRAY);
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        glVertexPointer(3, GL_FLOAT, STRIDE_FLOATS * Float.BYTES, 0L);
+        glNormalPointer(GL_FLOAT, STRIDE_FLOATS * Float.BYTES, 3L * Float.BYTES);
+        glTexCoordPointer(2, GL_FLOAT, STRIDE_FLOATS * Float.BYTES, 6L * Float.BYTES);
+        glDrawArrays(GL_TRIANGLES, 0, volumeSurfaceVertexCount);
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+        glDisableClientState(GL_NORMAL_ARRAY);
+        glDisableClientState(GL_VERTEX_ARRAY);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glEnable(GL_CULL_FACE);
+    }
+
+    private void disposeVolumeSurfaceBuffers() {
+        if (volumeSurfaceVboId >= 0) {
+            glDeleteBuffers(volumeSurfaceVboId);
+            volumeSurfaceVboId = -1;
+        }
+        volumeSurfaceVertexCount = 0;
+    }
+
     private void disposeTerrainBuffers() {
         if (terrainVboId != -1) {
             glDeleteBuffers(terrainVboId);
@@ -2383,6 +2815,29 @@ public class Chunk {
             return new float[] { 0f, 1f, 0f };
         }
         return new float[] { nx / len, ny / len, nz / len };
+    }
+
+    private static void applyTriangleNormal(float ax, float ay, float az,
+                                            float bx, float by, float bz,
+                                            float cx, float cy, float cz) {
+        float ux = bx - ax;
+        float uy = by - ay;
+        float uz = bz - az;
+        float vx = cx - ax;
+        float vy = cy - ay;
+        float vz = cz - az;
+
+        float nx = uy * vz - uz * vy;
+        float ny = uz * vx - ux * vz;
+        float nz = ux * vy - uy * vx;
+
+        float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (len <= 0.00001f) {
+            glNormal3f(0f, 1f, 0f);
+            return;
+        }
+        float invLen = 1f / len;
+        glNormal3f(nx * invLen, ny * invLen, nz * invLen);
     }
 
     private static final int STRIDE_FLOATS = 8;

@@ -75,8 +75,12 @@ public class WeatherSystem {
         precipitationTime += dt;
     }
 
-    public void renderPrecipitation(float camX, float camY, float camZ, float surfaceY) {
-        if (precipitationStrength <= 0.01f || weatherType == WeatherType.SUNNY) {
+    public void renderPrecipitation(float camX, float camY, float camZ, float surfaceY, float localSnowStrength) {
+        float localSnow = Math.max(0f, Math.min(1f, localSnowStrength));
+        float particleStrength = Math.max(precipitationStrength, localSnow);
+        boolean weatherSnow = weatherType == WeatherType.SNOWY;
+
+        if (!weatherSnow && (weatherType == WeatherType.SUNNY || precipitationStrength <= 0.01f) && localSnow <= 0.01f) {
             return;
         }
 
@@ -85,8 +89,8 @@ public class WeatherSystem {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        if (weatherType == WeatherType.SNOWY) {
-            renderSnowParticles(camX, camY, camZ, surfaceY);
+        if (weatherSnow || localSnow > 0.01f) {
+            renderSnowParticles(camX, camY, camZ, surfaceY, particleStrength);
         } else {
             renderRainParticles(camX, camY, camZ);
         }
@@ -94,7 +98,7 @@ public class WeatherSystem {
         glDisable(GL_BLEND);
     }
 
-    private void renderSnowParticles(float camX, float camY, float camZ, float surfaceY) {
+    private void renderSnowParticles(float camX, float camY, float camZ, float surfaceY, float strength) {
         float snappedGroundY = (float) Math.floor(surfaceY * 0.5f) * 2f;
         float desiredTop = Math.max(snappedGroundY + 32f, camY + 14f);
         float topY = (float) Math.ceil(desiredTop / 4f) * 4f;
@@ -102,22 +106,22 @@ public class WeatherSystem {
 
         int start = 0;
         start = renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_FAR,
-                PRECIPITATION_FAR_RADIUS, 2.8f, 2.8f, 0.20f, topY, snowSpan);
+                PRECIPITATION_FAR_RADIUS, 2.8f, 2.8f, 0.20f, topY, snowSpan, strength);
         start = renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_MID,
-                PRECIPITATION_MID_RADIUS, 3.8f, 5.5f, 0.38f, topY, snowSpan);
+                PRECIPITATION_MID_RADIUS, 3.8f, 5.5f, 0.38f, topY, snowSpan, strength);
         renderSnowPass(camX, camY, camZ, start, SNOW_PARTICLES_NEAR,
-                PRECIPITATION_DENSE_RADIUS, 4.8f, 10.0f, 0.66f, topY, snowSpan);
+                PRECIPITATION_DENSE_RADIUS, 4.8f, 10.0f, 0.66f, topY, snowSpan, strength);
     }
 
     private int renderSnowPass(float camX, float camY, float camZ, int startIndex, int count,
                                float radius, float baseSpeed, float pointSize, float alpha,
-                               float topOffset, float verticalSpan) {
+                               float topOffset, float verticalSpan, float strength) {
         final float top = topOffset;
         final float effectiveRadius = radius * (0.9f + precipitationStrength * 0.1f);
         final float snappedCenterX = (float) Math.floor(camX / 8f) * 8f;
         final float snappedCenterZ = (float) Math.floor(camZ / 8f) * 8f;
         glPointSize(pointSize);
-        glColor4f(1f, 1f, 1f, alpha * precipitationStrength);
+        glColor4f(1f, 1f, 1f, alpha * Math.max(0f, Math.min(1f, strength)));
         glBegin(GL_POINTS);
         int end = Math.min(startIndex + count, SNOW_PARTICLE_TEMPLATES.length);
         float time = precipitationTime;

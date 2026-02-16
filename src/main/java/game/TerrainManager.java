@@ -1037,6 +1037,66 @@ public class TerrainManager {
         }
     }
 
+    public float digTerrain(float wx, float wz, float halfWidth, float halfLength, float depth,
+                            boolean rectangular, float dirX, float dirZ, float digSlope, float floorY) {
+        float w = Math.max(0.25f, halfWidth);
+        float l = Math.max(w, halfLength);
+        float reach = rectangular ? l : w;
+        float d = Math.max(0f, depth);
+        if (d <= 0.0001f) {
+            return 0f;
+        }
+
+        int slices = rectangular ? 3 : 2;
+        float sliceSpacing = rectangular ? (l * 0.55f) : (w * 0.55f);
+
+        float totalMass = 0f;
+        Set<Chunk> changed = new LinkedHashSet<>();
+        for (int s = 0; s < slices; s++) {
+            float offset = s * sliceSpacing;
+            float sliceX = wx + dirX * offset;
+            float sliceZ = wz + dirZ * offset;
+            float sliceFloorY = floorY + offset * digSlope;
+
+            int minCx = (int) Math.floor((sliceX - reach) / (Chunk.SIZE * scale));
+            int maxCx = (int) Math.floor((sliceX + reach) / (Chunk.SIZE * scale));
+            int minCz = (int) Math.floor((sliceZ - reach) / (Chunk.SIZE * scale));
+            int maxCz = (int) Math.floor((sliceZ + reach) / (Chunk.SIZE * scale));
+
+            for (int cz = minCz; cz <= maxCz; cz++) {
+                for (int cx = minCx; cx <= maxCx; cx++) {
+                    Chunk chunk = chunks.get(key(cx, cz));
+                    if (chunk == null) {
+                        continue;
+                    }
+                    float mass = chunk.digArea(sliceX / scale, sliceZ / scale, w / scale, l / scale, d,
+                            rectangular, dirX, dirZ, digSlope, sliceFloorY / scale);
+                    if (mass > 0f) {
+                        totalMass += mass;
+                        changed.add(chunk);
+                    }
+                }
+            }
+        }
+
+        if (changed.isEmpty()) {
+            return 0f;
+        }
+
+        for (Chunk chunk : changed) {
+            for (int nz = -1; nz <= 1; nz++) {
+                for (int nx = -1; nx <= 1; nx++) {
+                    Chunk neighbor = getChunk(chunk.cx + nx, chunk.cz + nz);
+                    if (neighbor != null) {
+                        neighbor.refreshAfterNeighborEdit();
+                    }
+                }
+            }
+        }
+
+        return totalMass;
+    }
+
     public float getHeight(float wx, float wz) {
         int cx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int cz = (int) Math.floor(wz / (Chunk.SIZE * scale));
@@ -1508,21 +1568,24 @@ public class TerrainManager {
             return;
         }
 
-        float snowCoverage = weatherSystem.getSnowCoverage();
+        float terrainY = getHeight(wx, wz);
+        float weatherCoverage = weatherSystem.getSnowCoverage();
+        float altitudeCoverage = Chunk.getAltitudeSnowCoverage(terrainY);
+        float effectiveCoverage = Math.max(weatherCoverage, altitudeCoverage);
+
         Iterator<SnowDent> iterator = snowDents.iterator();
         while (iterator.hasNext()) {
             SnowDent dent = iterator.next();
             dent.ageSeconds += dt;
-            if (dent.ageSeconds >= SNOW_DENT_LIFETIME_SECONDS || snowCoverage <= 0.001f) {
+            if (dent.ageSeconds >= SNOW_DENT_LIFETIME_SECONDS || effectiveCoverage <= 0.001f) {
                 iterator.remove();
             }
         }
 
-        if (weatherSystem.getWeatherType() != WeatherType.SNOWY || snowCoverage <= 0.03f) {
+        if (effectiveCoverage <= 0.03f) {
             return;
         }
 
-        float terrainY = getHeight(wx, wz);
         if (Math.abs(wy - terrainY) > 0.22f) {
             // Player is not intersecting ground/snow surface right now.
             return;
@@ -1557,7 +1620,8 @@ public class TerrainManager {
             minSurface += weatherSystem.getIceThickness();
         }
         surfaceY = Math.max(surfaceY, minSurface);
-        weatherSystem.renderPrecipitation(camX, camY, camZ, surfaceY);
+        float altitudeSnowStrength = Chunk.getAltitudeSnowCoverage(surfaceY);
+        weatherSystem.renderPrecipitation(camX, camY, camZ, surfaceY, altitudeSnowStrength);
     }
 
     public int getSnowTexture() {
