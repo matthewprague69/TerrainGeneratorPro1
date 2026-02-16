@@ -2350,12 +2350,10 @@ public class Chunk {
                     }
                     float dist = (float) Math.sqrt(Math.max(0f, distSq));
                     float t = dist / appliedHalfWidth;
-                    if (t <= 0.88f) {
-                        shapeFactor = 1f;
-                    } else {
-                        float edge = (t - 0.88f) / 0.12f;
-                        shapeFactor = 1f - (float) smoothstep(0f, 1f, edge);
-                    }
+                    // Spherical subtraction profile: full effect at center, smoothly fading
+                    // toward the brush edge (like subtracting a ball from terrain).
+                    float radial = Math.max(0f, 1f - t * t);
+                    shapeFactor = (float) Math.sqrt(radial);
                 }
 
                 shapeFactor = Math.max(0f, Math.min(1f, shapeFactor));

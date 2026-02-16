@@ -54,11 +54,11 @@ public class Main {
     private boolean prevMouseDown = false;
     private float dugMassInventory = 0f;
     private double lastDigTime = 0.0;
-    private static final double DIG_INTERVAL_SECONDS = 0.18;
+    private static final double DIG_INTERVAL_SECONDS = 0.12;
     private static final float DIG_RAY_STEP = 0.25f;
     private static final float DIG_HALF_WIDTH = 0.40f;
     private static final float DIG_HALF_LENGTH = 0.40f;
-    private static final float DIG_DEPTH = 0.085f;
+    private static final float DIG_DEPTH = 0.11f;
     private String debugExportStatus = "";
     private static final DateTimeFormatter DEBUG_EXPORT_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
@@ -137,7 +137,7 @@ public class Main {
             float surfaceY = terrain.getHeight(sx, sz);
             if (sy <= surfaceY + 0.08f) {
                 targetX = sx;
-                targetY = sy;
+                targetY = surfaceY;
                 targetZ = sz;
                 break;
             }
