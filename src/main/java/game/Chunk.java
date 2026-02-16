@@ -1956,7 +1956,7 @@ public class Chunk {
         float wx3 = (cx * SIZE + lx3) * scale;
         float wz3 = (cz * SIZE + lz3) * scale;
 
-        float[] normal = computeTriangleNormal(wx1, y1, wz1, wx2, y2, wz2, wx3, y3, wz3);
+        float[] normal = computeNormalFromWorld(wx1, y1, wz1, wx2, y2, wz2, wx3, y3, wz3);
         FloatBuilder builder = getBuilder(builders, tex, 1f);
         if (builder == null) {
             return;
