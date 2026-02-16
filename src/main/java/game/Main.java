@@ -382,7 +382,7 @@ public class Main {
         PixelTextRenderer.drawText(String.format(Locale.US, "Dug soil mass: %.2f", dugMassInventory),
                 panelX + 18f, panelY + panelHeight - 70f, 1.1f);
         PixelTextRenderer.drawText("Left mouse = dig circle", panelX + 18f, panelY + panelHeight - 104f, 1.0f);
-        PixelTextRenderer.drawText("Shift + Left mouse = dig rectangle", panelX + 18f, panelY + panelHeight - 126f, 1.0f);
+        PixelTextRenderer.drawText("Shift + Left mouse = dig tunnel", panelX + 18f, panelY + panelHeight - 126f, 1.0f);
         UIRenderer.end2D();
     }
 

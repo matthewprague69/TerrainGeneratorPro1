@@ -63,10 +63,15 @@ public class Chunk {
 
     private static final int DIG_SUBDIVISIONS = 6;
     private static final int DIG_GRID_SIZE = SIZE * DIG_SUBDIVISIONS;
+    private static final float CAVE_MIN_CLEARANCE = 1.5f;
+    private static final float PROCEDURAL_CAVE_CLEARANCE = 2.35f;
+    private static final float DIG_TUNNEL_CLEARANCE = 2.6f;
 
     private final float[][] heights = new float[SIZE + 1][SIZE + 1];
     private final float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
     private final float[][] digOffsets = new float[DIG_GRID_SIZE + 1][DIG_GRID_SIZE + 1];
+    private final float[][] caveCeilings = new float[DIG_GRID_SIZE + 1][DIG_GRID_SIZE + 1];
+    private final boolean[][] caveMask = new boolean[DIG_GRID_SIZE + 1][DIG_GRID_SIZE + 1];
     private boolean hasDigEdits = false;
     private float cachedMaxAltitudeSnowCoverage = -1f;
     private final List<Feature> features = new ArrayList<>();
@@ -229,6 +234,8 @@ public class Chunk {
         this.biome = biome;
         this.lod = lod;
         generate(generateFeatures);
+        initializeProceduralCaves();
+        buildTerrainBuffers();
         renderResourcesBuilt = true;
     }
 
@@ -243,9 +250,12 @@ public class Chunk {
         this.lod = lod;
         if (data != null) {
             applyPrecomputedData(data);
+            initializeProceduralCaves();
             renderResourcesBuilt = false;
         } else {
             generate(false);
+            initializeProceduralCaves();
+            buildTerrainBuffers();
             renderResourcesBuilt = true;
         }
     }
@@ -926,6 +936,7 @@ public class Chunk {
         }
 
         addSkirts(builders, step, texScale);
+        addCaveGeometry(builders, texScale, step);
 
         FloatBuilder merged = new FloatBuilder();
         for (Map.Entry<BatchKey, FloatBuilder> entry : builders.entrySet()) {
@@ -1647,6 +1658,47 @@ public class Chunk {
         }
     }
 
+    private void addCaveGeometry(Map<BatchKey, FloatBuilder> builders, float texScale, int step) {
+        int caveTex = manager.getTexture(biome.rockTex);
+        int fineStep = Math.max(1, step * 2);
+
+        for (int gz = 0; gz < DIG_GRID_SIZE; gz += fineStep) {
+            int gz2 = Math.min(gz + fineStep, DIG_GRID_SIZE);
+            float z1 = gz / (float) DIG_SUBDIVISIONS;
+            float z2 = gz2 / (float) DIG_SUBDIVISIONS;
+            for (int gx = 0; gx < DIG_GRID_SIZE; gx += fineStep) {
+                int gx2 = Math.min(gx + fineStep, DIG_GRID_SIZE);
+                float x1 = gx / (float) DIG_SUBDIVISIONS;
+                float x2 = gx2 / (float) DIG_SUBDIVISIONS;
+
+                float floor00 = sampleEditedHeightAtGrid(gx, gz);
+                float floor10 = sampleEditedHeightAtGrid(gx2, gz);
+                float floor01 = sampleEditedHeightAtGrid(gx, gz2);
+                float floor11 = sampleEditedHeightAtGrid(gx2, gz2);
+
+                float c00 = caveMask[gx][gz] ? caveCeilings[gx][gz] : Float.NEGATIVE_INFINITY;
+                float c10 = caveMask[gx2][gz] ? caveCeilings[gx2][gz] : Float.NEGATIVE_INFINITY;
+                float c01 = caveMask[gx][gz2] ? caveCeilings[gx][gz2] : Float.NEGATIVE_INFINITY;
+                float c11 = caveMask[gx2][gz2] ? caveCeilings[gx2][gz2] : Float.NEGATIVE_INFINITY;
+
+                if (c00 <= floor00 + CAVE_MIN_CLEARANCE
+                        && c10 <= floor10 + CAVE_MIN_CLEARANCE
+                        && c01 <= floor01 + CAVE_MIN_CLEARANCE
+                        && c11 <= floor11 + CAVE_MIN_CLEARANCE) {
+                    continue;
+                }
+
+                c00 = Math.max(c00, floor00 + CAVE_MIN_CLEARANCE);
+                c10 = Math.max(c10, floor10 + CAVE_MIN_CLEARANCE);
+                c01 = Math.max(c01, floor01 + CAVE_MIN_CLEARANCE);
+                c11 = Math.max(c11, floor11 + CAVE_MIN_CLEARANCE);
+
+                addTriangleDetailedWithTexture(builders, caveTex, x1, z1, x1, z2, x2, z1, c00, c01, c10, texScale);
+                addTriangleDetailedWithTexture(builders, caveTex, x2, z1, x1, z2, x2, z2, c10, c01, c11, texScale);
+            }
+        }
+    }
+
     private boolean shouldDrawSkirtForNeighbor(int neighborCx, int neighborCz) {
         Chunk neighbor = manager.getChunk(neighborCx, neighborCz);
         return neighbor == null || neighbor.getLOD() != lod;
@@ -1909,6 +1961,24 @@ public class Chunk {
         if (builder == null) {
             return;
         }
+
+        builder.putVertex(wx1, y1, wz1, normal, lx1 * texScale, lz1 * texScale);
+        builder.putVertex(wx2, y2, wz2, normal, lx2 * texScale, lz2 * texScale);
+        builder.putVertex(wx3, y3, wz3, normal, lx3 * texScale, lz3 * texScale);
+    }
+
+    private void addTriangleDetailedWithTexture(Map<BatchKey, FloatBuilder> builders, int tex,
+                                                float lx1, float lz1, float lx2, float lz2, float lx3, float lz3,
+                                                float y1, float y2, float y3, float texScale) {
+        float wx1 = (cx * SIZE + lx1) * scale;
+        float wz1 = (cz * SIZE + lz1) * scale;
+        float wx2 = (cx * SIZE + lx2) * scale;
+        float wz2 = (cz * SIZE + lz2) * scale;
+        float wx3 = (cx * SIZE + lx3) * scale;
+        float wz3 = (cz * SIZE + lz3) * scale;
+
+        FloatBuilder builder = getBuilder(builders, tex, 1f);
+        float[] normal = computeNormalFromWorld(wx1, y1, wz1, wx2, y2, wz2, wx3, y3, wz3);
 
         builder.putVertex(wx1, y1, wz1, normal, lx1 * texScale, lz1 * texScale);
         builder.putVertex(wx2, y2, wz2, normal, lx2 * texScale, lz2 * texScale);
@@ -2246,6 +2316,11 @@ public class Chunk {
                         shapeFactor = 1f - (float) smoothstep(0f, 1f, t);
                     }
                     localFloor = floorHeight + forward * digSlope;
+                    if (shapeFactor >= 0.55f) {
+                        float tunnelCeiling = localFloor + DIG_TUNNEL_CLEARANCE;
+                        caveMask[gx][gz] = true;
+                        caveCeilings[gx][gz] = Math.max(caveCeilings[gx][gz], tunnelCeiling);
+                    }
                 } else {
                     float distSq = dx * dx + dz * dz;
                     if (distSq > radiusSq) {
@@ -2371,6 +2446,41 @@ public class Chunk {
         }
         recalculateHeavyFeatureCount();
         featuresGenerated = false;
+    }
+
+    private void initializeProceduralCaves() {
+        for (int x = 0; x <= DIG_GRID_SIZE; x++) {
+            Arrays.fill(caveCeilings[x], Float.NEGATIVE_INFINITY);
+            Arrays.fill(caveMask[x], false);
+        }
+
+        for (int gz = 0; gz <= DIG_GRID_SIZE; gz++) {
+            float z = gz / (float) DIG_SUBDIVISIONS;
+            for (int gx = 0; gx <= DIG_GRID_SIZE; gx++) {
+                float x = gx / (float) DIG_SUBDIVISIONS;
+                float baseHeight = sampleBaseHeightLocal(x, z);
+                if (baseHeight <= WATER_LEVEL + 1.2f) {
+                    continue;
+                }
+
+                double wx = (cx * SIZE + x) * scale;
+                double wz = (cz * SIZE + z) * scale;
+                double caveBand = Math.abs(terrainNoise.eval(wx * 0.0032 + 3200.0, wz * 0.0032 - 1800.0));
+                double caveMaskNoise = terrainNoise.eval(wx * 0.0014 - 700.0, wz * 0.0014 + 1300.0);
+                if (caveBand > 0.082 || caveMaskNoise < 0.18) {
+                    continue;
+                }
+
+                float curve = (float) (terrainNoise.eval(wx * 0.0065 + 5100.0, wz * 0.0065 - 4000.0) * 0.45);
+                float ceiling = baseHeight + PROCEDURAL_CAVE_CLEARANCE + curve;
+                if (ceiling <= baseHeight + CAVE_MIN_CLEARANCE) {
+                    continue;
+                }
+
+                caveMask[gx][gz] = true;
+                caveCeilings[gx][gz] = ceiling;
+            }
+        }
     }
 
 
@@ -2636,6 +2746,27 @@ public class Chunk {
             return new float[] { 0f, 1f, 0f };
         }
         return new float[] { nx / len, ny / len, nz / len };
+    }
+
+    private float[] computeNormalFromWorld(float ax, float ay, float az,
+                                           float bx, float by, float bz,
+                                           float cx, float cy, float cz) {
+        float ux = bx - ax;
+        float uy = by - ay;
+        float uz = bz - az;
+        float vx = cx - ax;
+        float vy = cy - ay;
+        float vz = cz - az;
+
+        float nx = uy * vz - uz * vy;
+        float ny = uz * vx - ux * vz;
+        float nz = ux * vy - uy * vx;
+        float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (len <= 0.00001f) {
+            return new float[] { 0f, 1f, 0f };
+        }
+        float invLen = 1f / len;
+        return new float[] { nx * invLen, ny * invLen, nz * invLen };
     }
 
     private static void applyTriangleNormal(float ax, float ay, float az,
