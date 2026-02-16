@@ -2364,8 +2364,10 @@ public class Chunk {
                 }
 
                 float current = sampleBaseHeightLocal(x, z) + digOffsets[gx][gz];
-                float blendedTarget = current + (localFloor - current) * shapeFactor;
-                float lowered = Math.min(current - appliedDepth * shapeFactor, blendedTarget);
+                // Carve by subtracting local material each step (incision style) instead of
+                // blending toward an absolute floor target, which can skew the terrain when
+                // the camera angle changes.
+                float lowered = current - appliedDepth * shapeFactor;
                 if (lowered >= current - 0.0001f) {
                     continue;
                 }
