@@ -64,7 +64,6 @@ public class Chunk {
     private static final int DIG_SUBDIVISIONS = 6;
     private static final int DIG_GRID_SIZE = SIZE * DIG_SUBDIVISIONS;
     private static final float CAVE_MIN_CLEARANCE = 1.5f;
-    private static final float PROCEDURAL_CAVE_CLEARANCE = 2.35f;
     private static final float DIG_TUNNEL_CLEARANCE = 2.6f;
 
     private final float[][] heights = new float[SIZE + 1][SIZE + 1];
@@ -72,6 +71,11 @@ public class Chunk {
     private final float[][] digOffsets = new float[DIG_GRID_SIZE + 1][DIG_GRID_SIZE + 1];
     private final float[][] caveCeilings = new float[DIG_GRID_SIZE + 1][DIG_GRID_SIZE + 1];
     private final boolean[][] caveMask = new boolean[DIG_GRID_SIZE + 1][DIG_GRID_SIZE + 1];
+    private boolean hasTunnelCeilings = false;
+    private int tunnelMinGx = DIG_GRID_SIZE;
+    private int tunnelMaxGx = 0;
+    private int tunnelMinGz = DIG_GRID_SIZE;
+    private int tunnelMaxGz = 0;
     private boolean hasDigEdits = false;
     private float cachedMaxAltitudeSnowCoverage = -1f;
     private final List<Feature> features = new ArrayList<>();
@@ -234,8 +238,6 @@ public class Chunk {
         this.biome = biome;
         this.lod = lod;
         generate(generateFeatures);
-        initializeProceduralCaves();
-        buildTerrainBuffers();
         renderResourcesBuilt = true;
     }
 
@@ -250,12 +252,9 @@ public class Chunk {
         this.lod = lod;
         if (data != null) {
             applyPrecomputedData(data);
-            initializeProceduralCaves();
             renderResourcesBuilt = false;
         } else {
             generate(false);
-            initializeProceduralCaves();
-            buildTerrainBuffers();
             renderResourcesBuilt = true;
         }
     }
@@ -1659,14 +1658,22 @@ public class Chunk {
     }
 
     private void addCaveGeometry(Map<BatchKey, FloatBuilder> builders, float texScale, int step) {
+        if (!hasTunnelCeilings) {
+            return;
+        }
         int caveTex = manager.getTexture(biome.rockTex);
         int fineStep = Math.max(1, step * 2);
 
-        for (int gz = 0; gz < DIG_GRID_SIZE; gz += fineStep) {
+        int startGx = Math.max(0, tunnelMinGx - fineStep);
+        int endGx = Math.min(DIG_GRID_SIZE, tunnelMaxGx + fineStep);
+        int startGz = Math.max(0, tunnelMinGz - fineStep);
+        int endGz = Math.min(DIG_GRID_SIZE, tunnelMaxGz + fineStep);
+
+        for (int gz = startGz; gz < endGz; gz += fineStep) {
             int gz2 = Math.min(gz + fineStep, DIG_GRID_SIZE);
             float z1 = gz / (float) DIG_SUBDIVISIONS;
             float z2 = gz2 / (float) DIG_SUBDIVISIONS;
-            for (int gx = 0; gx < DIG_GRID_SIZE; gx += fineStep) {
+            for (int gx = startGx; gx < endGx; gx += fineStep) {
                 int gx2 = Math.min(gx + fineStep, DIG_GRID_SIZE);
                 float x1 = gx / (float) DIG_SUBDIVISIONS;
                 float x2 = gx2 / (float) DIG_SUBDIVISIONS;
@@ -1940,6 +1947,22 @@ public class Chunk {
         float dx = (hR - hL) * 0.5f;
         float dz = (hU - hD) * 0.5f;
         return (float) Math.sqrt(dx * dx + dz * dz);
+    }
+
+    private void markTunnelCeiling(int gx, int gz, float tunnelCeiling) {
+        int clampedGx = Math.max(0, Math.min(DIG_GRID_SIZE, gx));
+        int clampedGz = Math.max(0, Math.min(DIG_GRID_SIZE, gz));
+        hasTunnelCeilings = true;
+        if (!caveMask[clampedGx][clampedGz]) {
+            caveMask[clampedGx][clampedGz] = true;
+            caveCeilings[clampedGx][clampedGz] = tunnelCeiling;
+        } else {
+            caveCeilings[clampedGx][clampedGz] = Math.max(caveCeilings[clampedGx][clampedGz], tunnelCeiling);
+        }
+        tunnelMinGx = Math.min(tunnelMinGx, clampedGx);
+        tunnelMaxGx = Math.max(tunnelMaxGx, clampedGx);
+        tunnelMinGz = Math.min(tunnelMinGz, clampedGz);
+        tunnelMaxGz = Math.max(tunnelMaxGz, clampedGz);
     }
 
     private void addTriangleDetailed(Map<BatchKey, FloatBuilder> builders,
@@ -2318,8 +2341,7 @@ public class Chunk {
                     localFloor = floorHeight + forward * digSlope;
                     if (shapeFactor >= 0.55f) {
                         float tunnelCeiling = localFloor + DIG_TUNNEL_CLEARANCE;
-                        caveMask[gx][gz] = true;
-                        caveCeilings[gx][gz] = Math.max(caveCeilings[gx][gz], tunnelCeiling);
+                        markTunnelCeiling(gx, gz, tunnelCeiling);
                     }
                 } else {
                     float distSq = dx * dx + dz * dz;
@@ -2447,42 +2469,6 @@ public class Chunk {
         recalculateHeavyFeatureCount();
         featuresGenerated = false;
     }
-
-    private void initializeProceduralCaves() {
-        for (int x = 0; x <= DIG_GRID_SIZE; x++) {
-            Arrays.fill(caveCeilings[x], Float.NEGATIVE_INFINITY);
-            Arrays.fill(caveMask[x], false);
-        }
-
-        for (int gz = 0; gz <= DIG_GRID_SIZE; gz++) {
-            float z = gz / (float) DIG_SUBDIVISIONS;
-            for (int gx = 0; gx <= DIG_GRID_SIZE; gx++) {
-                float x = gx / (float) DIG_SUBDIVISIONS;
-                float baseHeight = sampleBaseHeightLocal(x, z);
-                if (baseHeight <= WATER_LEVEL + 1.2f) {
-                    continue;
-                }
-
-                double wx = (cx * SIZE + x) * scale;
-                double wz = (cz * SIZE + z) * scale;
-                double caveBand = Math.abs(terrainNoise.eval(wx * 0.0032 + 3200.0, wz * 0.0032 - 1800.0));
-                double caveMaskNoise = terrainNoise.eval(wx * 0.0014 - 700.0, wz * 0.0014 + 1300.0);
-                if (caveBand > 0.082 || caveMaskNoise < 0.18) {
-                    continue;
-                }
-
-                float curve = (float) (terrainNoise.eval(wx * 0.0065 + 5100.0, wz * 0.0065 - 4000.0) * 0.45);
-                float ceiling = baseHeight + PROCEDURAL_CAVE_CLEARANCE + curve;
-                if (ceiling <= baseHeight + CAVE_MIN_CLEARANCE) {
-                    continue;
-                }
-
-                caveMask[gx][gz] = true;
-                caveCeilings[gx][gz] = ceiling;
-            }
-        }
-    }
-
 
     private void recalculateHeavyFeatureCount() {
         int count = 0;

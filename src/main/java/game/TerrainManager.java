@@ -1051,7 +1051,7 @@ public class TerrainManager {
         float sliceSpacing = rectangular ? (l * 0.24f) : (w * 0.35f);
 
         float totalMass = 0f;
-        List<Chunk> changed = new ArrayList<>();
+        Set<Chunk> changed = new HashSet<>();
         for (int s = 0; s < slices; s++) {
             float offset = s * sliceSpacing;
             float sliceX = wx + dirX * offset;
