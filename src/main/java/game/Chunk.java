@@ -488,8 +488,9 @@ public class Chunk {
     }
 
     public void drawWater(boolean frozen, float snowCoverage, float iceThickness, float waterTimeSeconds) {
-        stitchEdges(); // Ensure border vertices always use the latest neighbor edge heights.
-        buildWaterGeometry(); // Keep chunk borders in sync even as neighbors stream/update.
+        if (!renderResourcesBuilt) {
+            buildRenderResources();
+        }
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
         glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);
@@ -1004,6 +1005,7 @@ public class Chunk {
         float ly = -lightDir[1];
         float lz = -lightDir[2];
 
+        glBegin(GL_TRIANGLES);
         for (WaterPatch patch : waterPatches) {
             float waveScale1 = getWaveScale(patch.wy1, patch.terrainY1);
             float waveScale2 = getWaveScale(patch.wy2, patch.terrainY2);
@@ -1015,7 +1017,6 @@ public class Chunk {
             float wy3 = getWaterHeightAt(patch.wy3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
             float wy4 = getWaterHeightAt(patch.wy4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
 
-            glBegin(GL_TRIANGLES);
             // Triangle 1: (1,2,3)
             submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
                     timeSeconds, frozen, lx, ly, lz, texScale, waveScale1);
@@ -1030,8 +1031,8 @@ public class Chunk {
                     timeSeconds, frozen, lx, ly, lz, texScale, waveScale3);
             submitWaterVertex(patch.wx1, patch.wz2, wy4, patch.wy4, patch.terrainY4,
                     timeSeconds, frozen, lx, ly, lz, texScale, waveScale4);
-            glEnd();
         }
+        glEnd();
     }
 
     private void submitWaterVertex(float wx, float wz, float wy, float baseY, float terrainY,
