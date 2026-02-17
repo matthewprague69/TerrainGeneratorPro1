@@ -2131,8 +2131,6 @@ public class Chunk {
 
         return (count > 0) ? totalSlope / count : 1f; // 1f is max slope fallback
     }
-    }
-    }
 
     private static double smoothstep(double edge0, double edge1, double x) {
         double t = Math.max(0.0, Math.min(1.0, (x - edge0) / (edge1 - edge0)));
