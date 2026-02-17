@@ -126,6 +126,8 @@ public class Chunk {
     private static final float WATER_FOAM_SLOPE_RANGE = 0.24f;
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
     private static final float WATER_FOAM_FALL_RANGE = 1.55f;
+    private static final float MIN_RENDERABLE_WATER_DEPTH = 0.06f;
+    private static final float MIN_RENDERABLE_RIVER_DEPTH = 0.22f;
     private static final LinkedHashMap<String, ImpostorEntry> IMPOSTOR_TEXTURES =
             new LinkedHashMap<>(256, 0.75f, true);
 
@@ -977,35 +979,36 @@ public class Chunk {
                 boolean river01 = r01 > Float.NEGATIVE_INFINITY / 2;
                 boolean river11 = r11 > Float.NEGATIVE_INFINITY / 2;
 
-                int riverCorners = (river00 ? 1 : 0) + (river10 ? 1 : 0) + (river01 ? 1 : 0) + (river11 ? 1 : 0);
-                boolean hasRiverWater = riverCorners > 0;
-                boolean hasOceanWater = y00 < WATER_LEVEL || y10 < WATER_LEVEL || y01 < WATER_LEVEL || y11 < WATER_LEVEL;
+                float d00 = waterSimChunk.getDepthAtGrid(x, z);
+                float d10 = waterSimChunk.getDepthAtGrid(x2, z);
+                float d01 = waterSimChunk.getDepthAtGrid(x, z2);
+                float d11 = waterSimChunk.getDepthAtGrid(x2, z2);
+
+                boolean riverWet00 = river00 && d00 >= MIN_RENDERABLE_RIVER_DEPTH;
+                boolean riverWet10 = river10 && d10 >= MIN_RENDERABLE_RIVER_DEPTH;
+                boolean riverWet01 = river01 && d01 >= MIN_RENDERABLE_RIVER_DEPTH;
+                boolean riverWet11 = river11 && d11 >= MIN_RENDERABLE_RIVER_DEPTH;
+                int riverCorners = (riverWet00 ? 1 : 0) + (riverWet10 ? 1 : 0) + (riverWet01 ? 1 : 0) + (riverWet11 ? 1 : 0);
+                boolean hasRiverWater = riverCorners >= 3;
+
+                boolean oceanWet00 = d00 >= MIN_RENDERABLE_WATER_DEPTH && y00 < WATER_LEVEL + 0.02f;
+                boolean oceanWet10 = d10 >= MIN_RENDERABLE_WATER_DEPTH && y10 < WATER_LEVEL + 0.02f;
+                boolean oceanWet01 = d01 >= MIN_RENDERABLE_WATER_DEPTH && y01 < WATER_LEVEL + 0.02f;
+                boolean oceanWet11 = d11 >= MIN_RENDERABLE_WATER_DEPTH && y11 < WATER_LEVEL + 0.02f;
+                int oceanCorners = (oceanWet00 ? 1 : 0) + (oceanWet10 ? 1 : 0) + (oceanWet01 ? 1 : 0) + (oceanWet11 ? 1 : 0);
+                boolean hasOceanWater = oceanCorners >= 3;
 
                 if (hasRiverWater) {
-                    // River patches should be constrained to river channels only and must not flood low terrain.
-                    if (riverCorners < 2) {
-                        continue;
-                    }
-                    boolean adjacentRiverPair = (river00 && river10) || (river10 && river11)
-                            || (river11 && river01) || (river01 && river00);
-                    if (riverCorners == 2 && !adjacentRiverPair) {
-                        // Skip diagonal-only cases that produce stretched river sheets over banks.
-                        continue;
-                    }
-
                     float wx1 = (cx * SIZE + x) * scale;
                     float wz1 = (cz * SIZE + z) * scale;
                     float wx2 = (cx * SIZE + x2) * scale;
                     float wz2 = (cz * SIZE + z2) * scale;
 
-                    float riverLevelSum = (river00 ? r00 : 0f) + (river10 ? r10 : 0f) + (river11 ? r11 : 0f)
-                            + (river01 ? r01 : 0f);
-                    float riverLevel = riverLevelSum / riverCorners;
-
-                    float wy1 = river00 ? r00 : riverLevel;
-                    float wy2 = river10 ? r10 : riverLevel;
-                    float wy3 = river11 ? r11 : riverLevel;
-                    float wy4 = river01 ? r01 : riverLevel;
+                    float bankEpsilon = MIN_RENDERABLE_WATER_DEPTH * 0.25f;
+                    float wy1 = riverWet00 ? waterSimChunk.getSurfaceAtGrid(x, z) : y00 + bankEpsilon;
+                    float wy2 = riverWet10 ? waterSimChunk.getSurfaceAtGrid(x2, z) : y10 + bankEpsilon;
+                    float wy3 = riverWet11 ? waterSimChunk.getSurfaceAtGrid(x2, z2) : y11 + bankEpsilon;
+                    float wy4 = riverWet01 ? waterSimChunk.getSurfaceAtGrid(x, z2) : y01 + bankEpsilon;
 
                     waterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2, wy1, wy2, wy3, wy4,
                             y00, y10, y11, y01));

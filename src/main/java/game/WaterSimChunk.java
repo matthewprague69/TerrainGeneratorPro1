@@ -83,6 +83,18 @@ public class WaterSimChunk {
         return (float) Math.sqrt(ux * ux + uz * uz);
     }
 
+    public float getSurfaceAtGrid(int x, int z) {
+        int gx = Math.min(gridSize, Math.max(0, x));
+        int gz = Math.min(gridSize, Math.max(0, z));
+        return bedHeight[gx][gz] + waterDepth[gx][gz];
+    }
+
+    public float getDepthAtGrid(int x, int z) {
+        int gx = Math.min(gridSize, Math.max(0, x));
+        int gz = Math.min(gridSize, Math.max(0, z));
+        return waterDepth[gx][gz];
+    }
+
 
 
     public float sampleDepth(float localX, float localZ) {
