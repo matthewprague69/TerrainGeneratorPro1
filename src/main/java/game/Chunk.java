@@ -933,88 +933,15 @@ public class Chunk {
         ensureWaterSimInitialized();
         int step = 1; // Keep water topology identical across chunks to avoid LOD border cracks.
 
-        boolean[][] connectedWet = new boolean[SIZE][SIZE];
-        ArrayDeque<int[]> queue = new ArrayDeque<>();
-
-        for (int z = 0; z < SIZE; z++) {
-            int z2 = z + 1;
-            for (int x = 0; x < SIZE; x++) {
-                int x2 = x + 1;
-
-                float d00 = waterSimChunk.getDepthAtGrid(x, z);
-                float d10 = waterSimChunk.getDepthAtGrid(x2, z);
-                float d01 = waterSimChunk.getDepthAtGrid(x, z2);
-                float d11 = waterSimChunk.getDepthAtGrid(x2, z2);
-                float maxDepth = Math.max(Math.max(d00, d10), Math.max(d01, d11));
-                if (maxDepth < 0.003f) {
-                    continue;
-                }
-
-                float y00 = heights[x][z];
-                float y10 = heights[x2][z];
-                float y01 = heights[x][z2];
-                float y11 = heights[x2][z2];
-                float minTerrain = Math.min(Math.min(y00, y10), Math.min(y01, y11));
-                if (minTerrain <= WATER_LEVEL + 0.08f) {
-                    connectedWet[x][z] = true;
-                    queue.add(new int[]{x, z});
-                }
-            }
-        }
-
-        int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-        while (!queue.isEmpty()) {
-            int[] node = queue.poll();
-            int cxCell = node[0];
-            int czCell = node[1];
-            for (int[] d : dirs) {
-                int nx = cxCell + d[0];
-                int nz = czCell + d[1];
-                if (nx < 0 || nx >= SIZE || nz < 0 || nz >= SIZE || connectedWet[nx][nz]) {
-                    continue;
-                }
-                int nx2 = nx + 1;
-                int nz2 = nz + 1;
-                float nd00 = waterSimChunk.getDepthAtGrid(nx, nz);
-                float nd10 = waterSimChunk.getDepthAtGrid(nx2, nz);
-                float nd01 = waterSimChunk.getDepthAtGrid(nx, nz2);
-                float nd11 = waterSimChunk.getDepthAtGrid(nx2, nz2);
-                float neighborMaxDepth = Math.max(Math.max(nd00, nd10), Math.max(nd01, nd11));
-                if (neighborMaxDepth < 0.003f) {
-                    continue;
-                }
-                connectedWet[nx][nz] = true;
-                queue.add(new int[]{nx, nz});
-            }
-        }
-
         for (int z = 0; z < SIZE; z += step) {
             int z2 = Math.min(z + step, SIZE);
             for (int x = 0; x < SIZE; x += step) {
                 int x2 = Math.min(x + step, SIZE);
 
-                if (!connectedWet[x][z]) {
-                    continue;
-                }
-
                 float y00 = heights[x][z];
                 float y10 = heights[x2][z];
                 float y01 = heights[x][z2];
                 float y11 = heights[x2][z2];
-
-                float d00 = waterSimChunk.getDepthAtGrid(x, z);
-                float d10 = waterSimChunk.getDepthAtGrid(x2, z);
-                float d01 = waterSimChunk.getDepthAtGrid(x, z2);
-                float d11 = waterSimChunk.getDepthAtGrid(x2, z2);
-
-                boolean oceanWet00 = d00 >= MIN_RENDERABLE_WATER_DEPTH;
-                boolean oceanWet10 = d10 >= MIN_RENDERABLE_WATER_DEPTH;
-                boolean oceanWet01 = d01 >= MIN_RENDERABLE_WATER_DEPTH;
-                boolean oceanWet11 = d11 >= MIN_RENDERABLE_WATER_DEPTH;
-                int oceanCorners = (oceanWet00 ? 1 : 0) + (oceanWet10 ? 1 : 0) + (oceanWet01 ? 1 : 0) + (oceanWet11 ? 1 : 0);
-                if (oceanCorners < 1) {
-                    continue;
-                }
 
                 float wx1 = (cx * SIZE + x) * scale;
                 float wz1 = (cz * SIZE + z) * scale;
@@ -1064,14 +991,13 @@ public class Chunk {
     }
 
     public void updateWaterSimulation(float dtSeconds) {
-        if (waterPatches.isEmpty()) {
-            return;
-        }
         ensureWaterSimInitialized();
         syncWaterSimEdgesFromNeighbors();
         waterSimChunk.stepSimulation(dtSeconds);
         // Re-sync borders after stepping to keep neighboring chunk seams watertight.
         syncWaterSimEdgesFromNeighbors();
+        // Rebuild water patch coverage so run-up can expand beyond previously visible shoreline cells.
+        buildWaterGeometry();
     }
 
     private void renderWaterSurface(float timeSeconds, boolean frozen) {
