@@ -115,7 +115,7 @@ public class Chunk {
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
 
     private static final int MAX_IMPOSTOR_CACHE_ENTRIES = 512;
-    private static final float WATER_WAVE_AMPLITUDE = 0.55f;
+    private static final float WATER_WAVE_AMPLITUDE = 1.10f;
     private static final float WATER_WAVE_SPEED = 1.65f;
     private static final float WATER_WAVE_LENGTH_1 = 18f;
     private static final float WATER_WAVE_LENGTH_2 = 10f;
@@ -132,9 +132,14 @@ public class Chunk {
         private final float wy2;
         private final float wy3;
         private final float wy4;
+        private final float terrainY1;
+        private final float terrainY2;
+        private final float terrainY3;
+        private final float terrainY4;
 
         private WaterPatch(float wx1, float wz1, float wx2, float wz2,
-                           float wy1, float wy2, float wy3, float wy4) {
+                           float wy1, float wy2, float wy3, float wy4,
+                           float terrainY1, float terrainY2, float terrainY3, float terrainY4) {
             this.wx1 = wx1;
             this.wz1 = wz1;
             this.wx2 = wx2;
@@ -143,6 +148,10 @@ public class Chunk {
             this.wy2 = wy2;
             this.wy3 = wy3;
             this.wy4 = wy4;
+            this.terrainY1 = terrainY1;
+            this.terrainY2 = terrainY2;
+            this.terrainY3 = terrainY3;
+            this.terrainY4 = terrainY4;
         }
     }
 
@@ -505,13 +514,8 @@ public class Chunk {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glDepthMask(false);
-            glColor4f(0.2f, 0.5f, 0.8f, 0.55f);
 
             float time = (float) (System.nanoTime() * 1.0e-9);
-            renderWaterSurface(time, false);
-
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-            glColor4f(0.75f, 0.85f, 0.95f, 0.12f);
             renderWaterSurface(time, false);
 
             glDepthMask(true);
@@ -578,6 +582,7 @@ public class Chunk {
         if (left != null) {
             for (int z = 0; z <= SIZE; z++) {
                 heights[0][z] = left.heights[SIZE][z];
+                riverSurface[0][z] = left.riverSurface[SIZE][z];
             }
         }
 
@@ -585,12 +590,14 @@ public class Chunk {
         if (top != null) {
             for (int x = 0; x <= SIZE; x++) {
                 heights[x][0] = top.heights[x][SIZE];
+                riverSurface[x][0] = top.riverSurface[x][SIZE];
             }
         }
 
         Chunk topLeft = manager.getChunk(cx - 1, cz - 1);
         if (topLeft != null) {
             heights[0][0] = topLeft.heights[SIZE][SIZE];
+            riverSurface[0][0] = topLeft.riverSurface[SIZE][SIZE];
         }
     }
 
@@ -974,7 +981,8 @@ public class Chunk {
                     float wy2 = r10 > Float.NEGATIVE_INFINITY / 2 ? r10 : WATER_LEVEL;
                     float wy3 = r11 > Float.NEGATIVE_INFINITY / 2 ? r11 : WATER_LEVEL;
                     float wy4 = r01 > Float.NEGATIVE_INFINITY / 2 ? r01 : WATER_LEVEL;
-                    waterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2, wy1, wy2, wy3, wy4));
+                    waterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2, wy1, wy2, wy3, wy4,
+                            y00, y10, y11, y01));
                 }
             }
         }
@@ -998,16 +1006,20 @@ public class Chunk {
             float wy4 = getWaterHeightAt(patch.wy4, patch.wx1, patch.wz2, timeSeconds, frozen);
 
             glBegin(GL_QUADS);
-            submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, timeSeconds, frozen, lx, ly, lz, texScale);
-            submitWaterVertex(patch.wx2, patch.wz1, wy2, patch.wy2, timeSeconds, frozen, lx, ly, lz, texScale);
-            submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, timeSeconds, frozen, lx, ly, lz, texScale);
-            submitWaterVertex(patch.wx1, patch.wz2, wy4, patch.wy4, timeSeconds, frozen, lx, ly, lz, texScale);
+            submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
+                    timeSeconds, frozen, lx, ly, lz, texScale);
+            submitWaterVertex(patch.wx2, patch.wz1, wy2, patch.wy2, patch.terrainY2,
+                    timeSeconds, frozen, lx, ly, lz, texScale);
+            submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
+                    timeSeconds, frozen, lx, ly, lz, texScale);
+            submitWaterVertex(patch.wx1, patch.wz2, wy4, patch.wy4, patch.terrainY4,
+                    timeSeconds, frozen, lx, ly, lz, texScale);
             glEnd();
         }
     }
 
-    private void submitWaterVertex(float wx, float wz, float wy, float baseY, float timeSeconds, boolean frozen,
-                                   float lx, float ly, float lz, float texScale) {
+    private void submitWaterVertex(float wx, float wz, float wy, float baseY, float terrainY,
+                                   float timeSeconds, boolean frozen, float lx, float ly, float lz, float texScale) {
         if (frozen) {
             glColor4f(1f, 1f, 1f, 1f);
             glNormal3f(0f, 1f, 0f);
@@ -1031,8 +1043,26 @@ public class Chunk {
             float diffuse = Math.max(0f, nx * lx + ny * ly + nz * lz);
             float waveOffset = wy - baseY;
             float crest = Math.max(0f, waveOffset / (WATER_WAVE_AMPLITUDE + 0.0001f));
-            float brightness = Math.min(1f, 0.55f + diffuse * 0.30f + crest * 0.25f);
-            glColor4f(0.12f + brightness * 0.22f, 0.38f + brightness * 0.27f, 0.60f + brightness * 0.30f, 0.58f);
+            float depth = Math.max(0f, baseY - terrainY);
+            float depth01 = Math.min(1f, depth / 8.0f);
+            float shallowMix = 1f - depth01;
+
+            float deepR = 0.05f;
+            float deepG = 0.22f;
+            float deepB = 0.38f;
+            float shallowR = 0.12f;
+            float shallowG = 0.44f;
+            float shallowB = 0.50f;
+
+            float baseR = deepR + (shallowR - deepR) * shallowMix;
+            float baseG = deepG + (shallowG - deepG) * shallowMix;
+            float baseB = deepB + (shallowB - deepB) * shallowMix;
+
+            float brightness = Math.min(1f, 0.45f + diffuse * 0.35f + crest * 0.30f);
+            glColor4f(baseR * (0.75f + brightness * 0.45f),
+                    baseG * (0.75f + brightness * 0.45f),
+                    baseB * (0.78f + brightness * 0.42f),
+                    0.62f);
         }
 
         glTexCoord2f(wx * texScale, wz * texScale);
