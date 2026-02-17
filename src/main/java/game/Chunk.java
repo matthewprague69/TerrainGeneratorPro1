@@ -489,7 +489,7 @@ public class Chunk {
 
     public void drawWater(boolean frozen, float snowCoverage, float iceThickness, float waterTimeSeconds) {
         if (!renderResourcesBuilt) {
-            buildRenderResources();
+            return;
         }
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
         glDisable(GL_LIGHTING);
@@ -1017,40 +1017,46 @@ public class Chunk {
             float wy3 = getWaterHeightAt(patch.wy3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
             float wy4 = getWaterHeightAt(patch.wy4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
 
+            float invDx = 1f / Math.max(0.0001f, patch.wx2 - patch.wx1);
+            float invDz = 1f / Math.max(0.0001f, patch.wz2 - patch.wz1);
+
+            float dx1 = (wy2 - wy1) * invDx;
+            float dz1 = (wy4 - wy1) * invDz;
+            float dx2 = (wy2 - wy1) * invDx;
+            float dz2 = (wy3 - wy2) * invDz;
+            float dx3 = (wy3 - wy4) * invDx;
+            float dz3 = (wy3 - wy2) * invDz;
+            float dx4 = (wy3 - wy4) * invDx;
+            float dz4 = (wy4 - wy1) * invDz;
+
+            float curvature = Math.abs((wy1 + wy3) - (wy2 + wy4)) * (0.5f * (invDx + invDz));
+
             // Triangle 1: (1,2,3)
             submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature);
             submitWaterVertex(patch.wx2, patch.wz1, wy2, patch.wy2, patch.terrainY2,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale2);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale2, dx2, dz2, curvature);
             submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature);
             // Triangle 2: (1,3,4)
             submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature);
             submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature);
             submitWaterVertex(patch.wx1, patch.wz2, wy4, patch.wy4, patch.terrainY4,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale4);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale4, dx4, dz4, curvature);
         }
         glEnd();
     }
 
     private void submitWaterVertex(float wx, float wz, float wy, float baseY, float terrainY,
                                    float timeSeconds, boolean frozen, float lx, float ly, float lz, float texScale,
-                                   float waveScale) {
+                                   float waveScale, float dx, float dz, float curvature) {
         if (frozen) {
             glColor4f(1f, 1f, 1f, 1f);
             glNormal3f(0f, 1f, 0f);
         } else {
-            float eps = Math.max(0.4f, scale * 0.8f);
-            float left = getWaveOffset(wx - eps, wz, timeSeconds, waveScale);
-            float right = getWaveOffset(wx + eps, wz, timeSeconds, waveScale);
-            float back = getWaveOffset(wx, wz - eps, timeSeconds, waveScale);
-            float front = getWaveOffset(wx, wz + eps, timeSeconds, waveScale);
             float center = wy - baseY;
-
-            float dx = (right - left) / (2f * eps);
-            float dz = (front - back) / (2f * eps);
             float nx = -dx;
             float ny = 1f;
             float nz = -dz;
@@ -1062,13 +1068,12 @@ public class Chunk {
 
             float diffuse = Math.max(0f, nx * lx + ny * ly + nz * lz);
             float waveOffset = center;
-            float waveVelocity = getWaveVelocity(wx, wz, timeSeconds, waveScale);
+            float waveVelocity = -waveOffset * 0.35f;
             float crest = clamp01(waveOffset / (WATER_WAVE_AMPLITUDE * waveScale * 0.95f + 0.0001f));
             float slopeMag = (float) Math.sqrt(dx * dx + dz * dz);
             float breaking = clamp01((slopeMag - WATER_FOAM_SLOPE_START) / WATER_FOAM_SLOPE_RANGE);
             float falling = clamp01((-waveVelocity - WATER_FOAM_FALL_SPEED) / WATER_FOAM_FALL_RANGE);
-            float curvature = (left + right + back + front - 4f * center) / (eps * eps);
-            float curvatureFoam = clamp01((-curvature - 0.03f) / 0.14f);
+            float curvatureFoam = clamp01((curvature - 0.01f) / 0.18f);
 
             float depth = Math.max(0f, baseY - terrainY);
             float depth01 = clamp01(depth / 8.0f);
@@ -1140,26 +1145,6 @@ public class Chunk {
         float primary = (float) (Math.sin(phaseA) * 0.5 + Math.sin(phaseB) * 0.32 + Math.sin(phaseC) * 0.18);
         float choppy = (float) Math.sin(phaseA * 1.45f + phaseC * 0.55f);
         return (primary + choppy * 0.16f) * WATER_WAVE_AMPLITUDE * waveScale;
-    }
-
-    private float getWaveVelocity(float wx, float wz, float timeSeconds, float waveScale) {
-        float currentBias = (float) Math.sin(wx * 0.03f + wz * 0.02f) * 0.18f;
-        float phaseA = ((wx + wz * 0.65f) / WATER_WAVE_LENGTH_1) + currentBias + timeSeconds * WATER_WAVE_SPEED;
-        float phaseB = ((wx * -0.45f + wz) / WATER_WAVE_LENGTH_2) + currentBias * 0.4f
-                + timeSeconds * WATER_WAVE_SPEED * 1.32f;
-        float phaseC = ((wx * 0.2f - wz * 0.9f) / WATER_WAVE_LENGTH_3) - currentBias * 0.6f
-                + timeSeconds * WATER_WAVE_SPEED * 1.82f;
-
-        float dPhaseA = WATER_WAVE_SPEED;
-        float dPhaseB = WATER_WAVE_SPEED * 1.32f;
-        float dPhaseC = WATER_WAVE_SPEED * 1.82f;
-
-        float dPrimary = (float) (Math.cos(phaseA) * 0.5f * dPhaseA
-                + Math.cos(phaseB) * 0.32f * dPhaseB
-                + Math.cos(phaseC) * 0.18f * dPhaseC);
-        float choppyPhase = phaseA * 1.45f + phaseC * 0.55f;
-        float dChoppy = (float) (Math.cos(choppyPhase) * (1.45f * dPhaseA + 0.55f * dPhaseC));
-        return (dPrimary + dChoppy * 0.16f) * WATER_WAVE_AMPLITUDE * waveScale;
     }
 
     private static float getWaveScale(float baseWaterHeight, float terrainHeight) {
