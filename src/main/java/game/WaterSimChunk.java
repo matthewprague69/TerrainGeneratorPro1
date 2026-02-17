@@ -13,12 +13,20 @@ public class WaterSimChunk {
     private final float[][] maxSurface;
     private final float[][] velX;
     private final float[][] velZ;
+    private final float[][] foam;
     private final float[][] tmpDepth;
+    private final float[][] tmpDepthSpread;
     private final float[][] tmpVelX;
     private final float[][] tmpVelZ;
+    private final float[][] tmpFoam;
+    private final float[][] prevEta;
+    private final float[][] waveMemory;
+    private final float[][] tmpWaveMemory;
 
-    private static final float SHORE_RUNUP_MAX = 0.80f;
-    private static final float SHORE_RUNUP_SLOPE = 1.20f;
+    private static final float SHORE_RUNUP_MAX = 1.35f;
+    private static final float SHORE_RUNUP_SLOPE = 1.50f;
+    private static final float SHORE_RETENTION_MAX = 0.60f;
+    private static final float SHORE_RUNUP_RISE_LIMIT = 2.4f;
 
     public WaterSimChunk(int gridSize) {
         this.gridSize = gridSize;
@@ -27,9 +35,15 @@ public class WaterSimChunk {
         this.maxSurface = new float[gridSize + 1][gridSize + 1];
         this.velX = new float[gridSize + 1][gridSize + 1];
         this.velZ = new float[gridSize + 1][gridSize + 1];
+        this.foam = new float[gridSize + 1][gridSize + 1];
         this.tmpDepth = new float[gridSize + 1][gridSize + 1];
+        this.tmpDepthSpread = new float[gridSize + 1][gridSize + 1];
         this.tmpVelX = new float[gridSize + 1][gridSize + 1];
         this.tmpVelZ = new float[gridSize + 1][gridSize + 1];
+        this.tmpFoam = new float[gridSize + 1][gridSize + 1];
+        this.prevEta = new float[gridSize + 1][gridSize + 1];
+        this.waveMemory = new float[gridSize + 1][gridSize + 1];
+        this.tmpWaveMemory = new float[gridSize + 1][gridSize + 1];
     }
 
     public void initializeFromTerrainAndSurface(float[][] terrainHeights, float waterLevel) {
@@ -44,6 +58,9 @@ public class WaterSimChunk {
                 maxSurface[x][z] = targetSurface;
                 velX[x][z] = 0f;
                 velZ[x][z] = 0f;
+                foam[x][z] = 0f;
+                prevEta[x][z] = bed + waterDepth[x][z];
+                waveMemory[x][z] = 0f;
             }
         }
     }
@@ -79,6 +96,28 @@ public class WaterSimChunk {
         float ux = velX[xi][zi];
         float uz = velZ[xi][zi];
         return (float) Math.sqrt(ux * ux + uz * uz);
+    }
+
+    public float sampleFoam(float localX, float localZ) {
+        float sx = clamp(localX, 0f, gridSize);
+        float sz = clamp(localZ, 0f, gridSize);
+
+        int x0 = (int) Math.floor(sx);
+        int z0 = (int) Math.floor(sz);
+        int x1 = Math.min(gridSize, x0 + 1);
+        int z1 = Math.min(gridSize, z0 + 1);
+
+        float tx = sx - x0;
+        float tz = sz - z0;
+
+        float f00 = foam[x0][z0];
+        float f10 = foam[x1][z0];
+        float f01 = foam[x0][z1];
+        float f11 = foam[x1][z1];
+
+        float fx0 = lerp(f00, f10, tx);
+        float fx1 = lerp(f01, f11, tx);
+        return lerp(fx0, fx1, tz);
     }
 
     public float getDepthAtGrid(int x, int z) {
@@ -126,6 +165,7 @@ public class WaterSimChunk {
             waterDepth[0][z] = nDepth;
             velX[0][z] = nUx;
             velZ[0][z] = nUz;
+            foam[0][z] = neighbor.foam[gridSize][z];
         }
     }
 
@@ -140,6 +180,7 @@ public class WaterSimChunk {
             waterDepth[gridSize][z] = nDepth;
             velX[gridSize][z] = nUx;
             velZ[gridSize][z] = nUz;
+            foam[gridSize][z] = neighbor.foam[0][z];
         }
     }
 
@@ -154,6 +195,7 @@ public class WaterSimChunk {
             waterDepth[x][0] = nDepth;
             velX[x][0] = nUx;
             velZ[x][0] = nUz;
+            foam[x][0] = neighbor.foam[x][gridSize];
         }
     }
 
@@ -168,6 +210,7 @@ public class WaterSimChunk {
             waterDepth[x][gridSize] = nDepth;
             velX[x][gridSize] = nUx;
             velZ[x][gridSize] = nUz;
+            foam[x][gridSize] = neighbor.foam[x][0];
         }
     }
 
@@ -211,6 +254,15 @@ public class WaterSimChunk {
                     nextUz *= 0.90f;
                 }
 
+                boolean shorelineBackwash = staticMaxDepth < 0.06f && waterDepth[x][z] > 0.02f;
+                if (shorelineBackwash) {
+                    float bedGradX = (bedHeight[xr][z] - bedHeight[xl][z]) * 0.5f;
+                    float bedGradZ = (bedHeight[x][zf] - bedHeight[x][zb]) * 0.5f;
+                    float slide = clamp(waterDepth[x][z] / 0.35f, 0f, 1f);
+                    nextUx -= bedGradX * gravity * (2.2f + slide * 0.8f);
+                    nextUz -= bedGradZ * gravity * (2.2f + slide * 0.8f);
+                }
+
                 // Keep tiny puddles calm and avoid jitter when near dry terrain.
                 float wetness = clamp(waterDepth[x][z] / 0.22f, 0f, 1f);
                 nextUx *= wetness;
@@ -246,38 +298,148 @@ public class WaterSimChunk {
 
                 float bed = bedHeight[x][z];
                 float staticMaxDepth = Math.max(0f, maxSurface[x][z] - bed);
+                float inlandRise = Math.max(0f, bed - maxSurface[x][z]);
+                float inlandAttenuation = 1f - clamp(inlandRise / SHORE_RUNUP_RISE_LIMIT, 0f, 1f);
 
                 float etaL = bedHeight[xl][z] + waterDepth[xl][z];
                 float etaR = bedHeight[xr][z] + waterDepth[xr][z];
                 float etaB = bedHeight[x][zb] + waterDepth[x][zb];
                 float etaF = bedHeight[x][zf] + waterDepth[x][zf];
                 float neighborEta = Math.max(Math.max(etaL, etaR), Math.max(etaB, etaF));
+                float etaNow = bed + depth;
+                float arrival = Math.max(0f, etaNow - prevEta[x][z]);
+                float directionalArrival = Math.max(0f, neighborEta - etaNow);
+                float wavePulse = clamp(arrival * 2.8f + directionalArrival * 1.2f, 0f, 1f);
+                float waveCarry = Math.max(waveMemory[x][z] * (float) Math.pow(0.90f, frameScale), wavePulse);
+                tmpWaveMemory[x][z] = waveCarry;
 
                 // Allow controlled shoreline run-up so waves can reach terrain edges,
                 // while still preventing bulk flooding into higher dry land.
                 float runupAllowance = SHORE_RUNUP_MAX * clamp((neighborEta - bed) / SHORE_RUNUP_SLOPE, 0f, 1f);
-                float dynamicSurfaceCap = Math.max(maxSurface[x][z], neighborEta - 0.03f) + runupAllowance;
+                float velocityMagPre = (float) Math.sqrt(tmpVelX[x][z] * tmpVelX[x][z] + tmpVelZ[x][z] * tmpVelZ[x][z]);
+                float momentumRunup = clamp((velocityMagPre - 0.08f) / 0.30f, 0f, 1f)
+                        * (0.75f + centerDepth * 0.65f)
+                        * (0.72f + waveCarry * 0.95f);
+                runupAllowance *= inlandAttenuation;
+                momentumRunup *= inlandAttenuation;
+                float dynamicSurfaceCap = Math.max(maxSurface[x][z], neighborEta - 0.02f) + runupAllowance + momentumRunup;
                 float dynamicMaxDepth = Math.max(staticMaxDepth, dynamicSurfaceCap - bed);
 
-                float pressureDepth = staticMaxDepth;
-                depth += (pressureDepth - depth) * pressureBlend;
+                // Don't yank shoreline water back to static depth too aggressively; let momentum carry it inland.
+                float pressureDepth = Math.max(staticMaxDepth, centerDepth * 0.92f);
+                boolean shorelineFilm = staticMaxDepth < 0.04f;
+                float shorelinePressureBlend = shorelineFilm ? pressureBlend * 0.14f : pressureBlend * 0.55f;
+                depth += (pressureDepth - depth) * shorelinePressureBlend;
 
-                tmpDepth[x][z] = clamp(depth, 0f, dynamicMaxDepth);
+                // Very soft overflow region: only treat as collision when far beyond the dynamic cap.
+                float softCap = dynamicMaxDepth + 0.55f + centerDepth * 0.45f + waveCarry * 0.40f;
+                float collisionOverflow = Math.max(0f, depth - softCap);
+                if (collisionOverflow > 0f) {
+                    float bedGradX = (bedHeight[xr][z] - bedHeight[xl][z]) * 0.5f;
+                    float bedGradZ = (bedHeight[x][zf] - bedHeight[x][zb]) * 0.5f;
+                    float normalX = -bedGradX;
+                    float normalZ = -bedGradZ;
+                    float nLen = (float) Math.sqrt(normalX * normalX + normalZ * normalZ);
+                    if (nLen > 0.0001f) {
+                        normalX /= nLen;
+                        normalZ /= nLen;
+                        float inDot = tmpVelX[x][z] * normalX + tmpVelZ[x][z] * normalZ;
+                        if (inDot > 0f) {
+                            // Convert impact into a softer bounce + tangential run so wave mass spreads along shore.
+                            float tangentX = -normalZ;
+                            float tangentZ = normalX;
+                            float tangentDot = tmpVelX[x][z] * tangentX + tmpVelZ[x][z] * tangentZ;
+                            tmpVelX[x][z] -= 0.72f * inDot * normalX;
+                            tmpVelZ[x][z] -= 0.72f * inDot * normalZ;
+                            tmpVelX[x][z] += tangentX * Math.abs(tangentDot) * 0.26f;
+                            tmpVelZ[x][z] += tangentZ * Math.abs(tangentDot) * 0.26f;
+                        }
+                    }
+                }
+
+                // Keep a thin moving shoreline film instead of hard-clipping all overflow away.
+                float retainedOverflow = shorelineFilm
+                        ? Math.min(SHORE_RETENTION_MAX, collisionOverflow * 0.90f)
+                        : Math.min(0.40f, collisionOverflow * 0.55f);
+                retainedOverflow += waveCarry * (shorelineFilm ? 0.06f : 0.03f);
+                retainedOverflow *= (0.42f + 0.58f * inlandAttenuation);
+                float postCollisionDepth = depth - collisionOverflow + retainedOverflow;
+
+                // Shore fade-out: run-up should die off inland after a few meters instead of flowing forever.
+                float inlandFade = clamp((inlandRise - 0.35f) / (SHORE_RUNUP_RISE_LIMIT - 0.35f), 0f, 1f);
+                postCollisionDepth *= 1f - inlandFade * (0.35f + 0.55f * frameScale);
+
+                // Inland drainage: thin run-up water should naturally drain back unless another wave reinforces it.
+                float inlandDrain = inlandFade * (0.035f + postCollisionDepth * 0.24f) * frameScale;
+                inlandDrain *= (1.10f - 0.55f * waveCarry);
+                postCollisionDepth = Math.max(0f, postCollisionDepth - inlandDrain);
+
+                float maxRise = (0.24f + centerDepth * 0.30f) * frameScale;
+                float maxDrop = (0.26f + centerDepth * 0.38f) * frameScale;
+                float smoothedDepth = clamp(postCollisionDepth, centerDepth - maxDrop, centerDepth + maxRise);
+
+                float velocityMag = (float) Math.sqrt(tmpVelX[x][z] * tmpVelX[x][z] + tmpVelZ[x][z] * tmpVelZ[x][z]);
+                float impactFoam = clamp(collisionOverflow / 0.32f, 0f, 1f) * (0.65f + waveCarry * 0.55f);
+                float speedFoam = clamp((velocityMag - 0.10f) / 0.35f, 0f, 1f);
+                float retainedFoam = foam[x][z] * (float) Math.pow(0.962f, frameScale);
+                float advectionFoam = (foam[xl][z] + foam[xr][z] + foam[x][zb] + foam[x][zf]) * 0.25f;
+                tmpFoam[x][z] = clamp(Math.max(retainedFoam, advectionFoam * 0.70f) + impactFoam * 0.85f + speedFoam * 0.08f, 0f, 1f);
+
+                tmpDepth[x][z] = Math.max(0f, smoothedDepth);
+            }
+        }
+
+        // Pass 2.5: spread thin shoreline sheets in flow direction so run-up looks liquid, not vertical spikes.
+        for (int x = 0; x <= gridSize; x++) {
+            for (int z = 0; z <= gridSize; z++) {
+                int xl = Math.max(0, x - 1);
+                int xr = Math.min(gridSize, x + 1);
+                int zb = Math.max(0, z - 1);
+                int zf = Math.min(gridSize, z + 1);
+
+                float center = tmpDepth[x][z];
+                float neighbors = (tmpDepth[xl][z] + tmpDepth[xr][z] + tmpDepth[x][zb] + tmpDepth[x][zf]) * 0.25f;
+                float flow = (float) Math.sqrt(tmpVelX[x][z] * tmpVelX[x][z] + tmpVelZ[x][z] * tmpVelZ[x][z]);
+                float shoreline = clamp((0.20f - Math.max(0f, maxSurface[x][z] - bedHeight[x][z])) / 0.20f, 0f, 1f);
+                float spread = clamp((flow - 0.06f) / 0.45f, 0f, 1f) * shoreline;
+                spread *= 0.70f + tmpWaveMemory[x][z] * 0.90f;
+                float inlandRise = Math.max(0f, bedHeight[x][z] - maxSurface[x][z]);
+                float inlandAttenuation = 1f - clamp(inlandRise / SHORE_RUNUP_RISE_LIMIT, 0f, 1f);
+                spread *= inlandAttenuation;
+                tmpDepthSpread[x][z] = center + (neighbors - center) * (0.10f + spread * 0.34f);
             }
         }
 
         // Pass 3: copy back and damp velocity where blocked by terrain ceilings.
         for (int x = 0; x <= gridSize; x++) {
             for (int z = 0; z <= gridSize; z++) {
-                waterDepth[x][z] = tmpDepth[x][z];
+                waterDepth[x][z] = Math.max(0f, tmpDepthSpread[x][z]);
 
                 float bed = bedHeight[x][z];
                 float maxDepth = Math.max(0f, maxSurface[x][z] - bed);
-                float pressure = maxDepth > 0.0001f ? (tmpDepth[x][z] / maxDepth) : 0f;
-                float terrainCollisionDamp = 0.40f + 0.60f * clamp(pressure, 0f, 1f);
+                float pressure = maxDepth > 0.0001f ? (tmpDepth[x][z] / maxDepth) : clamp(tmpDepth[x][z] / 0.18f, 0f, 1f);
+                float terrainCollisionDamp = 0.55f + 0.45f * clamp(pressure, 0f, 1f);
+
+                float inlandRise = Math.max(0f, bedHeight[x][z] - maxSurface[x][z]);
+                float inlandFade = clamp((inlandRise - 0.25f) / (SHORE_RUNUP_RISE_LIMIT - 0.25f), 0f, 1f);
+                if (inlandFade > 0f) {
+                    int xl = Math.max(0, x - 1);
+                    int xr = Math.min(gridSize, x + 1);
+                    int zb = Math.max(0, z - 1);
+                    int zf = Math.min(gridSize, z + 1);
+                    float bedGradX = (bedHeight[xr][z] - bedHeight[xl][z]) * 0.5f;
+                    float bedGradZ = (bedHeight[x][zf] - bedHeight[x][zb]) * 0.5f;
+                    // Backwash acceleration so run-up returns toward shoreline instead of lingering inland.
+                    tmpVelX[x][z] -= bedGradX * inlandFade * 0.75f;
+                    tmpVelZ[x][z] -= bedGradZ * inlandFade * 0.75f;
+                    terrainCollisionDamp *= (1f - inlandFade * 0.35f);
+                }
 
                 velX[x][z] = tmpVelX[x][z] * terrainCollisionDamp;
                 velZ[x][z] = tmpVelZ[x][z] * terrainCollisionDamp;
+                foam[x][z] = tmpFoam[x][z];
+                waveMemory[x][z] = tmpWaveMemory[x][z];
+                prevEta[x][z] = bedHeight[x][z] + waterDepth[x][z];
             }
         }
     }
