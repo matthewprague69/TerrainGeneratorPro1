@@ -13,12 +13,14 @@ public class WaterSimChunk {
     private final float[][] maxSurface;
     private final float[][] velX;
     private final float[][] velZ;
+    private final float[][] foam;
     private final float[][] tmpDepth;
     private final float[][] tmpVelX;
     private final float[][] tmpVelZ;
+    private final float[][] tmpFoam;
 
-    private static final float SHORE_RUNUP_MAX = 0.80f;
-    private static final float SHORE_RUNUP_SLOPE = 1.20f;
+    private static final float SHORE_RUNUP_MAX = 1.35f;
+    private static final float SHORE_RUNUP_SLOPE = 1.50f;
 
     public WaterSimChunk(int gridSize) {
         this.gridSize = gridSize;
@@ -27,9 +29,11 @@ public class WaterSimChunk {
         this.maxSurface = new float[gridSize + 1][gridSize + 1];
         this.velX = new float[gridSize + 1][gridSize + 1];
         this.velZ = new float[gridSize + 1][gridSize + 1];
+        this.foam = new float[gridSize + 1][gridSize + 1];
         this.tmpDepth = new float[gridSize + 1][gridSize + 1];
         this.tmpVelX = new float[gridSize + 1][gridSize + 1];
         this.tmpVelZ = new float[gridSize + 1][gridSize + 1];
+        this.tmpFoam = new float[gridSize + 1][gridSize + 1];
     }
 
     public void initializeFromTerrainAndSurface(float[][] terrainHeights, float waterLevel) {
@@ -44,6 +48,7 @@ public class WaterSimChunk {
                 maxSurface[x][z] = targetSurface;
                 velX[x][z] = 0f;
                 velZ[x][z] = 0f;
+                foam[x][z] = 0f;
             }
         }
     }
@@ -79,6 +84,28 @@ public class WaterSimChunk {
         float ux = velX[xi][zi];
         float uz = velZ[xi][zi];
         return (float) Math.sqrt(ux * ux + uz * uz);
+    }
+
+    public float sampleFoam(float localX, float localZ) {
+        float sx = clamp(localX, 0f, gridSize);
+        float sz = clamp(localZ, 0f, gridSize);
+
+        int x0 = (int) Math.floor(sx);
+        int z0 = (int) Math.floor(sz);
+        int x1 = Math.min(gridSize, x0 + 1);
+        int z1 = Math.min(gridSize, z0 + 1);
+
+        float tx = sx - x0;
+        float tz = sz - z0;
+
+        float f00 = foam[x0][z0];
+        float f10 = foam[x1][z0];
+        float f01 = foam[x0][z1];
+        float f11 = foam[x1][z1];
+
+        float fx0 = lerp(f00, f10, tx);
+        float fx1 = lerp(f01, f11, tx);
+        return lerp(fx0, fx1, tz);
     }
 
     public float getDepthAtGrid(int x, int z) {
@@ -126,6 +153,7 @@ public class WaterSimChunk {
             waterDepth[0][z] = nDepth;
             velX[0][z] = nUx;
             velZ[0][z] = nUz;
+            foam[0][z] = neighbor.foam[gridSize][z];
         }
     }
 
@@ -140,6 +168,7 @@ public class WaterSimChunk {
             waterDepth[gridSize][z] = nDepth;
             velX[gridSize][z] = nUx;
             velZ[gridSize][z] = nUz;
+            foam[gridSize][z] = neighbor.foam[0][z];
         }
     }
 
@@ -154,6 +183,7 @@ public class WaterSimChunk {
             waterDepth[x][0] = nDepth;
             velX[x][0] = nUx;
             velZ[x][0] = nUz;
+            foam[x][0] = neighbor.foam[x][gridSize];
         }
     }
 
@@ -168,6 +198,7 @@ public class WaterSimChunk {
             waterDepth[x][gridSize] = nDepth;
             velX[x][gridSize] = nUx;
             velZ[x][gridSize] = nUz;
+            foam[x][gridSize] = neighbor.foam[x][0];
         }
     }
 
@@ -209,6 +240,15 @@ public class WaterSimChunk {
                     nextUz -= bedGradZ * gravity * 1.9f;
                     nextUx *= 0.90f;
                     nextUz *= 0.90f;
+                }
+
+                boolean shorelineBackwash = staticMaxDepth < 0.06f && waterDepth[x][z] > 0.02f;
+                if (shorelineBackwash) {
+                    float bedGradX = (bedHeight[xr][z] - bedHeight[xl][z]) * 0.5f;
+                    float bedGradZ = (bedHeight[x][zf] - bedHeight[x][zb]) * 0.5f;
+                    float slide = clamp(waterDepth[x][z] / 0.35f, 0f, 1f);
+                    nextUx -= bedGradX * gravity * (2.2f + slide * 0.8f);
+                    nextUz -= bedGradZ * gravity * (2.2f + slide * 0.8f);
                 }
 
                 // Keep tiny puddles calm and avoid jitter when near dry terrain.
@@ -262,6 +302,32 @@ public class WaterSimChunk {
                 float pressureDepth = staticMaxDepth;
                 depth += (pressureDepth - depth) * pressureBlend;
 
+                float collisionOverflow = Math.max(0f, depth - dynamicMaxDepth);
+                if (collisionOverflow > 0f) {
+                    float bedGradX = (bedHeight[xr][z] - bedHeight[xl][z]) * 0.5f;
+                    float bedGradZ = (bedHeight[x][zf] - bedHeight[x][zb]) * 0.5f;
+                    float normalX = -bedGradX;
+                    float normalZ = -bedGradZ;
+                    float nLen = (float) Math.sqrt(normalX * normalX + normalZ * normalZ);
+                    if (nLen > 0.0001f) {
+                        normalX /= nLen;
+                        normalZ /= nLen;
+                        float inDot = tmpVelX[x][z] * normalX + tmpVelZ[x][z] * normalZ;
+                        if (inDot > 0f) {
+                            // Reflect a portion of impact momentum so crest energy collides with shore instead of clipping.
+                            tmpVelX[x][z] -= 1.65f * inDot * normalX;
+                            tmpVelZ[x][z] -= 1.65f * inDot * normalZ;
+                        }
+                    }
+                }
+
+                float velocityMag = (float) Math.sqrt(tmpVelX[x][z] * tmpVelX[x][z] + tmpVelZ[x][z] * tmpVelZ[x][z]);
+                float impactFoam = clamp(collisionOverflow / 0.18f, 0f, 1f);
+                float speedFoam = clamp((velocityMag - 0.10f) / 0.35f, 0f, 1f);
+                float retainedFoam = foam[x][z] * (float) Math.pow(0.962f, frameScale);
+                float advectionFoam = (foam[xl][z] + foam[xr][z] + foam[x][zb] + foam[x][zf]) * 0.25f;
+                tmpFoam[x][z] = clamp(Math.max(retainedFoam, advectionFoam * 0.70f) + impactFoam * 0.85f + speedFoam * 0.08f, 0f, 1f);
+
                 tmpDepth[x][z] = clamp(depth, 0f, dynamicMaxDepth);
             }
         }
@@ -278,6 +344,7 @@ public class WaterSimChunk {
 
                 velX[x][z] = tmpVelX[x][z] * terrainCollisionDamp;
                 velZ[x][z] = tmpVelZ[x][z] * terrainCollisionDamp;
+                foam[x][z] = tmpFoam[x][z];
             }
         }
     }

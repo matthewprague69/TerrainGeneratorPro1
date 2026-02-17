@@ -1078,6 +1078,10 @@ public class Chunk {
             glNormal3f(0f, 1f, 0f);
         } else {
             float center = wy - baseY;
+            float localX = (wx / scale) - (cx * SIZE);
+            float localZ = (wz / scale) - (cz * SIZE);
+            float simFoam = waterSimChunk != null ? waterSimChunk.sampleFoam(localX, localZ) : 0f;
+            float simSpeed = waterSimChunk != null ? waterSimChunk.sampleSpeed(localX, localZ) : 0f;
             float nx = -dx;
             float ny = 1f;
             float nz = -dz;
@@ -1107,11 +1111,13 @@ public class Chunk {
             float terrainSteepnessFoam = clamp01((slopeMag - 0.09f) / 0.18f) * clamp01((1.8f - depth) / 1.8f);
             float crestCurvatureFoam = crest * (0.70f * breaking + 0.45f * falling + 0.42f * curvatureFoam);
             float largeBodyFoam = crest * clamp01((depth - 2.6f) / 5.5f) * clamp01((slopeMag - 0.06f) / 0.16f);
+            float impactFoam = clamp01(simFoam * (0.8f + clamp01(simSpeed / 0.45f) * 0.5f));
 
             // Foam placement is terrain/wave driven (height/depth/slope), not synthetic dot masks.
             float foam = Math.max(crestCurvatureFoam, shoreFoam * 0.64f);
             foam = Math.max(foam, terrainSteepnessFoam * 0.52f);
             foam = Math.max(foam, largeBodyFoam * (0.50f + 0.38f * foamNoise));
+            foam = Math.max(foam, impactFoam);
             foam = clamp01(foam * (0.95f + 0.08f * foamNoise));
 
             float altitude01 = clamp01((baseY - WATER_LEVEL) / 18f);
@@ -1168,7 +1174,7 @@ public class Chunk {
             float finalB = litB + (1f - litB) * foamMix;
 
             // Higher opacity to keep water clearly readable while still preserving some depth transparency.
-            float alpha = Math.min(0.99f, 0.77f + shorelineMix * 0.15f + foam * 0.20f + fresnel * 0.08f);
+            float alpha = Math.min(0.99f, 0.75f + shorelineMix * 0.15f + foam * 0.23f + fresnel * 0.08f);
             glColor4f(finalR, finalG, finalB, alpha);
         }
 
@@ -1210,7 +1216,7 @@ public class Chunk {
         float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
         float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
         float shoalingBoost = 1.0f + shallowBand * clamp01((terrainSlope - 0.06f) / 0.22f) * 0.95f;
-        float shoreDamping = 1.0f - shallowBand * 0.22f;
+        float shoreDamping = 1.0f - shallowBand * 0.12f;
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
                 * (0.10f + waveStrength * 0.46f * largeSwellBoost) * shoreDamping * shoalingBoost;
 
