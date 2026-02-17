@@ -1126,12 +1126,12 @@ public class Chunk {
             float depth = Math.max(0f, baseY - terrainY);
             float depth01 = clamp01(depth / 8.0f);
             float shallowMix = 1f - depth01;
-            float shoreFoam = clamp01((2.2f - depth) / 2.2f) * clamp01((slopeMag - 0.03f) / 0.16f);
+            float shoreFoam = clamp01((1.0f - depth) / 1.0f) * clamp01((slopeMag - 0.10f) / 0.22f);
 
             float foamNoise = 0.5f + 0.5f * (float) Math.sin(wx * 0.22f + wz * 0.31f + timeSeconds * 3.4f + waveOffset * 3.6f);
             float foam = crest * (0.48f * breaking + 0.38f * falling + 0.24f * curvatureFoam);
-            foam = Math.max(foam, shoreFoam * 0.88f);
-            foam = clamp01(foam * (0.95f + 0.35f * foamNoise));
+            foam = Math.max(foam, shoreFoam * 0.25f);
+            foam = clamp01(foam * (0.78f + 0.22f * foamNoise));
 
             float altitude01 = clamp01((baseY - WATER_LEVEL) / 18f);
             float deepR = lerp(0.07f, 0.12f, altitude01);
@@ -1164,7 +1164,8 @@ public class Chunk {
             litG = clamp01(litG + glint * 0.92f);
             litB = clamp01(litB + glint * 1.05f);
 
-            float foamMix = clamp01(foam * 1.22f + breaking * 0.12f);
+            float shoreSuppress = clamp01((depth - 0.9f) / 2.6f);
+            float foamMix = clamp01((foam * 0.82f + breaking * 0.08f) * shoreSuppress);
             float finalR = litR + (1f - litR) * foamMix;
             float finalG = litG + (1f - litG) * foamMix;
             float finalB = litB + (1f - litB) * foamMix;
@@ -1185,14 +1186,19 @@ public class Chunk {
         }
 
         float simulatedSurface = baseHeight;
+        float simulatedDepth = 0f;
         if (waterSimChunk != null) {
             float localX = (wx / scale) - (cx * SIZE);
             float localZ = (wz / scale) - (cz * SIZE);
             simulatedSurface = waterSimChunk.sampleSurface(localX, localZ);
+            simulatedDepth = waterSimChunk.sampleDepth(localX, localZ);
         }
 
-        // During migration, keep height fully simulation-driven to avoid overlay artifacts.
-        return simulatedSurface;
+        // Big waves only in deep/open water; tiny ripples near shores/rivers.
+        float openWater = clamp01((simulatedDepth - 1.8f) / 7.0f);
+        float waveStrength = openWater * openWater;
+        float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale) * (0.04f + waveStrength * 0.56f);
+        return simulatedSurface + detailRipple;
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {

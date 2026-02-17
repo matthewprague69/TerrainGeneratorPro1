@@ -84,6 +84,29 @@ public class WaterSimChunk {
     }
 
 
+
+    public float sampleDepth(float localX, float localZ) {
+        float sx = clamp(localX, 0f, gridSize);
+        float sz = clamp(localZ, 0f, gridSize);
+
+        int x0 = (int) Math.floor(sx);
+        int z0 = (int) Math.floor(sz);
+        int x1 = Math.min(gridSize, x0 + 1);
+        int z1 = Math.min(gridSize, z0 + 1);
+
+        float tx = sx - x0;
+        float tz = sz - z0;
+
+        float d00 = waterDepth[x0][z0];
+        float d10 = waterDepth[x1][z0];
+        float d01 = waterDepth[x0][z1];
+        float d11 = waterDepth[x1][z1];
+
+        float dx0 = lerp(d00, d10, tx);
+        float dx1 = lerp(d01, d11, tx);
+        return lerp(dx0, dx1, tz);
+    }
+
     public int getGridSize() {
         return gridSize;
     }
