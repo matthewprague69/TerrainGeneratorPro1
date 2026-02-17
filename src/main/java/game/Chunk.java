@@ -972,26 +972,48 @@ public class Chunk {
                 float r10 = riverSurface[x2][z];
                 float r01 = riverSurface[x][z2];
                 float r11 = riverSurface[x2][z2];
-                boolean hasRiverWater = r00 > Float.NEGATIVE_INFINITY / 2
-                        || r10 > Float.NEGATIVE_INFINITY / 2
-                        || r01 > Float.NEGATIVE_INFINITY / 2
-                        || r11 > Float.NEGATIVE_INFINITY / 2;
+                boolean river00 = r00 > Float.NEGATIVE_INFINITY / 2;
+                boolean river10 = r10 > Float.NEGATIVE_INFINITY / 2;
+                boolean river01 = r01 > Float.NEGATIVE_INFINITY / 2;
+                boolean river11 = r11 > Float.NEGATIVE_INFINITY / 2;
 
-                boolean needsWater =
-                        y00 < WATER_LEVEL || y10 < WATER_LEVEL || y01 < WATER_LEVEL || y11 < WATER_LEVEL
-                                || hasRiverWater;
+                int riverCorners = (river00 ? 1 : 0) + (river10 ? 1 : 0) + (river01 ? 1 : 0) + (river11 ? 1 : 0);
+                boolean hasRiverWater = riverCorners > 0;
+                boolean hasOceanWater = y00 < WATER_LEVEL || y10 < WATER_LEVEL || y01 < WATER_LEVEL || y11 < WATER_LEVEL;
 
-                if (needsWater) {
+                if (hasRiverWater) {
+                    // River patches should be constrained to river channels only and must not flood low terrain.
+                    if (riverCorners < 2) {
+                        continue;
+                    }
+
                     float wx1 = (cx * SIZE + x) * scale;
                     float wz1 = (cz * SIZE + z) * scale;
                     float wx2 = (cx * SIZE + x2) * scale;
                     float wz2 = (cz * SIZE + z2) * scale;
 
-                    float wy1 = r00 > Float.NEGATIVE_INFINITY / 2 ? r00 : WATER_LEVEL;
-                    float wy2 = r10 > Float.NEGATIVE_INFINITY / 2 ? r10 : WATER_LEVEL;
-                    float wy3 = r11 > Float.NEGATIVE_INFINITY / 2 ? r11 : WATER_LEVEL;
-                    float wy4 = r01 > Float.NEGATIVE_INFINITY / 2 ? r01 : WATER_LEVEL;
+                    float riverLevelSum = (river00 ? r00 : 0f) + (river10 ? r10 : 0f) + (river11 ? r11 : 0f)
+                            + (river01 ? r01 : 0f);
+                    float riverLevel = riverLevelSum / riverCorners;
+
+                    float wy1 = river00 ? r00 : riverLevel;
+                    float wy2 = river10 ? r10 : riverLevel;
+                    float wy3 = river11 ? r11 : riverLevel;
+                    float wy4 = river01 ? r01 : riverLevel;
+
                     waterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2, wy1, wy2, wy3, wy4,
+                            y00, y10, y11, y01));
+                    continue;
+                }
+
+                if (hasOceanWater) {
+                    float wx1 = (cx * SIZE + x) * scale;
+                    float wz1 = (cz * SIZE + z) * scale;
+                    float wx2 = (cx * SIZE + x2) * scale;
+                    float wz2 = (cz * SIZE + z2) * scale;
+
+                    waterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2,
+                            WATER_LEVEL, WATER_LEVEL, WATER_LEVEL, WATER_LEVEL,
                             y00, y10, y11, y01));
                 }
             }
@@ -1194,10 +1216,15 @@ public class Chunk {
             simulatedDepth = waterSimChunk.sampleDepth(localX, localZ);
         }
 
-        // Big waves only in deep/open water; tiny ripples near shores/rivers.
+        // Rivers should stay calm (no stale wave movement) and sit in-channel.
+        if (Math.abs(baseHeight - WATER_LEVEL) > 0.02f) {
+            return simulatedSurface;
+        }
+
+        // Big waves only in deep/open water; tiny ripples near shores.
         float openWater = clamp01((simulatedDepth - 1.8f) / 7.0f);
         float waveStrength = openWater * openWater;
-        float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale) * (0.04f + waveStrength * 0.56f);
+        float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale) * (0.02f + waveStrength * 0.70f);
         return simulatedSurface + detailRipple;
     }
 
