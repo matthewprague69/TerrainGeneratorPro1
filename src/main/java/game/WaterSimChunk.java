@@ -15,6 +15,7 @@ public class WaterSimChunk {
     private final float[][] velZ;
     private final float[][] foam;
     private final float[][] tmpDepth;
+    private final float[][] tmpDepthSpread;
     private final float[][] tmpVelX;
     private final float[][] tmpVelZ;
     private final float[][] tmpFoam;
@@ -32,6 +33,7 @@ public class WaterSimChunk {
         this.velZ = new float[gridSize + 1][gridSize + 1];
         this.foam = new float[gridSize + 1][gridSize + 1];
         this.tmpDepth = new float[gridSize + 1][gridSize + 1];
+        this.tmpDepthSpread = new float[gridSize + 1][gridSize + 1];
         this.tmpVelX = new float[gridSize + 1][gridSize + 1];
         this.tmpVelZ = new float[gridSize + 1][gridSize + 1];
         this.tmpFoam = new float[gridSize + 1][gridSize + 1];
@@ -322,9 +324,14 @@ public class WaterSimChunk {
                         normalZ /= nLen;
                         float inDot = tmpVelX[x][z] * normalX + tmpVelZ[x][z] * normalZ;
                         if (inDot > 0f) {
-                            // Reflect a portion of impact momentum so crest energy collides with shore instead of clipping.
-                            tmpVelX[x][z] -= 1.65f * inDot * normalX;
-                            tmpVelZ[x][z] -= 1.65f * inDot * normalZ;
+                            // Convert impact into a softer bounce + tangential run so wave mass spreads along shore.
+                            float tangentX = -normalZ;
+                            float tangentZ = normalX;
+                            float tangentDot = tmpVelX[x][z] * tangentX + tmpVelZ[x][z] * tangentZ;
+                            tmpVelX[x][z] -= 0.72f * inDot * normalX;
+                            tmpVelZ[x][z] -= 0.72f * inDot * normalZ;
+                            tmpVelX[x][z] += tangentX * Math.abs(tangentDot) * 0.26f;
+                            tmpVelZ[x][z] += tangentZ * Math.abs(tangentDot) * 0.26f;
                         }
                     }
                 }
@@ -340,7 +347,7 @@ public class WaterSimChunk {
                 float smoothedDepth = clamp(postCollisionDepth, centerDepth - maxDrop, centerDepth + maxRise);
 
                 float velocityMag = (float) Math.sqrt(tmpVelX[x][z] * tmpVelX[x][z] + tmpVelZ[x][z] * tmpVelZ[x][z]);
-                float impactFoam = clamp(collisionOverflow / 0.18f, 0f, 1f);
+                float impactFoam = clamp(collisionOverflow / 0.32f, 0f, 1f);
                 float speedFoam = clamp((velocityMag - 0.10f) / 0.35f, 0f, 1f);
                 float retainedFoam = foam[x][z] * (float) Math.pow(0.962f, frameScale);
                 float advectionFoam = (foam[xl][z] + foam[xr][z] + foam[x][zb] + foam[x][zf]) * 0.25f;
@@ -350,10 +357,27 @@ public class WaterSimChunk {
             }
         }
 
+        // Pass 2.5: spread thin shoreline sheets in flow direction so run-up looks liquid, not vertical spikes.
+        for (int x = 0; x <= gridSize; x++) {
+            for (int z = 0; z <= gridSize; z++) {
+                int xl = Math.max(0, x - 1);
+                int xr = Math.min(gridSize, x + 1);
+                int zb = Math.max(0, z - 1);
+                int zf = Math.min(gridSize, z + 1);
+
+                float center = tmpDepth[x][z];
+                float neighbors = (tmpDepth[xl][z] + tmpDepth[xr][z] + tmpDepth[x][zb] + tmpDepth[x][zf]) * 0.25f;
+                float flow = (float) Math.sqrt(tmpVelX[x][z] * tmpVelX[x][z] + tmpVelZ[x][z] * tmpVelZ[x][z]);
+                float shoreline = clamp((0.20f - Math.max(0f, maxSurface[x][z] - bedHeight[x][z])) / 0.20f, 0f, 1f);
+                float spread = clamp((flow - 0.06f) / 0.45f, 0f, 1f) * shoreline;
+                tmpDepthSpread[x][z] = center + (neighbors - center) * (0.10f + spread * 0.34f);
+            }
+        }
+
         // Pass 3: copy back and damp velocity where blocked by terrain ceilings.
         for (int x = 0; x <= gridSize; x++) {
             for (int z = 0; z <= gridSize; z++) {
-                waterDepth[x][z] = tmpDepth[x][z];
+                waterDepth[x][z] = Math.max(0f, tmpDepthSpread[x][z]);
 
                 float bed = bedHeight[x][z];
                 float maxDepth = Math.max(0f, maxSurface[x][z] - bed);
