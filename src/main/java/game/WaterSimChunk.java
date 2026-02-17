@@ -10,7 +10,7 @@ public class WaterSimChunk {
     private final int gridSize;
     private final float[][] bedHeight;
     private final float[][] waterDepth;
-    private final float[][] restDepth;
+    private final float[][] maxSurface;
     private final float[][] velX;
     private final float[][] velZ;
     private final float[][] tmpDepth;
@@ -21,7 +21,7 @@ public class WaterSimChunk {
         this.gridSize = gridSize;
         this.bedHeight = new float[gridSize + 1][gridSize + 1];
         this.waterDepth = new float[gridSize + 1][gridSize + 1];
-        this.restDepth = new float[gridSize + 1][gridSize + 1];
+        this.maxSurface = new float[gridSize + 1][gridSize + 1];
         this.velX = new float[gridSize + 1][gridSize + 1];
         this.velZ = new float[gridSize + 1][gridSize + 1];
         this.tmpDepth = new float[gridSize + 1][gridSize + 1];
@@ -43,7 +43,7 @@ public class WaterSimChunk {
                 }
 
                 waterDepth[x][z] = Math.max(0f, targetSurface - bed);
-                restDepth[x][z] = waterDepth[x][z];
+                maxSurface[x][z] = targetSurface;
                 velX[x][z] = 0f;
                 velZ[x][z] = 0f;
             }
@@ -146,9 +146,8 @@ public class WaterSimChunk {
 
     public void stepSimulation(float dt) {
         float clampedDt = clamp(dt, 1.0f / 240.0f, 1.0f / 20.0f);
-        float g = 9.81f;
-        float friction = 1.15f;
-        float restRestore = 0.035f;
+        float relaxToLocalLevel = 0.18f * (clampedDt * 60.0f);
+        float relaxToNeighbors = 0.10f * (clampedDt * 60.0f);
 
         for (int x = 0; x <= gridSize; x++) {
             for (int z = 0; z <= gridSize; z++) {
@@ -157,51 +156,27 @@ public class WaterSimChunk {
                 int zb = Math.max(0, z - 1);
                 int zf = Math.min(gridSize, z + 1);
 
-                float etaL = bedHeight[xl][z] + waterDepth[xl][z];
-                float etaR = bedHeight[xr][z] + waterDepth[xr][z];
-                float etaB = bedHeight[x][zb] + waterDepth[x][zb];
-                float etaF = bedHeight[x][zf] + waterDepth[x][zf];
+                float bed = bedHeight[x][z];
+                float currentSurface = bed + waterDepth[x][z];
+                float localTargetSurface = maxSurface[x][z];
 
-                float dEtaDx = (etaR - etaL) * 0.5f;
-                float dEtaDz = (etaF - etaB) * 0.5f;
+                float n0 = bedHeight[xl][z] + waterDepth[xl][z];
+                float n1 = bedHeight[xr][z] + waterDepth[xr][z];
+                float n2 = bedHeight[x][zb] + waterDepth[x][zb];
+                float n3 = bedHeight[x][zf] + waterDepth[x][zf];
+                float neighborAvg = (n0 + n1 + n2 + n3) * 0.25f;
 
-                float ux = velX[x][z] - g * dEtaDx * clampedDt;
-                float uz = velZ[x][z] - g * dEtaDz * clampedDt;
+                float nextSurface = currentSurface;
+                nextSurface += (localTargetSurface - nextSurface) * relaxToLocalLevel;
+                nextSurface += (neighborAvg - nextSurface) * relaxToNeighbors;
 
-                float damp = Math.max(0f, 1f - friction * clampedDt);
-                ux *= damp;
-                uz *= damp;
+                // Never allow water to rise above initialized liquid surface map,
+                // and never go below terrain.
+                nextSurface = clamp(nextSurface, bed, localTargetSurface);
 
-                tmpVelX[x][z] = ux;
-                tmpVelZ[x][z] = uz;
-            }
-        }
-
-        for (int x = 0; x <= gridSize; x++) {
-            for (int z = 0; z <= gridSize; z++) {
-                int xl = Math.max(0, x - 1);
-                int xr = Math.min(gridSize, x + 1);
-                int zb = Math.max(0, z - 1);
-                int zf = Math.min(gridSize, z + 1);
-
-                float hC = waterDepth[x][z];
-                float hL = waterDepth[xl][z];
-                float hR = waterDepth[xr][z];
-                float hB = waterDepth[x][zb];
-                float hF = waterDepth[x][zf];
-
-                float qxL = 0.5f * (tmpVelX[x][z] + tmpVelX[xl][z]) * 0.5f * (hC + hL);
-                float qxR = 0.5f * (tmpVelX[x][z] + tmpVelX[xr][z]) * 0.5f * (hC + hR);
-                float qzB = 0.5f * (tmpVelZ[x][z] + tmpVelZ[x][zb]) * 0.5f * (hC + hB);
-                float qzF = 0.5f * (tmpVelZ[x][z] + tmpVelZ[x][zf]) * 0.5f * (hC + hF);
-
-                float divergence = (qxR - qxL) + (qzF - qzB);
-                float nextDepth = hC - divergence * clampedDt * 0.45f;
-
-                // keep this phase stable: softly preserve original static bodies while allowing motion
-                nextDepth += (restDepth[x][z] - nextDepth) * restRestore;
-
-                tmpDepth[x][z] = Math.max(0f, nextDepth);
+                tmpDepth[x][z] = Math.max(0f, nextSurface - bed);
+                tmpVelX[x][z] = 0f;
+                tmpVelZ[x][z] = 0f;
             }
         }
 

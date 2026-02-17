@@ -1191,9 +1191,8 @@ public class Chunk {
             simulatedSurface = waterSimChunk.sampleSurface(localX, localZ);
         }
 
-        // Keep only a small detail ripple so the surface reads as liquid, not a detached overlay.
-        float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale) * 0.14f;
-        return simulatedSurface + detailRipple;
+        // During migration, keep height fully simulation-driven to avoid overlay artifacts.
+        return simulatedSurface;
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {
