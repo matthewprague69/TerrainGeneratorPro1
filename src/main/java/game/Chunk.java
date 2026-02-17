@@ -1194,57 +1194,36 @@ public class Chunk {
         float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
         float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
-                * (0.08f + waveStrength * 0.48f * largeSwellBoost);
+                * (0.06f + waveStrength * 0.44f * largeSwellBoost);
         return simulatedSurface + detailRipple;
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {
-        // Position-varying packet fields to avoid symmetry and same-direction motion.
-        float regionA = waveHash2D(wx * 0.016f, wz * 0.016f);
-        float regionB = waveHash2D((wx + 137.2f) * 0.011f, (wz - 91.7f) * 0.011f);
-        float mix = smoothstep01(0.5f + 0.5f * regionA);
+        // Keep ordered, readable wave trains and add only mild asymmetry/opposition.
+        float spatialBias = (float) Math.sin(wx * 0.011f + wz * 0.014f) * 0.10f;
+        float phaseA = ((wx + wz * 0.65f) / WATER_WAVE_LENGTH_1) + spatialBias
+                + timeSeconds * WATER_WAVE_SPEED * 1.10f;
+        float phaseB = ((wx * -0.45f + wz) / WATER_WAVE_LENGTH_2) + spatialBias * 0.5f
+                - timeSeconds * WATER_WAVE_SPEED * 1.35f;
+        float phaseC = ((wx * 0.2f - wz * 0.9f) / WATER_WAVE_LENGTH_3) - spatialBias * 0.4f
+                + timeSeconds * WATER_WAVE_SPEED * 1.90f;
 
-        float lenA = WATER_WAVE_LENGTH_1 * (0.75f + regionA * 0.40f);
-        float lenB = WATER_WAVE_LENGTH_2 * (0.80f + regionB * 0.45f);
-        float lenC = WATER_WAVE_LENGTH_3 * (0.85f + (1.0f - regionA) * 0.55f);
+        float primary = (float) (Math.sin(phaseA) * 0.48f + Math.sin(phaseB) * 0.34f + Math.sin(phaseC) * 0.18f);
 
-        float speedA = WATER_WAVE_SPEED * (0.95f + 0.45f * regionB);
-        float speedB = WATER_WAVE_SPEED * (1.18f + 0.60f * (1.0f - regionA));
-        float speedC = WATER_WAVE_SPEED * (1.65f + 0.55f * regionA);
+        float crestShape = primary >= 0f ? primary * primary * 0.92f : -Math.abs(primary) * 0.60f;
+        float chop = (float) Math.sin(phaseA * 1.42f + phaseC * 0.72f) * 0.14f;
+        float interference = (float) Math.sin((wx * 0.76f + wz * 0.94f) / 5.2f + timeSeconds * 2.1f)
+                * (float) Math.sin((wx * -0.91f + wz * 0.58f) / 4.6f - timeSeconds * 2.0f)
+                * 0.14f;
 
-        // Opposing directions so waves can collide instead of marching uniformly.
-        float phaseA = ((wx * 0.86f + wz * 0.52f) / lenA) + timeSeconds * speedA;
-        float phaseB = ((wx * -0.58f + wz * 0.81f) / lenB) - timeSeconds * speedB;
-        float phaseC = ((wx * 0.23f - wz * 1.02f) / lenC) + timeSeconds * speedC;
-
-        float waveA = (float) Math.sin(phaseA);
-        float waveB = (float) Math.sin(phaseB);
-        float waveC = (float) Math.sin(phaseC);
-
-        float packets = waveA * (0.28f + 0.20f * mix)
-                + waveB * (0.30f + 0.18f * (1.0f - mix))
-                + waveC * 0.24f;
-
-        float crossA = (float) Math.sin((wx * 0.72f + wz * 1.12f) / (3.8f + regionA * 1.4f) + timeSeconds * (2.2f + regionB));
-        float crossB = (float) Math.sin((wx * -1.08f + wz * 0.62f) / (3.0f + regionB * 1.1f) - timeSeconds * (2.6f + regionA));
-        float interference = crossA * crossB;
-
-        // Sharpen crests without making every wave the same size.
-        float crestShape = packets >= 0f ? packets * packets * (0.75f + 0.35f * mix) : -Math.abs(packets) * 0.50f;
-        float chop = (float) Math.sin(phaseA * (1.55f + regionB * 0.45f) + phaseC * 0.85f) * 0.16f;
-
-        return (crestShape + chop + interference * 0.22f) * WATER_WAVE_AMPLITUDE * waveScale;
+        float modulation = 0.92f + 0.08f * (float) Math.sin(wx * 0.019f - wz * 0.016f);
+        return (crestShape + chop + interference) * modulation * WATER_WAVE_AMPLITUDE * waveScale;
     }
 
     private static float getWaveScale(float baseWaterHeight, float terrainHeight) {
         float depth = Math.max(0f, baseWaterHeight - terrainHeight);
         float openWaterFactor = clamp01((depth - 0.8f) / 6.0f);
         return 0.95f + openWaterFactor * 4.05f;
-    }
-
-    private static float waveHash2D(float x, float z) {
-        float s = (float) Math.sin(x * 127.1f + z * 311.7f) * 43758.5453f;
-        return s - (float) Math.floor(s);
     }
 
     private static float clamp01(float value) {
