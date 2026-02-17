@@ -80,6 +80,67 @@ public class WaterSimChunk {
         return (float) Math.sqrt(ux * ux + uz * uz);
     }
 
+
+    public int getGridSize() {
+        return gridSize;
+    }
+
+    public void blendLeftEdgeFrom(WaterSimChunk neighbor) {
+        if (neighbor == null || neighbor.gridSize != gridSize) {
+            return;
+        }
+        for (int z = 0; z <= gridSize; z++) {
+            float nDepth = neighbor.waterDepth[gridSize][z];
+            float nUx = neighbor.velX[gridSize][z];
+            float nUz = neighbor.velZ[gridSize][z];
+            waterDepth[0][z] = 0.5f * (waterDepth[0][z] + nDepth);
+            velX[0][z] = 0.5f * (velX[0][z] + nUx);
+            velZ[0][z] = 0.5f * (velZ[0][z] + nUz);
+        }
+    }
+
+    public void blendRightEdgeFrom(WaterSimChunk neighbor) {
+        if (neighbor == null || neighbor.gridSize != gridSize) {
+            return;
+        }
+        for (int z = 0; z <= gridSize; z++) {
+            float nDepth = neighbor.waterDepth[0][z];
+            float nUx = neighbor.velX[0][z];
+            float nUz = neighbor.velZ[0][z];
+            waterDepth[gridSize][z] = 0.5f * (waterDepth[gridSize][z] + nDepth);
+            velX[gridSize][z] = 0.5f * (velX[gridSize][z] + nUx);
+            velZ[gridSize][z] = 0.5f * (velZ[gridSize][z] + nUz);
+        }
+    }
+
+    public void blendTopEdgeFrom(WaterSimChunk neighbor) {
+        if (neighbor == null || neighbor.gridSize != gridSize) {
+            return;
+        }
+        for (int x = 0; x <= gridSize; x++) {
+            float nDepth = neighbor.waterDepth[x][gridSize];
+            float nUx = neighbor.velX[x][gridSize];
+            float nUz = neighbor.velZ[x][gridSize];
+            waterDepth[x][0] = 0.5f * (waterDepth[x][0] + nDepth);
+            velX[x][0] = 0.5f * (velX[x][0] + nUx);
+            velZ[x][0] = 0.5f * (velZ[x][0] + nUz);
+        }
+    }
+
+    public void blendBottomEdgeFrom(WaterSimChunk neighbor) {
+        if (neighbor == null || neighbor.gridSize != gridSize) {
+            return;
+        }
+        for (int x = 0; x <= gridSize; x++) {
+            float nDepth = neighbor.waterDepth[x][0];
+            float nUx = neighbor.velX[x][0];
+            float nUz = neighbor.velZ[x][0];
+            waterDepth[x][gridSize] = 0.5f * (waterDepth[x][gridSize] + nDepth);
+            velX[x][gridSize] = 0.5f * (velX[x][gridSize] + nUx);
+            velZ[x][gridSize] = 0.5f * (velZ[x][gridSize] + nUz);
+        }
+    }
+
     public void stepSimulation(float dt) {
         float clampedDt = clamp(dt, 1.0f / 240.0f, 1.0f / 20.0f);
         float g = 9.81f;

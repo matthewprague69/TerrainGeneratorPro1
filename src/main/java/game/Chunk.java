@@ -77,6 +77,7 @@ public class Chunk {
     private final float[] secondaryLayerAlphas = new float[3];
     private final List<WaterPatch> waterPatches = new ArrayList<>();
     private WaterSimChunk waterSimChunk;
+    private boolean waterSimDirty = true;
     private int grassBatchVbo = -1;
     private int grassBatchVertexCount = 0;
     private int grassBatchTexture = 0;
@@ -1001,17 +1002,43 @@ public class Chunk {
     private void ensureWaterSimInitialized() {
         if (waterSimChunk == null) {
             waterSimChunk = new WaterSimChunk(SIZE);
+            waterSimDirty = true;
         }
-        waterSimChunk.initializeFromTerrainAndSurface(heights, riverSurface, WATER_LEVEL);
+        if (waterSimDirty) {
+            waterSimChunk.initializeFromTerrainAndSurface(heights, riverSurface, WATER_LEVEL);
+            waterSimDirty = false;
+        }
+    }
+
+    private void syncWaterSimEdgesFromNeighbors() {
+        if (waterSimChunk == null) {
+            return;
+        }
+
+        Chunk left = manager.getChunk(cx - 1, cz);
+        if (left != null && left.waterSimChunk != null) {
+            waterSimChunk.blendLeftEdgeFrom(left.waterSimChunk);
+        }
+        Chunk right = manager.getChunk(cx + 1, cz);
+        if (right != null && right.waterSimChunk != null) {
+            waterSimChunk.blendRightEdgeFrom(right.waterSimChunk);
+        }
+        Chunk top = manager.getChunk(cx, cz - 1);
+        if (top != null && top.waterSimChunk != null) {
+            waterSimChunk.blendTopEdgeFrom(top.waterSimChunk);
+        }
+        Chunk bottom = manager.getChunk(cx, cz + 1);
+        if (bottom != null && bottom.waterSimChunk != null) {
+            waterSimChunk.blendBottomEdgeFrom(bottom.waterSimChunk);
+        }
     }
 
     public void updateWaterSimulation(float dtSeconds) {
         if (waterPatches.isEmpty()) {
             return;
         }
-        if (waterSimChunk == null) {
-            ensureWaterSimInitialized();
-        }
+        ensureWaterSimInitialized();
+        syncWaterSimEdgesFromNeighbors();
         waterSimChunk.stepSimulation(dtSeconds);
     }
 
@@ -2334,10 +2361,12 @@ public class Chunk {
         disposeGrassBatch();
         disposeFlowerBatch();
         waterSimChunk = null;
+        waterSimDirty = true;
     }
 
     public void refreshAfterNeighborUpdate() {
         stitchEdges();
+        waterSimDirty = true;
         buildTerrainBuffers();
         buildWaterDisplayList();
         renderResourcesBuilt = true;
@@ -2346,6 +2375,7 @@ public class Chunk {
     public void markRenderDirty() {
         renderResourcesBuilt = false;
         waterSimChunk = null;
+        waterSimDirty = true;
     }
 
     public boolean needsRenderResources() {
