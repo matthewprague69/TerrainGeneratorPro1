@@ -196,7 +196,6 @@ public class TerrainManager {
     private final int iceTex;
     private final int waterBottomTex;
     private final int waterBottomAbsTex;
-    private final int waterSurfaceTex;
     private final EnumMap<PipelineStage, Long> perfStageNanos = new EnumMap<>(PipelineStage.class);
     private final EnumMap<PipelineStage, Integer> perfStageCalls = new EnumMap<>(PipelineStage.class);
     private long perfTotalUpdateNanos = 0L;
@@ -229,7 +228,6 @@ public class TerrainManager {
         iceTex = TextureLoader.getOrLoad("ice.png");
         waterBottomTex = TextureLoader.getOrLoad("sand.png");
         waterBottomAbsTex = TextureLoader.getOrLoad("water_bottom.png");
-        waterSurfaceTex = TextureLoader.getOrLoad("water_bottom.png");
 
 
         for (Biome b : Biome.values()) {
@@ -1309,10 +1307,6 @@ public class TerrainManager {
     }
     public int getWaterBottomAbsTexture() {
         return waterBottomAbsTex;
-    }
-
-    public int getWaterSurfaceTexture() {
-        return waterSurfaceTex;
     }
 
 
