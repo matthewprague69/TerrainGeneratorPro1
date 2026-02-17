@@ -196,6 +196,7 @@ public class TerrainManager {
     private final int iceTex;
     private final int waterBottomTex;
     private final int waterBottomAbsTex;
+    private final int waterSurfaceTex;
     private final EnumMap<PipelineStage, Long> perfStageNanos = new EnumMap<>(PipelineStage.class);
     private final EnumMap<PipelineStage, Integer> perfStageCalls = new EnumMap<>(PipelineStage.class);
     private long perfTotalUpdateNanos = 0L;
@@ -228,6 +229,7 @@ public class TerrainManager {
         iceTex = TextureLoader.getOrLoad("ice.png");
         waterBottomTex = TextureLoader.getOrLoad("sand.png");
         waterBottomAbsTex = TextureLoader.getOrLoad("water_bottom.png");
+        waterSurfaceTex = TextureLoader.getOrLoad("water_bottom.png");
 
 
         for (Biome b : Biome.values()) {
@@ -1109,7 +1111,7 @@ public class TerrainManager {
         recordStage(PipelineStage.DRAW_TERRAIN_AND_FEATURES, System.nanoTime() - start);
     }
 
-    public void drawWater(float wx, float wz) {
+    public void drawWater(float wx, float wy, float wz) {
         long start = System.nanoTime();
         float waterTimeSeconds = (float) (System.nanoTime() * 1.0e-9);
         final float waterSimDt = 1.0f / 60.0f;
@@ -1128,7 +1130,7 @@ public class TerrainManager {
                 c.updateWaterSimulation(waterSimDt);
             }
             c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
-                    weatherSystem.getIceThickness(), waterTimeSeconds);
+                    weatherSystem.getIceThickness(), waterTimeSeconds, wx, wy, wz);
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;
@@ -1307,6 +1309,10 @@ public class TerrainManager {
     }
     public int getWaterBottomAbsTexture() {
         return waterBottomAbsTex;
+    }
+
+    public int getWaterSurfaceTexture() {
+        return waterSurfaceTex;
     }
 
 

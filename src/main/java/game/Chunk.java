@@ -481,7 +481,8 @@ public class Chunk {
 
     }
 
-    public void drawWater(boolean frozen, float snowCoverage, float iceThickness, float waterTimeSeconds) {
+    public void drawWater(boolean frozen, float snowCoverage, float iceThickness, float waterTimeSeconds,
+                          float cameraX, float cameraY, float cameraZ) {
         if (!renderResourcesBuilt && waterPatches.isEmpty()) {
             stitchEdges();
             buildWaterDisplayList();
@@ -509,7 +510,7 @@ public class Chunk {
             float lightLuma = (lightColor[0] + lightColor[1] + lightColor[2]) / 3f;
             float iceBrightness = Math.max(0.16f, Math.min(1f, lightLuma * 1.1f));
             glColor4f(iceBrightness, iceBrightness, iceBrightness, 1.0f);
-            renderWaterSurface(0f, true);
+            renderWaterSurface(0f, true, cameraX, cameraY, cameraZ);
             glPopMatrix();
             glDisable(GL_POLYGON_OFFSET_FILL);
         } else {
@@ -518,7 +519,18 @@ public class Chunk {
             // Keep depth writes on for translucent water to reduce side-angle sorting artifacts.
             glDepthMask(true);
 
-            renderWaterSurface(waterTimeSeconds, false);
+            int waterSurfaceTexture = manager.getWaterSurfaceTexture();
+            if (waterSurfaceTexture != 0) {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, waterSurfaceTexture);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            }
+
+            renderWaterSurface(waterTimeSeconds, false, cameraX, cameraY, cameraZ);
+            if (waterSurfaceTexture != 0) {
+                glDisable(GL_TEXTURE_2D);
+            }
         }
 
         glDisable(GL_FOG);
@@ -1029,7 +1041,8 @@ public class Chunk {
         return waterSimChunk.sampleSurface(localX, localZ);
     }
 
-    private void renderWaterSurface(float timeSeconds, boolean frozen) {
+    private void renderWaterSurface(float timeSeconds, boolean frozen,
+                                    float cameraX, float cameraY, float cameraZ) {
         if (waterPatches.isEmpty()) {
             return;
         }
@@ -1068,25 +1081,32 @@ public class Chunk {
 
             // Triangle 1: (1,2,3)
             submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature,
+                    cameraX, cameraY, cameraZ);
             submitWaterVertex(patch.wx2, patch.wz1, wy2, patch.wy2, patch.terrainY2,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale2, dx2, dz2, curvature);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale2, dx2, dz2, curvature,
+                    cameraX, cameraY, cameraZ);
             submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature,
+                    cameraX, cameraY, cameraZ);
             // Triangle 2: (1,3,4)
             submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature,
+                    cameraX, cameraY, cameraZ);
             submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature,
+                    cameraX, cameraY, cameraZ);
             submitWaterVertex(patch.wx1, patch.wz2, wy4, patch.wy4, patch.terrainY4,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale4, dx4, dz4, curvature);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale4, dx4, dz4, curvature,
+                    cameraX, cameraY, cameraZ);
         }
         glEnd();
     }
 
     private void submitWaterVertex(float wx, float wz, float wy, float baseY, float terrainY,
                                    float timeSeconds, boolean frozen, float lx, float ly, float lz, float texScale,
-                                   float waveScale, float dx, float dz, float curvature) {
+                                   float waveScale, float dx, float dz, float curvature,
+                                   float cameraX, float cameraY, float cameraZ) {
         if (frozen) {
             glColor4f(1f, 1f, 1f, 1f);
             glNormal3f(0f, 1f, 0f);
@@ -1167,13 +1187,30 @@ public class Chunk {
             float litG = clamp01(baseG * (0.74f + brightness * 0.60f) * heightContrast);
             float litB = clamp01(baseB * (0.78f + brightness * 0.56f) * (heightContrast + 0.04f));
 
-            // Approximate Fresnel + glints so surfaces read more like water, not flat translucent tint.
-            float fresnel = clamp01((1f - ny) * 1.25f + slopeMag * 0.25f);
+            float vx = cameraX - wx;
+            float vy = cameraY - wy;
+            float vz = cameraZ - wz;
+            float vLen = (float) Math.sqrt(vx * vx + vy * vy + vz * vz);
+            if (vLen > 0.0001f) {
+                vx /= vLen;
+                vy /= vLen;
+                vz /= vLen;
+            }
+            float ndotv = clamp01(nx * vx + ny * vy + nz * vz);
+
+            // View-dependent Fresnel gives stronger sky reflection at grazing angles.
+            float fresnel = clamp01((1f - ndotv) * 1.45f + slopeMag * 0.20f);
             float glintNoise = 0.5f + 0.5f * (float) Math.sin(wx * 0.9f + wz * 1.1f + timeSeconds * 5.2f);
-            float glint = fresnel * diffuse * (0.14f + 0.30f * glintNoise);
+            float glint = fresnel * diffuse * (0.16f + 0.34f * glintNoise);
             litR = clamp01(litR + glint * 0.85f);
             litG = clamp01(litG + glint * 0.92f);
-            litB = clamp01(litB + glint * 1.05f);
+            litB = clamp01(litB + glint * 1.08f);
+
+            // Sky-tinted reflection band.
+            float reflection = fresnel * (0.35f + 0.40f * diffuse);
+            litR = clamp01(litR + reflection * 0.12f);
+            litG = clamp01(litG + reflection * 0.17f);
+            litB = clamp01(litB + reflection * 0.27f);
 
             float shoreSuppress = clamp01((depth - 0.9f) / 2.6f);
             float foamMix = clamp01((foam * 0.96f + breaking * 0.14f) * shoreSuppress);
@@ -1182,11 +1219,17 @@ public class Chunk {
             float finalB = litB + (1f - litB) * foamMix;
 
             // Higher opacity to keep water clearly readable while still preserving some depth transparency.
-            float alpha = Math.min(0.99f, 0.77f + shorelineMix * 0.15f + foam * 0.20f + fresnel * 0.08f);
+            float alpha = Math.min(0.99f, 0.74f + shorelineMix * 0.15f + foam * 0.18f + fresnel * 0.12f);
             glColor4f(finalR, finalG, finalB, alpha);
+
+            float flowU = wx * texScale + timeSeconds * 0.028f + dz * 0.22f;
+            float flowV = wz * texScale - timeSeconds * 0.021f + dx * 0.22f;
+            glTexCoord2f(flowU, flowV);
         }
 
-        glTexCoord2f(wx * texScale, wz * texScale);
+        if (frozen) {
+            glTexCoord2f(wx * texScale, wz * texScale);
+        }
         glVertex3f(wx, wy, wz);
     }
 

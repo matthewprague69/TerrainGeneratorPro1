@@ -764,7 +764,7 @@ public class Main {
                     fogStart, fogEnd, fogColor);
             terrain.drawTerrainAndFeatures(player.getX(), player.getZ());
             shadowRenderer.endScenePass();
-            terrain.drawWater(player.getX(), player.getZ());
+            terrain.drawWater(player.getX(), player.getY(), player.getZ());
             terrain.renderWeatherEffects(player.getX(), player.getY(), player.getZ());
 
             sky.renderSunAndMoon(player.getX(), player.getY(), player.getZ());
