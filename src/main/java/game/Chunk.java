@@ -1095,11 +1095,21 @@ public class Chunk {
             float litG = baseG * (0.72f + brightness * 0.50f);
             float litB = baseB * (0.75f + brightness * 0.46f);
 
+            // Approximate Fresnel + glints so surfaces read more like water, not flat translucent tint.
+            float fresnel = clamp01((1f - ny) * 1.25f + slopeMag * 0.25f);
+            float glintNoise = 0.5f + 0.5f * (float) Math.sin(wx * 0.9f + wz * 1.1f + timeSeconds * 5.2f);
+            float glint = fresnel * diffuse * (0.10f + 0.20f * glintNoise);
+            litR = clamp01(litR + glint * 0.85f);
+            litG = clamp01(litG + glint * 0.92f);
+            litB = clamp01(litB + glint * 1.05f);
+
             float foamMix = foam * 0.92f;
             float finalR = litR + (1f - litR) * foamMix;
             float finalG = litG + (1f - litG) * foamMix;
             float finalB = litB + (1f - litB) * foamMix;
-            float alpha = Math.min(0.9f, 0.56f + shallowMix * 0.10f + foam * 0.22f);
+
+            // Higher opacity to keep water clearly readable while still preserving some depth transparency.
+            float alpha = Math.min(0.98f, 0.74f + shallowMix * 0.14f + foam * 0.10f + fresnel * 0.08f);
             glColor4f(finalR, finalG, finalB, alpha);
         }
 
