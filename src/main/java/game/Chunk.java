@@ -115,11 +115,11 @@ public class Chunk {
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
 
     private static final int MAX_IMPOSTOR_CACHE_ENTRIES = 512;
-    private static final float WATER_WAVE_AMPLITUDE = 1.10f;
-    private static final float WATER_WAVE_SPEED = 1.65f;
-    private static final float WATER_WAVE_LENGTH_1 = 18f;
-    private static final float WATER_WAVE_LENGTH_2 = 10f;
-    private static final float WATER_WAVE_LENGTH_3 = 6f;
+    private static final float WATER_WAVE_AMPLITUDE = 1.22f;
+    private static final float WATER_WAVE_SPEED = 0.72f;
+    private static final float WATER_WAVE_LENGTH_1 = 30f;
+    private static final float WATER_WAVE_LENGTH_2 = 16f;
+    private static final float WATER_WAVE_LENGTH_3 = 9f;
     private static final float WATER_FOAM_SLOPE_START = 0.10f;
     private static final float WATER_FOAM_SLOPE_RANGE = 0.24f;
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
@@ -1005,41 +1005,47 @@ public class Chunk {
         float lz = -lightDir[2];
 
         for (WaterPatch patch : waterPatches) {
-            float wy1 = getWaterHeightAt(patch.wy1, patch.wx1, patch.wz1, timeSeconds, frozen);
-            float wy2 = getWaterHeightAt(patch.wy2, patch.wx2, patch.wz1, timeSeconds, frozen);
-            float wy3 = getWaterHeightAt(patch.wy3, patch.wx2, patch.wz2, timeSeconds, frozen);
-            float wy4 = getWaterHeightAt(patch.wy4, patch.wx1, patch.wz2, timeSeconds, frozen);
+            float waveScale1 = getWaveScale(patch.wy1, patch.terrainY1);
+            float waveScale2 = getWaveScale(patch.wy2, patch.terrainY2);
+            float waveScale3 = getWaveScale(patch.wy3, patch.terrainY3);
+            float waveScale4 = getWaveScale(patch.wy4, patch.terrainY4);
+
+            float wy1 = getWaterHeightAt(patch.wy1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
+            float wy2 = getWaterHeightAt(patch.wy2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
+            float wy3 = getWaterHeightAt(patch.wy3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
+            float wy4 = getWaterHeightAt(patch.wy4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
 
             glBegin(GL_TRIANGLES);
             // Triangle 1: (1,2,3)
             submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
-                    timeSeconds, frozen, lx, ly, lz, texScale);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1);
             submitWaterVertex(patch.wx2, patch.wz1, wy2, patch.wy2, patch.terrainY2,
-                    timeSeconds, frozen, lx, ly, lz, texScale);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale2);
             submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
-                    timeSeconds, frozen, lx, ly, lz, texScale);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3);
             // Triangle 2: (1,3,4)
             submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
-                    timeSeconds, frozen, lx, ly, lz, texScale);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1);
             submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
-                    timeSeconds, frozen, lx, ly, lz, texScale);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3);
             submitWaterVertex(patch.wx1, patch.wz2, wy4, patch.wy4, patch.terrainY4,
-                    timeSeconds, frozen, lx, ly, lz, texScale);
+                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale4);
             glEnd();
         }
     }
 
     private void submitWaterVertex(float wx, float wz, float wy, float baseY, float terrainY,
-                                   float timeSeconds, boolean frozen, float lx, float ly, float lz, float texScale) {
+                                   float timeSeconds, boolean frozen, float lx, float ly, float lz, float texScale,
+                                   float waveScale) {
         if (frozen) {
             glColor4f(1f, 1f, 1f, 1f);
             glNormal3f(0f, 1f, 0f);
         } else {
             float eps = Math.max(0.4f, scale * 0.8f);
-            float left = getWaveOffset(wx - eps, wz, timeSeconds);
-            float right = getWaveOffset(wx + eps, wz, timeSeconds);
-            float back = getWaveOffset(wx, wz - eps, timeSeconds);
-            float front = getWaveOffset(wx, wz + eps, timeSeconds);
+            float left = getWaveOffset(wx - eps, wz, timeSeconds, waveScale);
+            float right = getWaveOffset(wx + eps, wz, timeSeconds, waveScale);
+            float back = getWaveOffset(wx, wz - eps, timeSeconds, waveScale);
+            float front = getWaveOffset(wx, wz + eps, timeSeconds, waveScale);
             float center = wy - baseY;
 
             float dx = (right - left) / (2f * eps);
@@ -1055,8 +1061,8 @@ public class Chunk {
 
             float diffuse = Math.max(0f, nx * lx + ny * ly + nz * lz);
             float waveOffset = center;
-            float waveVelocity = getWaveVelocity(wx, wz, timeSeconds);
-            float crest = clamp01(waveOffset / (WATER_WAVE_AMPLITUDE * 0.95f + 0.0001f));
+            float waveVelocity = getWaveVelocity(wx, wz, timeSeconds, waveScale);
+            float crest = clamp01(waveOffset / (WATER_WAVE_AMPLITUDE * waveScale * 0.95f + 0.0001f));
             float slopeMag = (float) Math.sqrt(dx * dx + dz * dz);
             float breaking = clamp01((slopeMag - WATER_FOAM_SLOPE_START) / WATER_FOAM_SLOPE_RANGE);
             float falling = clamp01((-waveVelocity - WATER_FOAM_FALL_SPEED) / WATER_FOAM_FALL_RANGE);
@@ -1117,40 +1123,47 @@ public class Chunk {
         glVertex3f(wx, wy, wz);
     }
 
-    private float getWaterHeightAt(float baseHeight, float wx, float wz, float timeSeconds, boolean frozen) {
-        return frozen ? baseHeight : baseHeight + getWaveOffset(wx, wz, timeSeconds);
+    private float getWaterHeightAt(float baseHeight, float wx, float wz, float timeSeconds, boolean frozen,
+                                   float waveScale) {
+        return frozen ? baseHeight : baseHeight + getWaveOffset(wx, wz, timeSeconds, waveScale);
     }
 
-    private float getWaveOffset(float wx, float wz, float timeSeconds) {
+    private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {
         float currentBias = (float) Math.sin(wx * 0.03f + wz * 0.02f) * 0.18f;
         float phaseA = ((wx + wz * 0.65f) / WATER_WAVE_LENGTH_1) + currentBias + timeSeconds * WATER_WAVE_SPEED;
         float phaseB = ((wx * -0.45f + wz) / WATER_WAVE_LENGTH_2) + currentBias * 0.4f
-                + timeSeconds * WATER_WAVE_SPEED * 1.55f;
+                + timeSeconds * WATER_WAVE_SPEED * 1.32f;
         float phaseC = ((wx * 0.2f - wz * 0.9f) / WATER_WAVE_LENGTH_3) - currentBias * 0.6f
-                + timeSeconds * WATER_WAVE_SPEED * 2.3f;
+                + timeSeconds * WATER_WAVE_SPEED * 1.82f;
         float primary = (float) (Math.sin(phaseA) * 0.5 + Math.sin(phaseB) * 0.32 + Math.sin(phaseC) * 0.18);
-        float choppy = (float) Math.sin(phaseA * 1.8f + phaseC * 0.7f);
-        return (primary + choppy * 0.2f) * WATER_WAVE_AMPLITUDE;
+        float choppy = (float) Math.sin(phaseA * 1.45f + phaseC * 0.55f);
+        return (primary + choppy * 0.16f) * WATER_WAVE_AMPLITUDE * waveScale;
     }
 
-    private float getWaveVelocity(float wx, float wz, float timeSeconds) {
+    private float getWaveVelocity(float wx, float wz, float timeSeconds, float waveScale) {
         float currentBias = (float) Math.sin(wx * 0.03f + wz * 0.02f) * 0.18f;
         float phaseA = ((wx + wz * 0.65f) / WATER_WAVE_LENGTH_1) + currentBias + timeSeconds * WATER_WAVE_SPEED;
         float phaseB = ((wx * -0.45f + wz) / WATER_WAVE_LENGTH_2) + currentBias * 0.4f
-                + timeSeconds * WATER_WAVE_SPEED * 1.55f;
+                + timeSeconds * WATER_WAVE_SPEED * 1.32f;
         float phaseC = ((wx * 0.2f - wz * 0.9f) / WATER_WAVE_LENGTH_3) - currentBias * 0.6f
-                + timeSeconds * WATER_WAVE_SPEED * 2.3f;
+                + timeSeconds * WATER_WAVE_SPEED * 1.82f;
 
         float dPhaseA = WATER_WAVE_SPEED;
-        float dPhaseB = WATER_WAVE_SPEED * 1.55f;
-        float dPhaseC = WATER_WAVE_SPEED * 2.3f;
+        float dPhaseB = WATER_WAVE_SPEED * 1.32f;
+        float dPhaseC = WATER_WAVE_SPEED * 1.82f;
 
         float dPrimary = (float) (Math.cos(phaseA) * 0.5f * dPhaseA
                 + Math.cos(phaseB) * 0.32f * dPhaseB
                 + Math.cos(phaseC) * 0.18f * dPhaseC);
-        float choppyPhase = phaseA * 1.8f + phaseC * 0.7f;
-        float dChoppy = (float) (Math.cos(choppyPhase) * (1.8f * dPhaseA + 0.7f * dPhaseC));
-        return (dPrimary + dChoppy * 0.2f) * WATER_WAVE_AMPLITUDE;
+        float choppyPhase = phaseA * 1.45f + phaseC * 0.55f;
+        float dChoppy = (float) (Math.cos(choppyPhase) * (1.45f * dPhaseA + 0.55f * dPhaseC));
+        return (dPrimary + dChoppy * 0.16f) * WATER_WAVE_AMPLITUDE * waveScale;
+    }
+
+    private static float getWaveScale(float baseWaterHeight, float terrainHeight) {
+        float depth = Math.max(0f, baseWaterHeight - terrainHeight);
+        float openWaterFactor = clamp01((depth - 0.8f) / 6.0f);
+        return 0.78f + openWaterFactor * 0.72f;
     }
 
     private static float clamp01(float value) {
