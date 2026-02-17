@@ -19,6 +19,7 @@ public class WaterSimChunk {
 
     private static final float SHORE_RUNUP_MAX = 0.42f;
     private static final float SHORE_RUNUP_SLOPE = 0.55f;
+    private static final float SHORE_RETREAT_RATE = 0.22f;
 
     public WaterSimChunk(int gridSize) {
         this.gridSize = gridSize;
@@ -176,7 +177,7 @@ public class WaterSimChunk {
         float frameScale = clampedDt * 60.0f;
         float gravity = 0.020f * frameScale;
         float damping = (float) Math.pow(0.92f, frameScale);
-        float pressureBlend = 0.24f * frameScale;
+        float pressureBlend = 0.14f * frameScale;
         float diffusion = 0.12f * frameScale;
 
         // Pass 1: terrain-aware velocity update.
@@ -247,8 +248,17 @@ public class WaterSimChunk {
                 float dynamicSurfaceCap = Math.max(maxSurface[x][z], neighborEta - 0.03f) + runupAllowance;
                 float dynamicMaxDepth = Math.max(staticMaxDepth, dynamicSurfaceCap - bed);
 
+                float excessShoreDepth = Math.max(0f, depth - staticMaxDepth);
+                float downslope = 0f;
+                downslope += Math.max(0f, bed - bedHeight[xl][z]);
+                downslope += Math.max(0f, bed - bedHeight[xr][z]);
+                downslope += Math.max(0f, bed - bedHeight[x][zb]);
+                downslope += Math.max(0f, bed - bedHeight[x][zf]);
+                float retreat = excessShoreDepth * clamp(downslope / 2.8f, 0f, 1f) * SHORE_RETREAT_RATE;
+
                 float pressureDepth = staticMaxDepth;
                 depth += (pressureDepth - depth) * pressureBlend;
+                depth -= retreat;
 
                 tmpDepth[x][z] = clamp(depth, 0f, dynamicMaxDepth);
             }

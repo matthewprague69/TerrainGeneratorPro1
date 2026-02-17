@@ -1161,8 +1161,8 @@ public class Chunk {
             litG = clamp01(litG + glint * 0.92f);
             litB = clamp01(litB + glint * 1.05f);
 
-            float shoreSuppress = clamp01((depth - 0.9f) / 2.6f);
-            float foamMix = clamp01((foam * 0.96f + breaking * 0.14f) * shoreSuppress);
+            float shoreBreakZone = 1f - smoothstep01(clamp01((depth - 1.6f) / 2.2f));
+            float foamMix = clamp01(foam * (0.72f + shoreBreakZone * 0.42f) + breaking * 0.18f);
             float finalR = litR + (1f - litR) * foamMix;
             float finalG = litG + (1f - litG) * foamMix;
             float finalB = litB + (1f - litB) * foamMix;
@@ -1193,16 +1193,23 @@ public class Chunk {
             simulatedSpeed = waterSimChunk.sampleSpeed(localX, localZ);
         }
 
-        // Preserve wave energy toward shore (with damping) so waves can reach terrain edges.
-        float shallowBand = 1f - smoothstep01(clamp01((simulatedDepth - 0.22f) / 0.95f));
-        float openWater = clamp01((simulatedDepth - 1.8f) / 7.0f);
-        float waveStrength = 0.24f + openWater * openWater * 0.76f;
+        // Preserve wave energy toward shore, then let it collapse and slide back naturally.
+        float shallowBand = 1f - smoothstep01(clamp01((simulatedDepth - 0.18f) / 1.2f));
+        float openWater = clamp01((simulatedDepth - 1.5f) / 7.0f);
+        float waveStrength = 0.34f + openWater * openWater * 0.66f;
         float vastWater = smoothstep01(clamp01((simulatedDepth - 4.0f) / 8.0f));
-        float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
-        float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
-        float shoreDamping = 1.0f - shallowBand * 0.46f;
-        float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
-                * (0.08f + waveStrength * 0.42f * largeSwellBoost) * shoreDamping;
+        float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.20f));
+        float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.62f + velocityBoost * 0.38f);
+        float shoreDamping = 1.0f - shallowBand * 0.18f;
+
+        float wave = getWaveOffset(wx, wz, timeSeconds, waveScale);
+        float runupBoost = shallowBand * (0.10f + velocityBoost * 0.12f);
+        float retreatBlend = clamp01((0.35f - simulatedDepth) / 0.35f);
+        float drawdown = retreatBlend * (0.03f + simulatedSpeed * 0.04f);
+
+        float detailRipple = wave * (0.10f + waveStrength * 0.44f * largeSwellBoost) * shoreDamping;
+        detailRipple += Math.max(0f, wave) * runupBoost;
+        detailRipple -= Math.max(0f, -wave) * drawdown;
 
         float minSurface = terrainHeight + 0.01f;
         float finalSurface = simulatedSurface + detailRipple;
