@@ -986,6 +986,12 @@ public class Chunk {
                     if (riverCorners < 2) {
                         continue;
                     }
+                    boolean adjacentRiverPair = (river00 && river10) || (river10 && river11)
+                            || (river11 && river01) || (river01 && river00);
+                    if (riverCorners == 2 && !adjacentRiverPair) {
+                        // Skip diagonal-only cases that produce stretched river sheets over banks.
+                        continue;
+                    }
 
                     float wx1 = (cx * SIZE + x) * scale;
                     float wz1 = (cz * SIZE + z) * scale;
@@ -2253,8 +2259,13 @@ public class Chunk {
                         float target = Math.min(bedHeight, riverSurfaceHeight - minRiverDepth);
                         float blended = (float) (baseHeight * (1.0 - bankBlend) + target * bankBlend);
                         heights[x][z] = blended;
-                        if (riverSurface != null && bankBlend > 0.0) {
-                            riverSurface[x][z] = riverSurfaceHeight;
+                        if (riverSurface != null) {
+                            // Only mark true channel cores as water surface; avoid painting river water onto carved banks.
+                            boolean inChannelCore = depthFactor > 0.24;
+                            if (inChannelCore) {
+                                float clampedSurface = Math.min(riverSurfaceHeight, heights[x][z] + minRiverDepth * 1.05f);
+                                riverSurface[x][z] = clampedSurface;
+                            }
                         }
                     }
                 }
