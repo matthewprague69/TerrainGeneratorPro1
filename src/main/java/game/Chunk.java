@@ -1103,16 +1103,17 @@ public class Chunk {
             float shorelineMix = 1f - depthSmooth;
             float shoreFoam = clamp01((1.0f - depth) / 1.0f) * clamp01((slopeMag - 0.10f) / 0.22f);
 
-            float foamNoise = 0.5f + 0.5f * (float) Math.sin(wx * 0.22f + wz * 0.31f + timeSeconds * 3.4f + waveOffset * 3.6f);
-            float collisionPattern = Math.abs((float) Math.sin(wx * 0.42f + timeSeconds * 2.8f)
-                    * (float) Math.sin(wz * 0.39f - timeSeconds * 3.1f));
-            float collisionFoam = clamp01((collisionPattern - 0.58f) / 0.32f) * clamp01((slopeMag - 0.08f) / 0.20f);
-            float largeBodyFoam = crest * clamp01((depth - 2.4f) / 5.5f);
-            float foam = crest * (0.78f * breaking + 0.55f * falling + 0.34f * curvatureFoam);
-            foam = Math.max(foam, shoreFoam * 0.52f);
-            foam = Math.max(foam, collisionFoam * 0.70f);
-            foam = Math.max(foam, largeBodyFoam * (0.45f + 0.55f * foamNoise));
-            foam = clamp01(foam * (0.90f + 0.34f * foamNoise));
+            float foamNoise = 0.5f + 0.5f * (float) Math.sin(wx * 0.18f + wz * 0.24f + timeSeconds * 2.6f + waveOffset * 2.8f);
+            float collisionPattern = 0.5f + 0.5f * (float) Math.sin(wx * 0.18f + wz * 0.14f + timeSeconds * 2.1f)
+                    * (float) Math.sin(wx * -0.12f + wz * 0.22f - timeSeconds * 2.4f);
+            float collisionFoam = smoothstep01(clamp01((collisionPattern - 0.46f) / 0.34f))
+                    * clamp01((slopeMag - 0.07f) / 0.20f);
+            float largeBodyFoam = crest * clamp01((depth - 2.2f) / 5.0f);
+            float foam = crest * (0.86f * breaking + 0.58f * falling + 0.40f * curvatureFoam);
+            foam = Math.max(foam, shoreFoam * 0.58f);
+            foam = Math.max(foam, collisionFoam * (0.45f + 0.35f * foamNoise));
+            foam = Math.max(foam, largeBodyFoam * (0.50f + 0.50f * foamNoise));
+            foam = clamp01(foam * (0.94f + 0.22f * foamNoise));
 
             float altitude01 = clamp01((baseY - WATER_LEVEL) / 18f);
             float deepR = lerp(0.06f, 0.14f, altitude01);
@@ -1135,6 +1136,12 @@ public class Chunk {
                     ? lerp(shallowB, midB, depthSmooth * 2f)
                     : lerp(midB, deepB, (depthSmooth - 0.5f) * 2f);
 
+            // Tie color to wave shape so crests/troughs read as water motion, not random tint patches.
+            float trough = clamp01((-waveOffset) / (WATER_WAVE_AMPLITUDE * waveScale + 0.0001f));
+            baseR = clamp01(baseR + crest * 0.035f - trough * 0.020f);
+            baseG = clamp01(baseG + crest * 0.055f - trough * 0.030f);
+            baseB = clamp01(baseB + crest * 0.075f + trough * 0.020f);
+
             float positionTint = (float) Math.sin((wx + wz) * 0.015f + timeSeconds * 0.25f) * 0.035f;
             float terrainHeightTint = clamp01((terrainY - WATER_LEVEL + 6.0f) / 18.0f);
             baseG = clamp01(baseG + positionTint * 0.6f + shorelineMix * 0.05f + terrainHeightTint * 0.03f);
@@ -1156,13 +1163,13 @@ public class Chunk {
             litB = clamp01(litB + glint * 1.05f);
 
             float shoreSuppress = clamp01((depth - 0.9f) / 2.6f);
-            float foamMix = clamp01((foam * 0.94f + breaking * 0.12f) * shoreSuppress);
+            float foamMix = clamp01((foam * 0.96f + breaking * 0.14f) * shoreSuppress);
             float finalR = litR + (1f - litR) * foamMix;
             float finalG = litG + (1f - litG) * foamMix;
             float finalB = litB + (1f - litB) * foamMix;
 
             // Higher opacity to keep water clearly readable while still preserving some depth transparency.
-            float alpha = Math.min(0.99f, 0.76f + shorelineMix * 0.16f + foam * 0.18f + fresnel * 0.09f);
+            float alpha = Math.min(0.99f, 0.77f + shorelineMix * 0.15f + foam * 0.20f + fresnel * 0.08f);
             glColor4f(finalR, finalG, finalB, alpha);
         }
 
