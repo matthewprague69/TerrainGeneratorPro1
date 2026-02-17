@@ -27,6 +27,8 @@ public class WaterSimChunk {
     private static final float SHORE_RUNUP_SLOPE = 1.50f;
     private static final float SHORE_RETENTION_MAX = 0.60f;
     private static final float SHORE_RUNUP_RISE_LIMIT = 2.4f;
+    private static final float SHORE_SHEET_TRANSFER_MAX = 0.22f;
+    private static final float SHORE_BREAKER_FOAM_BONUS = 0.42f;
 
     public WaterSimChunk(int gridSize) {
         this.gridSize = gridSize;
@@ -334,6 +336,7 @@ public class WaterSimChunk {
                 // Very soft overflow region: only treat as collision when far beyond the dynamic cap.
                 float softCap = dynamicMaxDepth + 0.55f + centerDepth * 0.45f + waveCarry * 0.40f;
                 float collisionOverflow = Math.max(0f, depth - softCap);
+                float breakerFoam = 0f;
                 if (collisionOverflow > 0f) {
                     float bedGradX = (bedHeight[xr][z] - bedHeight[xl][z]) * 0.5f;
                     float bedGradZ = (bedHeight[x][zf] - bedHeight[x][zb]) * 0.5f;
@@ -349,6 +352,7 @@ public class WaterSimChunk {
                             float tangentX = -normalZ;
                             float tangentZ = normalX;
                             float tangentDot = tmpVelX[x][z] * tangentX + tmpVelZ[x][z] * tangentZ;
+                            breakerFoam = clamp((inDot - 0.10f) / 0.45f, 0f, 1f) * SHORE_BREAKER_FOAM_BONUS;
                             tmpVelX[x][z] -= 0.72f * inDot * normalX;
                             tmpVelZ[x][z] -= 0.72f * inDot * normalZ;
                             tmpVelX[x][z] += tangentX * Math.abs(tangentDot) * 0.26f;
@@ -383,7 +387,12 @@ public class WaterSimChunk {
                 float speedFoam = clamp((velocityMag - 0.10f) / 0.35f, 0f, 1f);
                 float retainedFoam = foam[x][z] * (float) Math.pow(0.962f, frameScale);
                 float advectionFoam = (foam[xl][z] + foam[xr][z] + foam[x][zb] + foam[x][zf]) * 0.25f;
-                tmpFoam[x][z] = clamp(Math.max(retainedFoam, advectionFoam * 0.70f) + impactFoam * 0.85f + speedFoam * 0.08f, 0f, 1f);
+                tmpFoam[x][z] = clamp(Math.max(retainedFoam, advectionFoam * 0.70f)
+                        + impactFoam * 0.85f
+                        + speedFoam * 0.08f
+                        + breakerFoam,
+                        0f,
+                        1f);
 
                 tmpDepth[x][z] = Math.max(0f, smoothedDepth);
             }
@@ -407,6 +416,100 @@ public class WaterSimChunk {
                 float inlandAttenuation = 1f - clamp(inlandRise / SHORE_RUNUP_RISE_LIMIT, 0f, 1f);
                 spread *= inlandAttenuation;
                 tmpDepthSpread[x][z] = center + (neighbors - center) * (0.10f + spread * 0.34f);
+            }
+        }
+
+        // Pass 2.6: directional shoreline sheet transfer with return/backwash preference.
+        for (int x = 0; x <= gridSize; x++) {
+            for (int z = 0; z <= gridSize; z++) {
+                int xl = Math.max(0, x - 1);
+                int xr = Math.min(gridSize, x + 1);
+                int zb = Math.max(0, z - 1);
+                int zf = Math.min(gridSize, z + 1);
+
+                float staticMaxDepth = Math.max(0f, maxSurface[x][z] - bedHeight[x][z]);
+                float shoreline = clamp((0.18f - staticMaxDepth) / 0.18f, 0f, 1f);
+                if (shoreline <= 0f) {
+                    continue;
+                }
+
+                float depth = tmpDepthSpread[x][z];
+                if (depth <= 0.001f) {
+                    continue;
+                }
+
+                float ux = tmpVelX[x][z];
+                float uz = tmpVelZ[x][z];
+                float flow = (float) Math.sqrt(ux * ux + uz * uz);
+                if (flow < 0.05f) {
+                    continue;
+                }
+
+                float nx = ux / flow;
+                float nz = uz / flow;
+                float inlandRise = Math.max(0f, bedHeight[x][z] - maxSurface[x][z]);
+                float inlandFade = clamp(inlandRise / SHORE_RUNUP_RISE_LIMIT, 0f, 1f);
+                float travel = clamp((flow - 0.05f) / 0.55f, 0f, 1f) * (1f - inlandFade * 0.75f);
+                float transfer = Math.min(depth * (0.08f + 0.28f * travel) * shoreline, SHORE_SHEET_TRANSFER_MAX);
+                if (transfer <= 0f) {
+                    continue;
+                }
+
+                float wxPosX = Math.max(0f, nx);
+                float wxNegX = Math.max(0f, -nx);
+                float wzPos = Math.max(0f, nz);
+                float wzNeg = Math.max(0f, -nz);
+                float wSum = wxPosX + wxNegX + wzPos + wzNeg;
+                if (wSum < 0.0001f) {
+                    continue;
+                }
+
+                float sent = 0f;
+                if (xr != x && wxPosX > 0f) {
+                    float share = transfer * (wxPosX / wSum);
+                    tmpDepthSpread[xr][z] += share;
+                    sent += share;
+                }
+                if (xl != x && wxNegX > 0f) {
+                    float share = transfer * (wxNegX / wSum);
+                    tmpDepthSpread[xl][z] += share;
+                    sent += share;
+                }
+                if (zf != z && wzPos > 0f) {
+                    float share = transfer * (wzPos / wSum);
+                    tmpDepthSpread[x][zf] += share;
+                    sent += share;
+                }
+                if (zb != z && wzNeg > 0f) {
+                    float share = transfer * (wzNeg / wSum);
+                    tmpDepthSpread[x][zb] += share;
+                    sent += share;
+                }
+
+                float lateral = sent * (0.22f + 0.30f * tmpWaveMemory[x][z]) * shoreline;
+                if (lateral > 0f) {
+                    float latX = -nz;
+                    float latZ = nx;
+                    int lx = latX >= 0f ? xr : xl;
+                    int lz = latZ >= 0f ? zf : zb;
+                    int rx = latX >= 0f ? xl : xr;
+                    int rz = latZ >= 0f ? zb : zf;
+                    if (lx != x) {
+                        tmpDepthSpread[lx][z] += lateral * 0.25f;
+                    }
+                    if (rx != x) {
+                        tmpDepthSpread[rx][z] += lateral * 0.25f;
+                    }
+                    if (lz != z) {
+                        tmpDepthSpread[x][lz] += lateral * 0.25f;
+                    }
+                    if (rz != z) {
+                        tmpDepthSpread[x][rz] += lateral * 0.25f;
+                    }
+                    sent += lateral;
+                }
+
+                tmpDepthSpread[x][z] = Math.max(0f, tmpDepthSpread[x][z] - sent);
             }
         }
 
