@@ -117,7 +117,7 @@ public class Chunk {
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
 
     private static final int MAX_IMPOSTOR_CACHE_ENTRIES = 512;
-    private static final float WATER_WAVE_AMPLITUDE = 1.22f;
+    private static final float WATER_WAVE_AMPLITUDE = 0.58f;
     private static final float WATER_WAVE_SPEED = 0.72f;
     private static final float WATER_WAVE_LENGTH_1 = 30f;
     private static final float WATER_WAVE_LENGTH_2 = 16f;
@@ -1222,16 +1222,19 @@ public class Chunk {
             simulatedDepth = waterSimChunk.sampleDepth(localX, localZ);
         }
 
+        float terrainHeight = simulatedSurface - simulatedDepth;
+
         // Rivers should stay calm (no stale wave movement) and sit in-channel.
         if (Math.abs(baseHeight - WATER_LEVEL) > 0.02f) {
-            return simulatedSurface;
+            return Math.max(simulatedSurface, terrainHeight + 0.015f);
         }
 
         // Big waves only in deep/open water; tiny ripples near shores.
         float openWater = clamp01((simulatedDepth - 1.8f) / 7.0f);
         float waveStrength = openWater * openWater;
-        float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale) * (0.02f + waveStrength * 0.70f);
-        return simulatedSurface + detailRipple;
+        float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale) * (0.01f + waveStrength * 0.36f);
+        float surfaced = simulatedSurface + detailRipple;
+        return Math.max(surfaced, terrainHeight + 0.015f);
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {
