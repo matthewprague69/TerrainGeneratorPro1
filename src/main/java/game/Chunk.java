@@ -1015,6 +1015,20 @@ public class Chunk {
         syncWaterSimEdgesFromNeighbors();
     }
 
+    public float getWaterDepthAtWorld(float wx, float wz) {
+        ensureWaterSimInitialized();
+        float localX = wx / scale - cx * SIZE;
+        float localZ = wz / scale - cz * SIZE;
+        return waterSimChunk.sampleDepth(localX, localZ);
+    }
+
+    public float getWaterSurfaceAtWorld(float wx, float wz) {
+        ensureWaterSimInitialized();
+        float localX = wx / scale - cx * SIZE;
+        float localZ = wz / scale - cz * SIZE;
+        return waterSimChunk.sampleSurface(localX, localZ);
+    }
+
     private void renderWaterSurface(float timeSeconds, boolean frozen) {
         if (waterPatches.isEmpty()) {
             return;

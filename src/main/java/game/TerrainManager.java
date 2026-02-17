@@ -1049,6 +1049,35 @@ public class TerrainManager {
         return terrainHeight;
     }
 
+    public float getWaterDepth(float wx, float wz) {
+        int cx = (int) Math.floor(wx / (Chunk.SIZE * scale));
+        int cz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        Chunk c = chunks.get(key(cx, cz));
+        if (c == null) {
+            return 0f;
+        }
+        return c.getWaterDepthAtWorld(wx, wz);
+    }
+
+    public float getWaterSurfaceHeight(float wx, float wz) {
+        int cx = (int) Math.floor(wx / (Chunk.SIZE * scale));
+        int cz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        Chunk c = chunks.get(key(cx, cz));
+        if (c == null) {
+            return Chunk.WATER_LEVEL;
+        }
+        return c.getWaterSurfaceAtWorld(wx, wz);
+    }
+
+    public boolean isPositionInWater(float wx, float wy, float wz) {
+        float depth = getWaterDepth(wx, wz);
+        if (depth <= 0.05f) {
+            return false;
+        }
+        float surface = getWaterSurfaceHeight(wx, wz);
+        return wy < surface;
+    }
+
     public void drawTerrainAndFeatures(float wx, float wz) {
         long start = System.nanoTime();
         enableFogDynamic();

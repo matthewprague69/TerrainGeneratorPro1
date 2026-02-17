@@ -22,9 +22,17 @@ public class Player {
     private final float gravity = 9.8f;
     private boolean onGround = false;
     private final float eyeHeight = 1.8f;
+    private boolean prevSpacePressed = false;
 
-    // Movement speed
+    // Movement tuning
     private final float moveSpeed = 50f;
+    private static final float SWIM_SPEED_MULTIPLIER = 0.45f;
+    private static final float SWIM_UP_ACCEL = 14f;
+    private static final float SWIM_DOWN_ACCEL = 10f;
+    private static final float WATER_GRAVITY_SCALE = 0.25f;
+    private static final float WATER_DRAG = 2.8f;
+    private static final float WATER_BUOYANCY = 6.2f;
+    private static final float WATER_SURFACE_FLOAT_OFFSET = 0.2f;
 
     // Terrain for collision
     private final TerrainManager tm;
@@ -42,7 +50,13 @@ public class Player {
      * collision
      */
     public void update(long window, float dt) {
-        float speed = moveSpeed * dt;
+        float terrainY = tm.getHeight(x, z) + eyeHeight;
+        float waterDepth = tm.getWaterDepth(x, z);
+        float waterSurfaceY = tm.getWaterSurfaceHeight(x, z);
+        float footY = y - eyeHeight;
+        boolean inWater = waterDepth > 0.05f && footY < waterSurfaceY;
+
+        float speed = moveSpeed * dt * (inWater ? SWIM_SPEED_MULTIPLIER : 1f);
 
         // Calculate forward and right vectors
         float yawRad = (float) Math.toRadians(yaw);
@@ -89,17 +103,38 @@ public class Player {
             z = nextZ;
         }
 
-        // Jump / Jetpack
-        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-            velocityY = 5f;
-        }
+        boolean spacePressed = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
+        boolean shiftPressed = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
+                || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
 
-        // Gravity
-        velocityY -= gravity * dt;
+        if (inWater) {
+            velocityY -= gravity * WATER_GRAVITY_SCALE * dt;
+            velocityY -= velocityY * Math.min(1f, WATER_DRAG * dt);
+
+            float targetSurfaceY = waterSurfaceY + eyeHeight - WATER_SURFACE_FLOAT_OFFSET;
+            velocityY += (targetSurfaceY - y) * WATER_BUOYANCY * dt;
+
+            if (spacePressed) {
+                velocityY += SWIM_UP_ACCEL * dt;
+            }
+            if (shiftPressed) {
+                velocityY -= SWIM_DOWN_ACCEL * dt;
+            }
+
+            onGround = false;
+        } else {
+            if (spacePressed && !prevSpacePressed && onGround) {
+                velocityY = 5f;
+                onGround = false;
+            }
+            velocityY -= gravity * dt;
+        }
+        prevSpacePressed = spacePressed;
+
         y += velocityY * dt;
 
-        // Terrain collision ONLY (no water blocking)
-        float terrainY = tm.getHeight(x, z) + eyeHeight;
+        // Terrain collision keeps player above ground
+        terrainY = tm.getHeight(x, z) + eyeHeight;
         if (y <= terrainY) {
             y = terrainY;
             velocityY = 0f;
