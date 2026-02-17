@@ -5,6 +5,7 @@ import util.BoundingBox;
 import util.TextureLoader;
 import static org.lwjgl.opengl.GL11.*;
 import org.lwjgl.BufferUtils;
+import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.lang.management.BufferPoolMXBean;
 import java.lang.management.ManagementFactory;
@@ -196,6 +197,7 @@ public class TerrainManager {
     private final int iceTex;
     private final int waterBottomTex;
     private final int waterBottomAbsTex;
+    private final int waterSurfaceTex;
     private final EnumMap<PipelineStage, Long> perfStageNanos = new EnumMap<>(PipelineStage.class);
     private final EnumMap<PipelineStage, Integer> perfStageCalls = new EnumMap<>(PipelineStage.class);
     private long perfTotalUpdateNanos = 0L;
@@ -203,6 +205,7 @@ public class TerrainManager {
     private int perfWaterChunksDrawn = 0;
     private int perfDepthChunksDrawn = 0;
     private int perfVisibleFeatures = 0;
+    private int waterFrameCounter = 0;
     private Frustum lastCameraFrustum = null;
 
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
@@ -228,6 +231,7 @@ public class TerrainManager {
         iceTex = TextureLoader.getOrLoad("ice.png");
         waterBottomTex = TextureLoader.getOrLoad("sand.png");
         waterBottomAbsTex = TextureLoader.getOrLoad("water_bottom.png");
+        waterSurfaceTex = createProceduralWaterSurfaceTexture();
 
 
         for (Biome b : Biome.values()) {
@@ -1116,18 +1120,32 @@ public class TerrainManager {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         int renderedWaterChunks = 0;
+        boolean frozen = weatherSystem.isWaterFrozen();
+        int waterRenderDist = Math.max(4, renderDist - 2);
+        waterFrameCounter++;
+
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > renderDist) {
+            if (dist > waterRenderDist) {
                 continue;
             }
             if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
                 continue;
             }
-            if (!weatherSystem.isWaterFrozen()) {
-                c.updateWaterSimulation(waterSimDt);
+
+            if (!frozen) {
+                int simulationInterval = dist <= 2 ? 1 : (dist <= 5 ? 2 : 4);
+                if ((waterFrameCounter % simulationInterval) == 0) {
+                    c.updateWaterSimulation(waterSimDt);
+                }
             }
-            c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
+
+            int renderInterval = dist <= 3 ? 1 : 2;
+            if ((waterFrameCounter % renderInterval) != 0 && dist > 3) {
+                continue;
+            }
+
+            c.drawWater(frozen, weatherSystem.getWaterSnowCoverage(),
                     weatherSystem.getIceThickness(), waterTimeSeconds, wx, wy, wz);
             renderedWaterChunks++;
         }
@@ -1307,6 +1325,43 @@ public class TerrainManager {
     }
     public int getWaterBottomAbsTexture() {
         return waterBottomAbsTex;
+    }
+
+    public int getWaterSurfaceTexture() {
+        return waterSurfaceTex;
+    }
+
+    private int createProceduralWaterSurfaceTexture() {
+        final int size = 64;
+        ByteBuffer buffer = BufferUtils.createByteBuffer(size * size * 4);
+        Random rng = new Random(seed ^ 0x57A7A11CL);
+
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                float nx = x / (float) size;
+                float ny = y / (float) size;
+                float wave = 0.5f + 0.5f * (float) Math.sin((nx * 12.0f + ny * 8.0f) * Math.PI);
+                float streak = 0.5f + 0.5f * (float) Math.sin((nx * 28.0f - ny * 21.0f) * Math.PI);
+                float noise = rng.nextFloat() * 0.35f;
+                float detail = Math.max(0f, Math.min(1f, 0.55f * wave + 0.35f * streak + noise));
+
+                int r = (int) (16 + detail * 34);
+                int g = (int) (68 + detail * 74);
+                int b = (int) (108 + detail * 98);
+                int a = (int) (172 + detail * 72);
+                buffer.put((byte) r).put((byte) g).put((byte) b).put((byte) a);
+            }
+        }
+        buffer.flip();
+
+        int tex = glGenTextures();
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        return tex;
     }
 
 

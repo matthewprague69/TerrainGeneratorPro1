@@ -519,7 +519,15 @@ public class Chunk {
             // Keep depth writes on for translucent water to reduce side-angle sorting artifacts.
             glDepthMask(true);
 
+            int waterTex = manager.getWaterSurfaceTexture();
+            if (waterTex != 0) {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, waterTex);
+            }
             renderWaterSurface(waterTimeSeconds, false, cameraX, cameraY, cameraZ);
+            if (waterTex != 0) {
+                glDisable(GL_TEXTURE_2D);
+            }
         }
 
         glDisable(GL_FOG);
@@ -1215,7 +1223,7 @@ public class Chunk {
             litB = clamp01(litB + rippleDetail * 0.075f);
 
             float shoreSuppress = clamp01((depth - 0.9f) / 2.6f);
-            float foamMix = clamp01((foam * 0.96f + breaking * 0.14f) * shoreSuppress);
+            float foamMix = clamp01((foam * 1.22f + breaking * 0.20f) * shoreSuppress);
             float finalR = litR + (1f - litR) * foamMix;
             float finalG = litG + (1f - litG) * foamMix;
             float finalB = litB + (1f - litB) * foamMix;
@@ -1226,11 +1234,17 @@ public class Chunk {
             finalG = lerp(finalG, skyG, skyReflect);
             finalB = lerp(finalB, skyB, skyReflect);
 
-            float alpha = Math.min(0.98f, 0.70f + shorelineMix * 0.14f + foam * 0.16f + fresnel * 0.16f);
+            float alpha = Math.min(0.995f, 0.80f + shorelineMix * 0.16f + foam * 0.22f + fresnel * 0.12f);
             glColor4f(finalR, finalG, finalB, alpha);
         }
 
-        glTexCoord2f(wx * texScale, wz * texScale);
+        float flowU = wx * texScale;
+        float flowV = wz * texScale;
+        if (!frozen) {
+            flowU += timeSeconds * 0.060f + dz * 0.20f;
+            flowV -= timeSeconds * 0.045f + dx * 0.20f;
+        }
+        glTexCoord2f(flowU, flowV);
         glVertex3f(wx, wy, wz);
     }
 
