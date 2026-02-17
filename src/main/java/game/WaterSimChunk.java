@@ -1,0 +1,222 @@
+package game;
+
+/**
+ * Phase-1 liquid migration container.
+ *
+ * Stores a simulation-friendly water state (bed, depth, velocity) on the chunk grid,
+ * and exposes bilinear surface sampling for rendering.
+ */
+public class WaterSimChunk {
+    private final int gridSize;
+    private final float[][] bedHeight;
+    private final float[][] waterDepth;
+    private final float[][] maxSurface;
+    private final float[][] velX;
+    private final float[][] velZ;
+    private final float[][] tmpDepth;
+    private final float[][] tmpVelX;
+    private final float[][] tmpVelZ;
+
+    public WaterSimChunk(int gridSize) {
+        this.gridSize = gridSize;
+        this.bedHeight = new float[gridSize + 1][gridSize + 1];
+        this.waterDepth = new float[gridSize + 1][gridSize + 1];
+        this.maxSurface = new float[gridSize + 1][gridSize + 1];
+        this.velX = new float[gridSize + 1][gridSize + 1];
+        this.velZ = new float[gridSize + 1][gridSize + 1];
+        this.tmpDepth = new float[gridSize + 1][gridSize + 1];
+        this.tmpVelX = new float[gridSize + 1][gridSize + 1];
+        this.tmpVelZ = new float[gridSize + 1][gridSize + 1];
+    }
+
+    public void initializeFromTerrainAndSurface(float[][] terrainHeights, float[][] riverSurface, float waterLevel) {
+        for (int x = 0; x <= gridSize; x++) {
+            for (int z = 0; z <= gridSize; z++) {
+                float bed = terrainHeights[x][z];
+                bedHeight[x][z] = bed;
+
+                float river = riverSurface[x][z];
+                boolean hasRiverWater = river > Float.NEGATIVE_INFINITY / 2f;
+                float targetSurface = hasRiverWater ? river : waterLevel;
+                if (!hasRiverWater && bed >= waterLevel) {
+                    targetSurface = bed;
+                }
+
+                waterDepth[x][z] = Math.max(0f, targetSurface - bed);
+                maxSurface[x][z] = targetSurface;
+                velX[x][z] = 0f;
+                velZ[x][z] = 0f;
+            }
+        }
+    }
+
+    public float sampleSurface(float localX, float localZ) {
+        float sx = clamp(localX, 0f, gridSize);
+        float sz = clamp(localZ, 0f, gridSize);
+
+        int x0 = (int) Math.floor(sx);
+        int z0 = (int) Math.floor(sz);
+        int x1 = Math.min(gridSize, x0 + 1);
+        int z1 = Math.min(gridSize, z0 + 1);
+
+        float tx = sx - x0;
+        float tz = sz - z0;
+
+        float s00 = bedHeight[x0][z0] + waterDepth[x0][z0];
+        float s10 = bedHeight[x1][z0] + waterDepth[x1][z0];
+        float s01 = bedHeight[x0][z1] + waterDepth[x0][z1];
+        float s11 = bedHeight[x1][z1] + waterDepth[x1][z1];
+
+        float sx0 = lerp(s00, s10, tx);
+        float sx1 = lerp(s01, s11, tx);
+        return lerp(sx0, sx1, tz);
+    }
+
+    public float sampleSpeed(float localX, float localZ) {
+        float sx = clamp(localX, 0f, gridSize);
+        float sz = clamp(localZ, 0f, gridSize);
+
+        int xi = Math.min(gridSize, Math.max(0, Math.round(sx)));
+        int zi = Math.min(gridSize, Math.max(0, Math.round(sz)));
+        float ux = velX[xi][zi];
+        float uz = velZ[xi][zi];
+        return (float) Math.sqrt(ux * ux + uz * uz);
+    }
+
+
+
+    public float sampleDepth(float localX, float localZ) {
+        float sx = clamp(localX, 0f, gridSize);
+        float sz = clamp(localZ, 0f, gridSize);
+
+        int x0 = (int) Math.floor(sx);
+        int z0 = (int) Math.floor(sz);
+        int x1 = Math.min(gridSize, x0 + 1);
+        int z1 = Math.min(gridSize, z0 + 1);
+
+        float tx = sx - x0;
+        float tz = sz - z0;
+
+        float d00 = waterDepth[x0][z0];
+        float d10 = waterDepth[x1][z0];
+        float d01 = waterDepth[x0][z1];
+        float d11 = waterDepth[x1][z1];
+
+        float dx0 = lerp(d00, d10, tx);
+        float dx1 = lerp(d01, d11, tx);
+        return lerp(dx0, dx1, tz);
+    }
+
+    public int getGridSize() {
+        return gridSize;
+    }
+
+    public void blendLeftEdgeFrom(WaterSimChunk neighbor) {
+        if (neighbor == null || neighbor.gridSize != gridSize) {
+            return;
+        }
+        for (int z = 0; z <= gridSize; z++) {
+            float nDepth = neighbor.waterDepth[gridSize][z];
+            float nUx = neighbor.velX[gridSize][z];
+            float nUz = neighbor.velZ[gridSize][z];
+            waterDepth[0][z] = 0.5f * (waterDepth[0][z] + nDepth);
+            velX[0][z] = 0.5f * (velX[0][z] + nUx);
+            velZ[0][z] = 0.5f * (velZ[0][z] + nUz);
+        }
+    }
+
+    public void blendRightEdgeFrom(WaterSimChunk neighbor) {
+        if (neighbor == null || neighbor.gridSize != gridSize) {
+            return;
+        }
+        for (int z = 0; z <= gridSize; z++) {
+            float nDepth = neighbor.waterDepth[0][z];
+            float nUx = neighbor.velX[0][z];
+            float nUz = neighbor.velZ[0][z];
+            waterDepth[gridSize][z] = 0.5f * (waterDepth[gridSize][z] + nDepth);
+            velX[gridSize][z] = 0.5f * (velX[gridSize][z] + nUx);
+            velZ[gridSize][z] = 0.5f * (velZ[gridSize][z] + nUz);
+        }
+    }
+
+    public void blendTopEdgeFrom(WaterSimChunk neighbor) {
+        if (neighbor == null || neighbor.gridSize != gridSize) {
+            return;
+        }
+        for (int x = 0; x <= gridSize; x++) {
+            float nDepth = neighbor.waterDepth[x][gridSize];
+            float nUx = neighbor.velX[x][gridSize];
+            float nUz = neighbor.velZ[x][gridSize];
+            waterDepth[x][0] = 0.5f * (waterDepth[x][0] + nDepth);
+            velX[x][0] = 0.5f * (velX[x][0] + nUx);
+            velZ[x][0] = 0.5f * (velZ[x][0] + nUz);
+        }
+    }
+
+    public void blendBottomEdgeFrom(WaterSimChunk neighbor) {
+        if (neighbor == null || neighbor.gridSize != gridSize) {
+            return;
+        }
+        for (int x = 0; x <= gridSize; x++) {
+            float nDepth = neighbor.waterDepth[x][0];
+            float nUx = neighbor.velX[x][0];
+            float nUz = neighbor.velZ[x][0];
+            waterDepth[x][gridSize] = 0.5f * (waterDepth[x][gridSize] + nDepth);
+            velX[x][gridSize] = 0.5f * (velX[x][gridSize] + nUx);
+            velZ[x][gridSize] = 0.5f * (velZ[x][gridSize] + nUz);
+        }
+    }
+
+    public void stepSimulation(float dt) {
+        float clampedDt = clamp(dt, 1.0f / 240.0f, 1.0f / 20.0f);
+        float relaxToLocalLevel = 0.18f * (clampedDt * 60.0f);
+        float relaxToNeighbors = 0.10f * (clampedDt * 60.0f);
+
+        for (int x = 0; x <= gridSize; x++) {
+            for (int z = 0; z <= gridSize; z++) {
+                int xl = Math.max(0, x - 1);
+                int xr = Math.min(gridSize, x + 1);
+                int zb = Math.max(0, z - 1);
+                int zf = Math.min(gridSize, z + 1);
+
+                float bed = bedHeight[x][z];
+                float currentSurface = bed + waterDepth[x][z];
+                float localTargetSurface = maxSurface[x][z];
+
+                float n0 = bedHeight[xl][z] + waterDepth[xl][z];
+                float n1 = bedHeight[xr][z] + waterDepth[xr][z];
+                float n2 = bedHeight[x][zb] + waterDepth[x][zb];
+                float n3 = bedHeight[x][zf] + waterDepth[x][zf];
+                float neighborAvg = (n0 + n1 + n2 + n3) * 0.25f;
+
+                float nextSurface = currentSurface;
+                nextSurface += (localTargetSurface - nextSurface) * relaxToLocalLevel;
+                nextSurface += (neighborAvg - nextSurface) * relaxToNeighbors;
+
+                // Never allow water to rise above initialized liquid surface map,
+                // and never go below terrain.
+                nextSurface = clamp(nextSurface, bed, localTargetSurface);
+
+                tmpDepth[x][z] = Math.max(0f, nextSurface - bed);
+                tmpVelX[x][z] = 0f;
+                tmpVelZ[x][z] = 0f;
+            }
+        }
+
+        for (int x = 0; x <= gridSize; x++) {
+            for (int z = 0; z <= gridSize; z++) {
+                waterDepth[x][z] = tmpDepth[x][z];
+                velX[x][z] = tmpVelX[x][z];
+                velZ[x][z] = tmpVelZ[x][z];
+            }
+        }
+    }
+
+    private static float lerp(float a, float b, float t) {
+        return a + (b - a) * t;
+    }
+
+    private static float clamp(float v, float lo, float hi) {
+        return Math.max(lo, Math.min(hi, v));
+    }
+}
