@@ -17,6 +17,9 @@ public class WaterSimChunk {
     private final float[][] tmpVelX;
     private final float[][] tmpVelZ;
 
+    private static final float SHORE_RUNUP_MAX = 0.42f;
+    private static final float SHORE_RUNUP_SLOPE = 0.55f;
+
     public WaterSimChunk(int gridSize) {
         this.gridSize = gridSize;
         this.bedHeight = new float[gridSize + 1][gridSize + 1];
@@ -230,11 +233,24 @@ public class WaterSimChunk {
                 depth += (avgDepth - depth) * diffusion;
 
                 float bed = bedHeight[x][z];
-                float maxDepth = Math.max(0f, maxSurface[x][z] - bed);
-                float pressureDepth = maxDepth;
+                float staticMaxDepth = Math.max(0f, maxSurface[x][z] - bed);
+
+                float etaL = bedHeight[xl][z] + waterDepth[xl][z];
+                float etaR = bedHeight[xr][z] + waterDepth[xr][z];
+                float etaB = bedHeight[x][zb] + waterDepth[x][zb];
+                float etaF = bedHeight[x][zf] + waterDepth[x][zf];
+                float neighborEta = Math.max(Math.max(etaL, etaR), Math.max(etaB, etaF));
+
+                // Allow controlled shoreline run-up so waves can reach terrain edges,
+                // while still preventing bulk flooding into higher dry land.
+                float runupAllowance = SHORE_RUNUP_MAX * clamp((neighborEta - bed) / SHORE_RUNUP_SLOPE, 0f, 1f);
+                float dynamicSurfaceCap = Math.max(maxSurface[x][z], neighborEta - 0.03f) + runupAllowance;
+                float dynamicMaxDepth = Math.max(staticMaxDepth, dynamicSurfaceCap - bed);
+
+                float pressureDepth = staticMaxDepth;
                 depth += (pressureDepth - depth) * pressureBlend;
 
-                tmpDepth[x][z] = clamp(depth, 0f, maxDepth);
+                tmpDepth[x][z] = clamp(depth, 0f, dynamicMaxDepth);
             }
         }
 

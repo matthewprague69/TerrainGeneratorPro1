@@ -1033,10 +1033,10 @@ public class Chunk {
             float waveScale3 = getWaveScale(patch.wy3, patch.terrainY3);
             float waveScale4 = getWaveScale(patch.wy4, patch.terrainY4);
 
-            float wy1 = getWaterHeightAt(patch.wy1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
-            float wy2 = getWaterHeightAt(patch.wy2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
-            float wy3 = getWaterHeightAt(patch.wy3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
-            float wy4 = getWaterHeightAt(patch.wy4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
+            float wy1 = getWaterHeightAt(patch.wy1, patch.terrainY1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
+            float wy2 = getWaterHeightAt(patch.wy2, patch.terrainY2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
+            float wy3 = getWaterHeightAt(patch.wy3, patch.terrainY3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
+            float wy4 = getWaterHeightAt(patch.wy4, patch.terrainY4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
 
             float invDx = 1f / Math.max(0.0001f, patch.wx2 - patch.wx1);
             float invDz = 1f / Math.max(0.0001f, patch.wz2 - patch.wz1);
@@ -1176,7 +1176,7 @@ public class Chunk {
         glVertex3f(wx, wy, wz);
     }
 
-    private float getWaterHeightAt(float baseHeight, float wx, float wz, float timeSeconds, boolean frozen,
+    private float getWaterHeightAt(float baseHeight, float terrainHeight, float wx, float wz, float timeSeconds, boolean frozen,
                                    float waveScale) {
         if (frozen) {
             return baseHeight;
@@ -1193,15 +1193,20 @@ public class Chunk {
             simulatedSpeed = waterSimChunk.sampleSpeed(localX, localZ);
         }
 
-        // Larger waves in deep/open water, but controlled to avoid unrealistic spikes.
+        // Preserve wave energy toward shore (with damping) so waves can reach terrain edges.
+        float shallowBand = 1f - smoothstep01(clamp01((simulatedDepth - 0.22f) / 0.95f));
         float openWater = clamp01((simulatedDepth - 1.8f) / 7.0f);
-        float waveStrength = openWater * openWater;
+        float waveStrength = 0.24f + openWater * openWater * 0.76f;
         float vastWater = smoothstep01(clamp01((simulatedDepth - 4.0f) / 8.0f));
         float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
         float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
+        float shoreDamping = 1.0f - shallowBand * 0.46f;
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
-                * (0.06f + waveStrength * 0.44f * largeSwellBoost);
-        return simulatedSurface + detailRipple;
+                * (0.08f + waveStrength * 0.42f * largeSwellBoost) * shoreDamping;
+
+        float minSurface = terrainHeight + 0.01f;
+        float finalSurface = simulatedSurface + detailRipple;
+        return Math.max(minSurface, finalSurface);
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {
