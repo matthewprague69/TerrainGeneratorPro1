@@ -170,9 +170,13 @@ public class WaterSimChunk {
 
     public void stepSimulation(float dt) {
         float clampedDt = clamp(dt, 1.0f / 240.0f, 1.0f / 20.0f);
-        float relaxToLocalLevel = 0.18f * (clampedDt * 60.0f);
-        float relaxToNeighbors = 0.10f * (clampedDt * 60.0f);
+        float frameScale = clampedDt * 60.0f;
+        float gravity = 0.020f * frameScale;
+        float damping = (float) Math.pow(0.92f, frameScale);
+        float pressureBlend = 0.24f * frameScale;
+        float diffusion = 0.12f * frameScale;
 
+        // Pass 1: terrain-aware velocity update.
         for (int x = 0; x <= gridSize; x++) {
             for (int z = 0; z <= gridSize; z++) {
                 int xl = Math.max(0, x - 1);
@@ -180,35 +184,72 @@ public class WaterSimChunk {
                 int zb = Math.max(0, z - 1);
                 int zf = Math.min(gridSize, z + 1);
 
-                float bed = bedHeight[x][z];
-                float currentSurface = bed + waterDepth[x][z];
-                float localTargetSurface = maxSurface[x][z];
+                float eta = bedHeight[x][z] + waterDepth[x][z];
+                float etaL = bedHeight[xl][z] + waterDepth[xl][z];
+                float etaR = bedHeight[xr][z] + waterDepth[xr][z];
+                float etaB = bedHeight[x][zb] + waterDepth[x][zb];
+                float etaF = bedHeight[x][zf] + waterDepth[x][zf];
 
-                float n0 = bedHeight[xl][z] + waterDepth[xl][z];
-                float n1 = bedHeight[xr][z] + waterDepth[xr][z];
-                float n2 = bedHeight[x][zb] + waterDepth[x][zb];
-                float n3 = bedHeight[x][zf] + waterDepth[x][zf];
-                float neighborAvg = (n0 + n1 + n2 + n3) * 0.25f;
+                float gradX = (etaR - etaL) * 0.5f;
+                float gradZ = (etaF - etaB) * 0.5f;
 
-                float nextSurface = currentSurface;
-                nextSurface += (localTargetSurface - nextSurface) * relaxToLocalLevel;
-                nextSurface += (neighborAvg - nextSurface) * relaxToNeighbors;
+                float nextUx = (velX[x][z] - gradX * gravity) * damping;
+                float nextUz = (velZ[x][z] - gradZ * gravity) * damping;
 
-                // Never allow water to rise above initialized liquid surface map,
-                // and never go below terrain.
-                nextSurface = clamp(nextSurface, bed, localTargetSurface);
+                // Keep tiny puddles calm and avoid jitter when near dry terrain.
+                float wetness = clamp(waterDepth[x][z] / 0.22f, 0f, 1f);
+                nextUx *= wetness;
+                nextUz *= wetness;
 
-                tmpDepth[x][z] = Math.max(0f, nextSurface - bed);
-                tmpVelX[x][z] = 0f;
-                tmpVelZ[x][z] = 0f;
+                tmpVelX[x][z] = nextUx;
+                tmpVelZ[x][z] = nextUz;
             }
         }
 
+        // Pass 2: conservative depth transfer following velocity direction.
+        for (int x = 0; x <= gridSize; x++) {
+            for (int z = 0; z <= gridSize; z++) {
+                int xl = Math.max(0, x - 1);
+                int xr = Math.min(gridSize, x + 1);
+                int zb = Math.max(0, z - 1);
+                int zf = Math.min(gridSize, z + 1);
+
+                float centerDepth = waterDepth[x][z];
+                float avgDepth = (waterDepth[xl][z] + waterDepth[xr][z] + waterDepth[x][zb] + waterDepth[x][zf]) * 0.25f;
+
+                float outflowX = tmpVelX[x][z] * clampedDt;
+                float outflowZ = tmpVelZ[x][z] * clampedDt;
+                float moveX = Math.min(centerDepth * 0.35f, Math.abs(outflowX) * centerDepth * 0.85f);
+                float moveZ = Math.min(centerDepth * 0.35f, Math.abs(outflowZ) * centerDepth * 0.85f);
+
+                float incomingX = outflowX >= 0f ? Math.max(0f, tmpVelX[xl][z]) : Math.max(0f, -tmpVelX[xr][z]);
+                float incomingZ = outflowZ >= 0f ? Math.max(0f, tmpVelZ[x][zb]) : Math.max(0f, -tmpVelZ[x][zf]);
+                float inflow = (incomingX + incomingZ) * clampedDt * 0.35f;
+
+                float depth = centerDepth - moveX - moveZ + inflow;
+                depth += (avgDepth - depth) * diffusion;
+
+                float bed = bedHeight[x][z];
+                float maxDepth = Math.max(0f, maxSurface[x][z] - bed);
+                float pressureDepth = maxDepth;
+                depth += (pressureDepth - depth) * pressureBlend;
+
+                tmpDepth[x][z] = clamp(depth, 0f, maxDepth);
+            }
+        }
+
+        // Pass 3: copy back and damp velocity where blocked by terrain ceilings.
         for (int x = 0; x <= gridSize; x++) {
             for (int z = 0; z <= gridSize; z++) {
                 waterDepth[x][z] = tmpDepth[x][z];
-                velX[x][z] = tmpVelX[x][z];
-                velZ[x][z] = tmpVelZ[x][z];
+
+                float bed = bedHeight[x][z];
+                float maxDepth = Math.max(0f, maxSurface[x][z] - bed);
+                float pressure = maxDepth > 0.0001f ? (tmpDepth[x][z] / maxDepth) : 0f;
+                float terrainCollisionDamp = 0.40f + 0.60f * clamp(pressure, 0f, 1f);
+
+                velX[x][z] = tmpVelX[x][z] * terrainCollisionDamp;
+                velZ[x][z] = tmpVelZ[x][z] * terrainCollisionDamp;
             }
         }
     }

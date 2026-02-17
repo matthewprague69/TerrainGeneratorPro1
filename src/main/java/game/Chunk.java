@@ -121,7 +121,7 @@ public class Chunk {
     private static final float WATER_WAVE_LENGTH_1 = 30f;
     private static final float WATER_WAVE_LENGTH_2 = 16f;
     private static final float WATER_WAVE_LENGTH_3 = 9f;
-    private static final float WATER_LARGE_SWELL_MULTIPLIER = 5.0f;
+    private static final float WATER_LARGE_SWELL_MULTIPLIER = 2.2f;
     private static final float WATER_FOAM_SLOPE_START = 0.10f;
     private static final float WATER_FOAM_SLOPE_RANGE = 0.24f;
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
@@ -515,11 +515,10 @@ public class Chunk {
         } else {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glDepthMask(false);
+            // Keep depth writes on for translucent water to reduce side-angle sorting artifacts.
+            glDepthMask(true);
 
             renderWaterSurface(waterTimeSeconds, false);
-
-            glDepthMask(true);
         }
 
         glDisable(GL_FOG);
@@ -1173,20 +1172,23 @@ public class Chunk {
 
         float simulatedSurface = baseHeight;
         float simulatedDepth = 0f;
+        float simulatedSpeed = 0f;
         if (waterSimChunk != null) {
             float localX = (wx / scale) - (cx * SIZE);
             float localZ = (wz / scale) - (cz * SIZE);
             simulatedSurface = waterSimChunk.sampleSurface(localX, localZ);
             simulatedDepth = waterSimChunk.sampleDepth(localX, localZ);
+            simulatedSpeed = waterSimChunk.sampleSpeed(localX, localZ);
         }
 
-        // Big waves only in deep/open water; tiny ripples near shores.
+        // Larger waves in deep/open water, but controlled to avoid unrealistic spikes.
         float openWater = clamp01((simulatedDepth - 1.8f) / 7.0f);
         float waveStrength = openWater * openWater;
         float vastWater = smoothstep01(clamp01((simulatedDepth - 4.0f) / 8.0f));
-        float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater;
+        float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
+        float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
-                * (0.02f + waveStrength * 0.70f * largeSwellBoost);
+                * (0.03f + waveStrength * 0.55f * largeSwellBoost);
         return simulatedSurface + detailRipple;
     }
 
