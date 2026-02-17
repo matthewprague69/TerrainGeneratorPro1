@@ -76,6 +76,7 @@ public class Chunk {
     private final int[] secondaryLayerTextures = new int[3];
     private final float[] secondaryLayerAlphas = new float[3];
     private final List<WaterPatch> waterPatches = new ArrayList<>();
+    private WaterSimChunk waterSimChunk;
     private int grassBatchVbo = -1;
     private int grassBatchVertexCount = 0;
     private int grassBatchTexture = 0;
@@ -953,6 +954,7 @@ public class Chunk {
 
     private void buildWaterGeometry() {
         waterPatches.clear();
+        ensureWaterSimInitialized();
         int step = 1; // Keep water topology identical across chunks to avoid LOD border cracks.
 
         for (int z = 0; z < SIZE; z += step) {
@@ -993,6 +995,14 @@ public class Chunk {
                 }
             }
         }
+    }
+
+
+    private void ensureWaterSimInitialized() {
+        if (waterSimChunk == null) {
+            waterSimChunk = new WaterSimChunk(SIZE);
+        }
+        waterSimChunk.initializeFromTerrainAndSurface(heights, riverSurface, WATER_LEVEL);
     }
 
     private void renderWaterSurface(float timeSeconds, boolean frozen) {
@@ -1133,7 +1143,20 @@ public class Chunk {
 
     private float getWaterHeightAt(float baseHeight, float wx, float wz, float timeSeconds, boolean frozen,
                                    float waveScale) {
-        return frozen ? baseHeight : baseHeight + getWaveOffset(wx, wz, timeSeconds, waveScale);
+        if (frozen) {
+            return baseHeight;
+        }
+
+        float simulatedSurface = baseHeight;
+        if (waterSimChunk != null) {
+            float localX = (wx / scale) - (cx * SIZE);
+            float localZ = (wz / scale) - (cz * SIZE);
+            simulatedSurface = waterSimChunk.sampleSurface(localX, localZ);
+        }
+
+        // Keep only a small detail ripple so the surface reads as liquid, not a detached overlay.
+        float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale) * 0.14f;
+        return simulatedSurface + detailRipple;
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {
@@ -2300,6 +2323,7 @@ public class Chunk {
         disposeWaterDisplayList();
         disposeGrassBatch();
         disposeFlowerBatch();
+        waterSimChunk = null;
     }
 
     public void refreshAfterNeighborUpdate() {
@@ -2311,6 +2335,7 @@ public class Chunk {
 
     public void markRenderDirty() {
         renderResourcesBuilt = false;
+        waterSimChunk = null;
     }
 
     public boolean needsRenderResources() {
