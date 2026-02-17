@@ -26,6 +26,7 @@ public class WaterSimChunk {
     private static final float SHORE_RUNUP_MAX = 1.35f;
     private static final float SHORE_RUNUP_SLOPE = 1.50f;
     private static final float SHORE_RETENTION_MAX = 0.60f;
+    private static final float SHORE_RUNUP_RISE_LIMIT = 2.8f;
 
     public WaterSimChunk(int gridSize) {
         this.gridSize = gridSize;
@@ -297,6 +298,8 @@ public class WaterSimChunk {
 
                 float bed = bedHeight[x][z];
                 float staticMaxDepth = Math.max(0f, maxSurface[x][z] - bed);
+                float inlandRise = Math.max(0f, bed - maxSurface[x][z]);
+                float inlandAttenuation = 1f - clamp(inlandRise / SHORE_RUNUP_RISE_LIMIT, 0f, 1f);
 
                 float etaL = bedHeight[xl][z] + waterDepth[xl][z];
                 float etaR = bedHeight[xr][z] + waterDepth[xr][z];
@@ -317,6 +320,8 @@ public class WaterSimChunk {
                 float momentumRunup = clamp((velocityMagPre - 0.08f) / 0.30f, 0f, 1f)
                         * (0.75f + centerDepth * 0.65f)
                         * (0.72f + waveCarry * 0.95f);
+                runupAllowance *= inlandAttenuation;
+                momentumRunup *= inlandAttenuation;
                 float dynamicSurfaceCap = Math.max(maxSurface[x][z], neighborEta - 0.02f) + runupAllowance + momentumRunup;
                 float dynamicMaxDepth = Math.max(staticMaxDepth, dynamicSurfaceCap - bed);
 
@@ -357,7 +362,12 @@ public class WaterSimChunk {
                         ? Math.min(SHORE_RETENTION_MAX, collisionOverflow * 0.90f)
                         : Math.min(0.40f, collisionOverflow * 0.55f);
                 retainedOverflow += waveCarry * (shorelineFilm ? 0.06f : 0.03f);
+                retainedOverflow *= (0.42f + 0.58f * inlandAttenuation);
                 float postCollisionDepth = depth - collisionOverflow + retainedOverflow;
+
+                // Shore fade-out: run-up should die off inland after a few meters instead of flowing forever.
+                float inlandFade = clamp((inlandRise - 0.35f) / (SHORE_RUNUP_RISE_LIMIT - 0.35f), 0f, 1f);
+                postCollisionDepth *= 1f - inlandFade * (0.35f + 0.55f * frameScale);
 
                 float maxRise = (0.24f + centerDepth * 0.30f) * frameScale;
                 float maxDrop = (0.26f + centerDepth * 0.38f) * frameScale;
@@ -388,6 +398,9 @@ public class WaterSimChunk {
                 float shoreline = clamp((0.20f - Math.max(0f, maxSurface[x][z] - bedHeight[x][z])) / 0.20f, 0f, 1f);
                 float spread = clamp((flow - 0.06f) / 0.45f, 0f, 1f) * shoreline;
                 spread *= 0.70f + tmpWaveMemory[x][z] * 0.90f;
+                float inlandRise = Math.max(0f, bedHeight[x][z] - maxSurface[x][z]);
+                float inlandAttenuation = 1f - clamp(inlandRise / SHORE_RUNUP_RISE_LIMIT, 0f, 1f);
+                spread *= inlandAttenuation;
                 tmpDepthSpread[x][z] = center + (neighbors - center) * (0.10f + spread * 0.34f);
             }
         }
