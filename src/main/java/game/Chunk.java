@@ -946,7 +946,7 @@ public class Chunk {
 
     private void buildWaterGeometry() {
         waterPatches.clear();
-        int step = (int) Math.pow(2, lod);
+        int step = 1; // Keep water topology identical across chunks to avoid LOD border cracks.
 
         for (int z = 0; z < SIZE; z += step) {
             int z2 = Math.min(z + step, SIZE);
