@@ -475,7 +475,6 @@ public class Chunk {
             generateFeatures();
         stitchEdges();
         buildTerrainBuffers();
-        buildWaterDisplayList();
         recalculateHeavyFeatureCount();
         buildFeatureBatches();
 
@@ -931,6 +930,7 @@ public class Chunk {
     private void buildWaterGeometry() {
         waterPatches.clear();
         ensureWaterSimInitialized();
+        syncWaterSimEdgesFromNeighbors();
         int step = 1; // Keep water topology identical across chunks to avoid LOD border cracks.
 
         for (int z = 0; z < SIZE; z += step) {
@@ -953,7 +953,7 @@ public class Chunk {
                 boolean oceanWet01 = d01 >= MIN_RENDERABLE_WATER_DEPTH && y01 < WATER_LEVEL + 0.02f;
                 boolean oceanWet11 = d11 >= MIN_RENDERABLE_WATER_DEPTH && y11 < WATER_LEVEL + 0.02f;
                 int oceanCorners = (oceanWet00 ? 1 : 0) + (oceanWet10 ? 1 : 0) + (oceanWet01 ? 1 : 0) + (oceanWet11 ? 1 : 0);
-                if (oceanCorners < 3) {
+                if (oceanCorners == 0) {
                     continue;
                 }
 

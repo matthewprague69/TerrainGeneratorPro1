@@ -204,6 +204,7 @@ public class TerrainManager {
     private int perfDepthChunksDrawn = 0;
     private int perfVisibleFeatures = 0;
     private Frustum lastCameraFrustum = null;
+    private long waterSimulationFrameId = 0L;
 
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
         this(seed, scale, renderDist, renderDist - 1,  skyRenderer);
@@ -1112,7 +1113,8 @@ public class TerrainManager {
     public void drawWater(float wx, float wz) {
         long start = System.nanoTime();
         float waterTimeSeconds = (float) (System.nanoTime() * 1.0e-9);
-        final float waterSimDt = 1.0f / 60.0f;
+        final float baseWaterSimDt = 1.0f / 60.0f;
+        waterSimulationFrameId++;
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         int renderedWaterChunks = 0;
@@ -1125,7 +1127,10 @@ public class TerrainManager {
                 continue;
             }
             if (!weatherSystem.isWaterFrozen()) {
-                c.updateWaterSimulation(waterSimDt);
+                int simulationCadenceFrames = getWaterSimulationCadenceFrames(dist);
+                if (waterSimulationFrameId % simulationCadenceFrames == 0) {
+                    c.updateWaterSimulation(baseWaterSimDt * simulationCadenceFrames);
+                }
             }
             c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
                     weatherSystem.getIceThickness(), waterTimeSeconds);
@@ -1133,6 +1138,16 @@ public class TerrainManager {
         }
         perfWaterChunksDrawn = renderedWaterChunks;
         recordStage(PipelineStage.DRAW_WATER, System.nanoTime() - start);
+    }
+
+    private static int getWaterSimulationCadenceFrames(int chunkDistance) {
+        if (chunkDistance <= 2) {
+            return 1;
+        }
+        if (chunkDistance <= 6) {
+            return 2;
+        }
+        return 4;
     }
 
     public void drawDepth(float wx, float wz) {
