@@ -484,6 +484,7 @@ public class Chunk {
     }
 
     public void drawWater(boolean frozen, float snowCoverage, float iceThickness) {
+        buildWaterGeometry(); // Keep chunk borders in sync even as neighbors stream/update.
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
         glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);
@@ -1005,10 +1006,16 @@ public class Chunk {
             float wy3 = getWaterHeightAt(patch.wy3, patch.wx2, patch.wz2, timeSeconds, frozen);
             float wy4 = getWaterHeightAt(patch.wy4, patch.wx1, patch.wz2, timeSeconds, frozen);
 
-            glBegin(GL_QUADS);
+            glBegin(GL_TRIANGLES);
+            // Triangle 1: (1,2,3)
             submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
                     timeSeconds, frozen, lx, ly, lz, texScale);
             submitWaterVertex(patch.wx2, patch.wz1, wy2, patch.wy2, patch.terrainY2,
+                    timeSeconds, frozen, lx, ly, lz, texScale);
+            submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
+                    timeSeconds, frozen, lx, ly, lz, texScale);
+            // Triangle 2: (1,3,4)
+            submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
                     timeSeconds, frozen, lx, ly, lz, texScale);
             submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
                     timeSeconds, frozen, lx, ly, lz, texScale);
