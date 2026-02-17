@@ -488,8 +488,9 @@ public class Chunk {
     }
 
     public void drawWater(boolean frozen, float snowCoverage, float iceThickness, float waterTimeSeconds) {
-        if (!renderResourcesBuilt) {
-            return;
+        if (!renderResourcesBuilt && waterPatches.isEmpty()) {
+            stitchEdges();
+            buildWaterDisplayList();
         }
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
         glDisable(GL_LIGHTING);
