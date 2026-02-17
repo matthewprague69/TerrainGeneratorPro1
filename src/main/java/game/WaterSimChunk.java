@@ -26,7 +26,7 @@ public class WaterSimChunk {
     private static final float SHORE_RUNUP_MAX = 1.35f;
     private static final float SHORE_RUNUP_SLOPE = 1.50f;
     private static final float SHORE_RETENTION_MAX = 0.60f;
-    private static final float SHORE_RUNUP_RISE_LIMIT = 2.8f;
+    private static final float SHORE_RUNUP_RISE_LIMIT = 2.4f;
 
     public WaterSimChunk(int gridSize) {
         this.gridSize = gridSize;
@@ -369,6 +369,11 @@ public class WaterSimChunk {
                 float inlandFade = clamp((inlandRise - 0.35f) / (SHORE_RUNUP_RISE_LIMIT - 0.35f), 0f, 1f);
                 postCollisionDepth *= 1f - inlandFade * (0.35f + 0.55f * frameScale);
 
+                // Inland drainage: thin run-up water should naturally drain back unless another wave reinforces it.
+                float inlandDrain = inlandFade * (0.035f + postCollisionDepth * 0.24f) * frameScale;
+                inlandDrain *= (1.10f - 0.55f * waveCarry);
+                postCollisionDepth = Math.max(0f, postCollisionDepth - inlandDrain);
+
                 float maxRise = (0.24f + centerDepth * 0.30f) * frameScale;
                 float maxDrop = (0.26f + centerDepth * 0.38f) * frameScale;
                 float smoothedDepth = clamp(postCollisionDepth, centerDepth - maxDrop, centerDepth + maxRise);
@@ -414,6 +419,21 @@ public class WaterSimChunk {
                 float maxDepth = Math.max(0f, maxSurface[x][z] - bed);
                 float pressure = maxDepth > 0.0001f ? (tmpDepth[x][z] / maxDepth) : clamp(tmpDepth[x][z] / 0.18f, 0f, 1f);
                 float terrainCollisionDamp = 0.55f + 0.45f * clamp(pressure, 0f, 1f);
+
+                float inlandRise = Math.max(0f, bedHeight[x][z] - maxSurface[x][z]);
+                float inlandFade = clamp((inlandRise - 0.25f) / (SHORE_RUNUP_RISE_LIMIT - 0.25f), 0f, 1f);
+                if (inlandFade > 0f) {
+                    int xl = Math.max(0, x - 1);
+                    int xr = Math.min(gridSize, x + 1);
+                    int zb = Math.max(0, z - 1);
+                    int zf = Math.min(gridSize, z + 1);
+                    float bedGradX = (bedHeight[xr][z] - bedHeight[xl][z]) * 0.5f;
+                    float bedGradZ = (bedHeight[x][zf] - bedHeight[x][zb]) * 0.5f;
+                    // Backwash acceleration so run-up returns toward shoreline instead of lingering inland.
+                    tmpVelX[x][z] -= bedGradX * inlandFade * 0.75f;
+                    tmpVelZ[x][z] -= bedGradZ * inlandFade * 0.75f;
+                    terrainCollisionDamp *= (1f - inlandFade * 0.35f);
+                }
 
                 velX[x][z] = tmpVelX[x][z] * terrainCollisionDamp;
                 velZ[x][z] = tmpVelZ[x][z] * terrainCollisionDamp;
