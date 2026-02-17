@@ -21,7 +21,7 @@ public class WaterSimChunk {
 
     private static final float SHORE_RUNUP_MAX = 1.35f;
     private static final float SHORE_RUNUP_SLOPE = 1.50f;
-    private static final float SHORE_RETENTION_MAX = 0.24f;
+    private static final float SHORE_RETENTION_MAX = 0.60f;
 
     public WaterSimChunk(int gridSize) {
         this.gridSize = gridSize;
@@ -297,15 +297,20 @@ public class WaterSimChunk {
                 // Allow controlled shoreline run-up so waves can reach terrain edges,
                 // while still preventing bulk flooding into higher dry land.
                 float runupAllowance = SHORE_RUNUP_MAX * clamp((neighborEta - bed) / SHORE_RUNUP_SLOPE, 0f, 1f);
-                float dynamicSurfaceCap = Math.max(maxSurface[x][z], neighborEta - 0.03f) + runupAllowance;
+                float velocityMagPre = (float) Math.sqrt(tmpVelX[x][z] * tmpVelX[x][z] + tmpVelZ[x][z] * tmpVelZ[x][z]);
+                float momentumRunup = clamp((velocityMagPre - 0.08f) / 0.30f, 0f, 1f) * (0.75f + centerDepth * 0.65f);
+                float dynamicSurfaceCap = Math.max(maxSurface[x][z], neighborEta - 0.02f) + runupAllowance + momentumRunup;
                 float dynamicMaxDepth = Math.max(staticMaxDepth, dynamicSurfaceCap - bed);
 
-                float pressureDepth = staticMaxDepth;
+                // Don't yank shoreline water back to static depth too aggressively; let momentum carry it inland.
+                float pressureDepth = Math.max(staticMaxDepth, centerDepth * 0.92f);
                 boolean shorelineFilm = staticMaxDepth < 0.04f;
-                float shorelinePressureBlend = shorelineFilm ? pressureBlend * 0.35f : pressureBlend;
+                float shorelinePressureBlend = shorelineFilm ? pressureBlend * 0.14f : pressureBlend * 0.55f;
                 depth += (pressureDepth - depth) * shorelinePressureBlend;
 
-                float collisionOverflow = Math.max(0f, depth - dynamicMaxDepth);
+                // Very soft overflow region: only treat as collision when far beyond the dynamic cap.
+                float softCap = dynamicMaxDepth + 0.65f + centerDepth * 0.45f;
+                float collisionOverflow = Math.max(0f, depth - softCap);
                 if (collisionOverflow > 0f) {
                     float bedGradX = (bedHeight[xr][z] - bedHeight[xl][z]) * 0.5f;
                     float bedGradZ = (bedHeight[x][zf] - bedHeight[x][zb]) * 0.5f;
@@ -326,8 +331,8 @@ public class WaterSimChunk {
 
                 // Keep a thin moving shoreline film instead of hard-clipping all overflow away.
                 float retainedOverflow = shorelineFilm
-                        ? Math.min(SHORE_RETENTION_MAX, collisionOverflow * 0.78f)
-                        : Math.min(0.10f, collisionOverflow * 0.30f);
+                        ? Math.min(SHORE_RETENTION_MAX, collisionOverflow * 0.90f)
+                        : Math.min(0.40f, collisionOverflow * 0.55f);
                 float postCollisionDepth = depth - collisionOverflow + retainedOverflow;
 
                 float maxRise = (0.24f + centerDepth * 0.30f) * frameScale;
@@ -341,7 +346,7 @@ public class WaterSimChunk {
                 float advectionFoam = (foam[xl][z] + foam[xr][z] + foam[x][zb] + foam[x][zf]) * 0.25f;
                 tmpFoam[x][z] = clamp(Math.max(retainedFoam, advectionFoam * 0.70f) + impactFoam * 0.85f + speedFoam * 0.08f, 0f, 1f);
 
-                tmpDepth[x][z] = clamp(smoothedDepth, 0f, dynamicMaxDepth + retainedOverflow);
+                tmpDepth[x][z] = Math.max(0f, smoothedDepth);
             }
         }
 
