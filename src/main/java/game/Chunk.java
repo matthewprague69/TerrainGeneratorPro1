@@ -115,11 +115,11 @@ public class Chunk {
     public static final float FEATURE_TREE_MAX_HEIGHT = 25f; // example, you can adjust
 
     private static final int MAX_IMPOSTOR_CACHE_ENTRIES = 512;
-    private static final float WATER_WAVE_AMPLITUDE = 0.22f;
-    private static final float WATER_WAVE_SPEED = 1.35f;
-    private static final float WATER_WAVE_LENGTH_1 = 26f;
-    private static final float WATER_WAVE_LENGTH_2 = 14f;
-    private static final float WATER_WAVE_LENGTH_3 = 8f;
+    private static final float WATER_WAVE_AMPLITUDE = 0.55f;
+    private static final float WATER_WAVE_SPEED = 1.65f;
+    private static final float WATER_WAVE_LENGTH_1 = 18f;
+    private static final float WATER_WAVE_LENGTH_2 = 10f;
+    private static final float WATER_WAVE_LENGTH_3 = 6f;
     private static final LinkedHashMap<String, ImpostorEntry> IMPOSTOR_TEXTURES =
             new LinkedHashMap<>(256, 0.75f, true);
 
@@ -986,32 +986,70 @@ public class Chunk {
         }
 
         float texScale = 0.12f;
+        float[] lightDir = manager.getLightDirection();
+        float lx = -lightDir[0];
+        float ly = -lightDir[1];
+        float lz = -lightDir[2];
+
         for (WaterPatch patch : waterPatches) {
-            float wy1 = frozen ? patch.wy1 : patch.wy1 + getWaveOffset(patch.wx1, patch.wz1, timeSeconds);
-            float wy2 = frozen ? patch.wy2 : patch.wy2 + getWaveOffset(patch.wx2, patch.wz1, timeSeconds);
-            float wy3 = frozen ? patch.wy3 : patch.wy3 + getWaveOffset(patch.wx2, patch.wz2, timeSeconds);
-            float wy4 = frozen ? patch.wy4 : patch.wy4 + getWaveOffset(patch.wx1, patch.wz2, timeSeconds);
+            float wy1 = getWaterHeightAt(patch.wy1, patch.wx1, patch.wz1, timeSeconds, frozen);
+            float wy2 = getWaterHeightAt(patch.wy2, patch.wx2, patch.wz1, timeSeconds, frozen);
+            float wy3 = getWaterHeightAt(patch.wy3, patch.wx2, patch.wz2, timeSeconds, frozen);
+            float wy4 = getWaterHeightAt(patch.wy4, patch.wx1, patch.wz2, timeSeconds, frozen);
 
             glBegin(GL_QUADS);
-            glNormal3f(0f, 1f, 0f);
-            glTexCoord2f(patch.wx1 * texScale, patch.wz1 * texScale);
-            glVertex3f(patch.wx1, wy1, patch.wz1);
-            glTexCoord2f(patch.wx2 * texScale, patch.wz1 * texScale);
-            glVertex3f(patch.wx2, wy2, patch.wz1);
-            glTexCoord2f(patch.wx2 * texScale, patch.wz2 * texScale);
-            glVertex3f(patch.wx2, wy3, patch.wz2);
-            glTexCoord2f(patch.wx1 * texScale, patch.wz2 * texScale);
-            glVertex3f(patch.wx1, wy4, patch.wz2);
+            submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, timeSeconds, frozen, lx, ly, lz, texScale);
+            submitWaterVertex(patch.wx2, patch.wz1, wy2, patch.wy2, timeSeconds, frozen, lx, ly, lz, texScale);
+            submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, timeSeconds, frozen, lx, ly, lz, texScale);
+            submitWaterVertex(patch.wx1, patch.wz2, wy4, patch.wy4, timeSeconds, frozen, lx, ly, lz, texScale);
             glEnd();
         }
     }
 
+    private void submitWaterVertex(float wx, float wz, float wy, float baseY, float timeSeconds, boolean frozen,
+                                   float lx, float ly, float lz, float texScale) {
+        if (frozen) {
+            glColor4f(1f, 1f, 1f, 1f);
+            glNormal3f(0f, 1f, 0f);
+        } else {
+            float eps = Math.max(0.4f, scale * 0.8f);
+            float left = getWaveOffset(wx - eps, wz, timeSeconds);
+            float right = getWaveOffset(wx + eps, wz, timeSeconds);
+            float back = getWaveOffset(wx, wz - eps, timeSeconds);
+            float front = getWaveOffset(wx, wz + eps, timeSeconds);
+            float dx = (right - left) / (2f * eps);
+            float dz = (front - back) / (2f * eps);
+            float nx = -dx;
+            float ny = 1f;
+            float nz = -dz;
+            float invLen = (float) (1.0 / Math.sqrt(nx * nx + ny * ny + nz * nz));
+            nx *= invLen;
+            ny *= invLen;
+            nz *= invLen;
+            glNormal3f(nx, ny, nz);
+
+            float diffuse = Math.max(0f, nx * lx + ny * ly + nz * lz);
+            float waveOffset = wy - baseY;
+            float crest = Math.max(0f, waveOffset / (WATER_WAVE_AMPLITUDE + 0.0001f));
+            float brightness = Math.min(1f, 0.55f + diffuse * 0.30f + crest * 0.25f);
+            glColor4f(0.12f + brightness * 0.22f, 0.38f + brightness * 0.27f, 0.60f + brightness * 0.30f, 0.58f);
+        }
+
+        glTexCoord2f(wx * texScale, wz * texScale);
+        glVertex3f(wx, wy, wz);
+    }
+
+    private float getWaterHeightAt(float baseHeight, float wx, float wz, float timeSeconds, boolean frozen) {
+        return frozen ? baseHeight : baseHeight + getWaveOffset(wx, wz, timeSeconds);
+    }
+
     private float getWaveOffset(float wx, float wz, float timeSeconds) {
         float phaseA = ((wx + wz * 0.65f) / WATER_WAVE_LENGTH_1) + timeSeconds * WATER_WAVE_SPEED;
-        float phaseB = ((wx * -0.45f + wz) / WATER_WAVE_LENGTH_2) + timeSeconds * WATER_WAVE_SPEED * 1.35f;
-        float phaseC = ((wx * 0.2f - wz * 0.9f) / WATER_WAVE_LENGTH_3) + timeSeconds * WATER_WAVE_SPEED * 2.05f;
-        return (float) ((Math.sin(phaseA) * 0.55f + Math.sin(phaseB) * 0.3f + Math.sin(phaseC) * 0.15f)
-                * WATER_WAVE_AMPLITUDE);
+        float phaseB = ((wx * -0.45f + wz) / WATER_WAVE_LENGTH_2) + timeSeconds * WATER_WAVE_SPEED * 1.55f;
+        float phaseC = ((wx * 0.2f - wz * 0.9f) / WATER_WAVE_LENGTH_3) + timeSeconds * WATER_WAVE_SPEED * 2.3f;
+        float primary = (float) (Math.sin(phaseA) * 0.5 + Math.sin(phaseB) * 0.32 + Math.sin(phaseC) * 0.18);
+        float choppy = (float) Math.sin(phaseA * 1.8f + phaseC * 0.7f);
+        return (primary + choppy * 0.2f) * WATER_WAVE_AMPLITUDE;
     }
 
     private void buildGrassBatch() {
