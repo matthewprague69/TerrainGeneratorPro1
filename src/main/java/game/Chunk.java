@@ -483,7 +483,8 @@ public class Chunk {
 
     }
 
-    public void drawWater(boolean frozen, float snowCoverage, float iceThickness) {
+    public void drawWater(boolean frozen, float snowCoverage, float iceThickness, float waterTimeSeconds) {
+        stitchEdges(); // Ensure border vertices always use the latest neighbor edge heights.
         buildWaterGeometry(); // Keep chunk borders in sync even as neighbors stream/update.
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
         glDisable(GL_LIGHTING);
@@ -516,8 +517,7 @@ public class Chunk {
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glDepthMask(false);
 
-            float time = (float) (System.nanoTime() * 1.0e-9);
-            renderWaterSurface(time, false);
+            renderWaterSurface(waterTimeSeconds, false);
 
             glDepthMask(true);
         }
