@@ -126,7 +126,7 @@ public class Chunk {
     private static final float WATER_FOAM_SLOPE_RANGE = 0.24f;
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
     private static final float WATER_FOAM_FALL_RANGE = 1.55f;
-    private static final float MIN_RENDERABLE_WATER_DEPTH = 0.06f;
+    private static final float MIN_RENDERABLE_WATER_DEPTH = 0.008f;
     private static final LinkedHashMap<String, ImpostorEntry> IMPOSTOR_TEXTURES =
             new LinkedHashMap<>(256, 0.75f, true);
 
@@ -1028,6 +1028,21 @@ public class Chunk {
 
         glBegin(GL_TRIANGLES);
         for (WaterPatch patch : waterPatches) {
+            if (!frozen && waterSimChunk != null) {
+                float l1x = (patch.wx1 / scale) - (cx * SIZE);
+                float l1z = (patch.wz1 / scale) - (cz * SIZE);
+                float l2x = (patch.wx2 / scale) - (cx * SIZE);
+                float l2z = (patch.wz2 / scale) - (cz * SIZE);
+
+                float d1 = waterSimChunk.sampleDepth(l1x, l1z);
+                float d2 = waterSimChunk.sampleDepth(l2x, l1z);
+                float d3 = waterSimChunk.sampleDepth(l2x, l2z);
+                float d4 = waterSimChunk.sampleDepth(l1x, l2z);
+                if (Math.max(Math.max(d1, d2), Math.max(d3, d4)) < 0.003f) {
+                    continue;
+                }
+            }
+
             float waveScale1 = getWaveScale(patch.wy1, patch.terrainY1);
             float waveScale2 = getWaveScale(patch.wy2, patch.terrainY2);
             float waveScale3 = getWaveScale(patch.wy3, patch.terrainY3);
@@ -1212,9 +1227,14 @@ public class Chunk {
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
                 * (0.38f + waveStrength * 0.56f * largeSwellBoost) * shoreDamping * shoalingBoost;
 
-        float minSurface = terrainHeight + 0.01f;
+        if (simulatedDepth <= 0.004f) {
+            return terrainHeight;
+        }
+
         float finalSurface = simulatedSurface + detailRipple;
-        return Math.max(minSurface, finalSurface);
+        float shorelineFilmBlend = smoothstep01(clamp01((simulatedDepth - 0.008f) / 0.14f));
+        float shapedSurface = terrainHeight + (finalSurface - terrainHeight) * shorelineFilmBlend;
+        return Math.max(terrainHeight + 0.002f, shapedSurface);
     }
 
     private float sampleTerrainHeightAtLocal(float localX, float localZ) {
