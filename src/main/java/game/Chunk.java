@@ -121,6 +121,7 @@ public class Chunk {
     private static final float WATER_WAVE_LENGTH_1 = 30f;
     private static final float WATER_WAVE_LENGTH_2 = 16f;
     private static final float WATER_WAVE_LENGTH_3 = 9f;
+    private static final float WATER_LARGE_SWELL_MULTIPLIER = 5.0f;
     private static final float WATER_FOAM_SLOPE_START = 0.10f;
     private static final float WATER_FOAM_SLOPE_RANGE = 0.24f;
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
@@ -1096,28 +1097,42 @@ public class Chunk {
 
             float depth = Math.max(0f, baseY - terrainY);
             float depth01 = clamp01(depth / 8.0f);
+            float depthSmooth = smoothstep01(depth01);
             float shallowMix = 1f - depth01;
+            float shorelineMix = 1f - depthSmooth;
             float shoreFoam = clamp01((1.0f - depth) / 1.0f) * clamp01((slopeMag - 0.10f) / 0.22f);
 
             float foamNoise = 0.5f + 0.5f * (float) Math.sin(wx * 0.22f + wz * 0.31f + timeSeconds * 3.4f + waveOffset * 3.6f);
-            float foam = crest * (0.48f * breaking + 0.38f * falling + 0.24f * curvatureFoam);
-            foam = Math.max(foam, shoreFoam * 0.25f);
-            foam = clamp01(foam * (0.78f + 0.22f * foamNoise));
+            float largeBodyFoam = crest * clamp01((depth - 3.0f) / 6.0f);
+            float foam = crest * (0.66f * breaking + 0.52f * falling + 0.34f * curvatureFoam);
+            foam = Math.max(foam, shoreFoam * 0.48f);
+            foam = Math.max(foam, largeBodyFoam * (0.45f + 0.55f * foamNoise));
+            foam = clamp01(foam * (0.90f + 0.34f * foamNoise));
 
             float altitude01 = clamp01((baseY - WATER_LEVEL) / 18f);
-            float deepR = lerp(0.07f, 0.12f, altitude01);
-            float deepG = lerp(0.26f, 0.38f, altitude01);
-            float deepB = lerp(0.46f, 0.66f, altitude01);
-            float shallowR = lerp(0.20f, 0.28f, altitude01);
-            float shallowG = lerp(0.56f, 0.68f, altitude01);
-            float shallowB = lerp(0.64f, 0.78f, altitude01);
+            float deepR = lerp(0.06f, 0.14f, altitude01);
+            float deepG = lerp(0.21f, 0.42f, altitude01);
+            float deepB = lerp(0.40f, 0.73f, altitude01);
+            float midR = lerp(0.10f, 0.18f, altitude01);
+            float midG = lerp(0.37f, 0.56f, altitude01);
+            float midB = lerp(0.56f, 0.82f, altitude01);
+            float shallowR = lerp(0.23f, 0.34f, altitude01);
+            float shallowG = lerp(0.60f, 0.74f, altitude01);
+            float shallowB = lerp(0.70f, 0.84f, altitude01);
 
-            float baseR = deepR + (shallowR - deepR) * shallowMix;
-            float baseG = deepG + (shallowG - deepG) * shallowMix;
-            float baseB = deepB + (shallowB - deepB) * shallowMix;
+            float baseR = depthSmooth < 0.5f
+                    ? lerp(shallowR, midR, depthSmooth * 2f)
+                    : lerp(midR, deepR, (depthSmooth - 0.5f) * 2f);
+            float baseG = depthSmooth < 0.5f
+                    ? lerp(shallowG, midG, depthSmooth * 2f)
+                    : lerp(midG, deepG, (depthSmooth - 0.5f) * 2f);
+            float baseB = depthSmooth < 0.5f
+                    ? lerp(shallowB, midB, depthSmooth * 2f)
+                    : lerp(midB, deepB, (depthSmooth - 0.5f) * 2f);
 
             float positionTint = (float) Math.sin((wx + wz) * 0.015f + timeSeconds * 0.25f) * 0.035f;
-            baseG = clamp01(baseG + positionTint * 0.6f + shallowMix * 0.04f);
+            float terrainHeightTint = clamp01((terrainY - WATER_LEVEL + 6.0f) / 18.0f);
+            baseG = clamp01(baseG + positionTint * 0.6f + shorelineMix * 0.05f + terrainHeightTint * 0.03f);
             baseB = clamp01(baseB + positionTint * 0.9f);
             baseR = clamp01(baseR - positionTint * 0.2f);
 
@@ -1136,13 +1151,13 @@ public class Chunk {
             litB = clamp01(litB + glint * 1.05f);
 
             float shoreSuppress = clamp01((depth - 0.9f) / 2.6f);
-            float foamMix = clamp01((foam * 0.82f + breaking * 0.08f) * shoreSuppress);
+            float foamMix = clamp01((foam * 0.94f + breaking * 0.12f) * shoreSuppress);
             float finalR = litR + (1f - litR) * foamMix;
             float finalG = litG + (1f - litG) * foamMix;
             float finalB = litB + (1f - litB) * foamMix;
 
             // Higher opacity to keep water clearly readable while still preserving some depth transparency.
-            float alpha = Math.min(0.99f, 0.78f + shallowMix * 0.12f + foam * 0.14f + fresnel * 0.09f);
+            float alpha = Math.min(0.99f, 0.76f + shorelineMix * 0.16f + foam * 0.18f + fresnel * 0.09f);
             glColor4f(finalR, finalG, finalB, alpha);
         }
 
@@ -1168,7 +1183,10 @@ public class Chunk {
         // Big waves only in deep/open water; tiny ripples near shores.
         float openWater = clamp01((simulatedDepth - 1.8f) / 7.0f);
         float waveStrength = openWater * openWater;
-        float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale) * (0.02f + waveStrength * 0.70f);
+        float vastWater = smoothstep01(clamp01((simulatedDepth - 4.0f) / 8.0f));
+        float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater;
+        float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
+                * (0.02f + waveStrength * 0.70f * largeSwellBoost);
         return simulatedSurface + detailRipple;
     }
 
@@ -1192,6 +1210,11 @@ public class Chunk {
 
     private static float clamp01(float value) {
         return Math.max(0f, Math.min(1f, value));
+    }
+
+    private static float smoothstep01(float value) {
+        float t = clamp01(value);
+        return t * t * (3f - 2f * t);
     }
 
     private void buildGrassBatch() {
