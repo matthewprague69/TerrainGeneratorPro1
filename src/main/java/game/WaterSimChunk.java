@@ -120,9 +120,9 @@ public class WaterSimChunk {
             float nDepth = neighbor.waterDepth[gridSize][z];
             float nUx = neighbor.velX[gridSize][z];
             float nUz = neighbor.velZ[gridSize][z];
-            waterDepth[0][z] = 0.5f * (waterDepth[0][z] + nDepth);
-            velX[0][z] = 0.5f * (velX[0][z] + nUx);
-            velZ[0][z] = 0.5f * (velZ[0][z] + nUz);
+            waterDepth[0][z] = nDepth;
+            velX[0][z] = nUx;
+            velZ[0][z] = nUz;
         }
     }
 
@@ -134,9 +134,9 @@ public class WaterSimChunk {
             float nDepth = neighbor.waterDepth[0][z];
             float nUx = neighbor.velX[0][z];
             float nUz = neighbor.velZ[0][z];
-            waterDepth[gridSize][z] = 0.5f * (waterDepth[gridSize][z] + nDepth);
-            velX[gridSize][z] = 0.5f * (velX[gridSize][z] + nUx);
-            velZ[gridSize][z] = 0.5f * (velZ[gridSize][z] + nUz);
+            waterDepth[gridSize][z] = nDepth;
+            velX[gridSize][z] = nUx;
+            velZ[gridSize][z] = nUz;
         }
     }
 
@@ -148,9 +148,9 @@ public class WaterSimChunk {
             float nDepth = neighbor.waterDepth[x][gridSize];
             float nUx = neighbor.velX[x][gridSize];
             float nUz = neighbor.velZ[x][gridSize];
-            waterDepth[x][0] = 0.5f * (waterDepth[x][0] + nDepth);
-            velX[x][0] = 0.5f * (velX[x][0] + nUx);
-            velZ[x][0] = 0.5f * (velZ[x][0] + nUz);
+            waterDepth[x][0] = nDepth;
+            velX[x][0] = nUx;
+            velZ[x][0] = nUz;
         }
     }
 
@@ -162,9 +162,9 @@ public class WaterSimChunk {
             float nDepth = neighbor.waterDepth[x][0];
             float nUx = neighbor.velX[x][0];
             float nUz = neighbor.velZ[x][0];
-            waterDepth[x][gridSize] = 0.5f * (waterDepth[x][gridSize] + nDepth);
-            velX[x][gridSize] = 0.5f * (velX[x][gridSize] + nUx);
-            velZ[x][gridSize] = 0.5f * (velZ[x][gridSize] + nUz);
+            waterDepth[x][gridSize] = nDepth;
+            velX[x][gridSize] = nUx;
+            velZ[x][gridSize] = nUz;
         }
     }
 

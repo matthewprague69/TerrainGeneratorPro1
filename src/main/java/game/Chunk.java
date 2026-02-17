@@ -118,10 +118,10 @@ public class Chunk {
     private static final int MAX_IMPOSTOR_CACHE_ENTRIES = 512;
     private static final float WATER_WAVE_AMPLITUDE = 1.22f;
     private static final float WATER_WAVE_SPEED = 0.72f;
-    private static final float WATER_WAVE_LENGTH_1 = 30f;
-    private static final float WATER_WAVE_LENGTH_2 = 16f;
-    private static final float WATER_WAVE_LENGTH_3 = 9f;
-    private static final float WATER_LARGE_SWELL_MULTIPLIER = 2.2f;
+    private static final float WATER_WAVE_LENGTH_1 = 18f;
+    private static final float WATER_WAVE_LENGTH_2 = 9f;
+    private static final float WATER_WAVE_LENGTH_3 = 4.8f;
+    private static final float WATER_LARGE_SWELL_MULTIPLIER = 1.6f;
     private static final float WATER_FOAM_SLOPE_START = 0.10f;
     private static final float WATER_FOAM_SLOPE_RANGE = 0.24f;
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
@@ -1011,6 +1011,8 @@ public class Chunk {
         ensureWaterSimInitialized();
         syncWaterSimEdgesFromNeighbors();
         waterSimChunk.stepSimulation(dtSeconds);
+        // Re-sync borders after stepping to keep neighboring chunk seams watertight.
+        syncWaterSimEdgesFromNeighbors();
     }
 
     private void renderWaterSurface(float timeSeconds, boolean frozen) {
@@ -1102,9 +1104,13 @@ public class Chunk {
             float shoreFoam = clamp01((1.0f - depth) / 1.0f) * clamp01((slopeMag - 0.10f) / 0.22f);
 
             float foamNoise = 0.5f + 0.5f * (float) Math.sin(wx * 0.22f + wz * 0.31f + timeSeconds * 3.4f + waveOffset * 3.6f);
-            float largeBodyFoam = crest * clamp01((depth - 3.0f) / 6.0f);
-            float foam = crest * (0.66f * breaking + 0.52f * falling + 0.34f * curvatureFoam);
-            foam = Math.max(foam, shoreFoam * 0.48f);
+            float collisionPattern = Math.abs((float) Math.sin(wx * 0.42f + timeSeconds * 2.8f)
+                    * (float) Math.sin(wz * 0.39f - timeSeconds * 3.1f));
+            float collisionFoam = clamp01((collisionPattern - 0.58f) / 0.32f) * clamp01((slopeMag - 0.08f) / 0.20f);
+            float largeBodyFoam = crest * clamp01((depth - 2.4f) / 5.5f);
+            float foam = crest * (0.78f * breaking + 0.55f * falling + 0.34f * curvatureFoam);
+            foam = Math.max(foam, shoreFoam * 0.52f);
+            foam = Math.max(foam, collisionFoam * 0.70f);
             foam = Math.max(foam, largeBodyFoam * (0.45f + 0.55f * foamNoise));
             foam = clamp01(foam * (0.90f + 0.34f * foamNoise));
 
@@ -1188,20 +1194,28 @@ public class Chunk {
         float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
         float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
-                * (0.03f + waveStrength * 0.55f * largeSwellBoost);
+                * (0.08f + waveStrength * 0.48f * largeSwellBoost);
         return simulatedSurface + detailRipple;
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {
-        float currentBias = (float) Math.sin(wx * 0.03f + wz * 0.02f) * 0.18f;
-        float phaseA = ((wx + wz * 0.65f) / WATER_WAVE_LENGTH_1) + currentBias + timeSeconds * WATER_WAVE_SPEED;
+        float currentBias = (float) Math.sin(wx * 0.05f + wz * 0.04f) * 0.14f;
+        float phaseA = ((wx + wz * 0.65f) / WATER_WAVE_LENGTH_1) + currentBias + timeSeconds * WATER_WAVE_SPEED * 1.15f;
         float phaseB = ((wx * -0.45f + wz) / WATER_WAVE_LENGTH_2) + currentBias * 0.4f
-                + timeSeconds * WATER_WAVE_SPEED * 1.32f;
+                + timeSeconds * WATER_WAVE_SPEED * 1.72f;
         float phaseC = ((wx * 0.2f - wz * 0.9f) / WATER_WAVE_LENGTH_3) - currentBias * 0.6f
-                + timeSeconds * WATER_WAVE_SPEED * 1.82f;
-        float primary = (float) (Math.sin(phaseA) * 0.5 + Math.sin(phaseB) * 0.32 + Math.sin(phaseC) * 0.18);
-        float choppy = (float) Math.sin(phaseA * 1.45f + phaseC * 0.55f);
-        return (primary + choppy * 0.16f) * WATER_WAVE_AMPLITUDE * waveScale;
+                + timeSeconds * WATER_WAVE_SPEED * 2.45f;
+
+        float primary = (float) (Math.sin(phaseA) * 0.34 + Math.sin(phaseB) * 0.42 + Math.sin(phaseC) * 0.24);
+        float crossA = (float) Math.sin((wx * 0.78f + wz * 1.18f) / 3.6f + timeSeconds * 2.9f);
+        float crossB = (float) Math.sin((wx * -1.08f + wz * 0.68f) / 2.9f - timeSeconds * 3.6f);
+        float interference = crossA * crossB;
+
+        // Sharpen crests and flatten troughs so waves look like water, not hills.
+        float crestShape = primary >= 0f ? primary * primary : -Math.abs(primary) * 0.55f;
+        float choppy = (float) Math.sin(phaseA * 1.85f + phaseC * 0.95f) * 0.22f;
+
+        return (crestShape + choppy + interference * 0.28f) * WATER_WAVE_AMPLITUDE * waveScale;
     }
 
     private static float getWaveScale(float baseWaterHeight, float terrainHeight) {
