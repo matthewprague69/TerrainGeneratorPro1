@@ -120,6 +120,10 @@ public class Chunk {
     private static final float WATER_WAVE_LENGTH_1 = 18f;
     private static final float WATER_WAVE_LENGTH_2 = 10f;
     private static final float WATER_WAVE_LENGTH_3 = 6f;
+    private static final float WATER_FOAM_SLOPE_START = 0.10f;
+    private static final float WATER_FOAM_SLOPE_RANGE = 0.24f;
+    private static final float WATER_FOAM_FALL_SPEED = 0.28f;
+    private static final float WATER_FOAM_FALL_RANGE = 1.55f;
     private static final LinkedHashMap<String, ImpostorEntry> IMPOSTOR_TEXTURES =
             new LinkedHashMap<>(256, 0.75f, true);
 
@@ -1036,6 +1040,8 @@ public class Chunk {
             float right = getWaveOffset(wx + eps, wz, timeSeconds);
             float back = getWaveOffset(wx, wz - eps, timeSeconds);
             float front = getWaveOffset(wx, wz + eps, timeSeconds);
+            float center = wy - baseY;
+
             float dx = (right - left) / (2f * eps);
             float dz = (front - back) / (2f * eps);
             float nx = -dx;
@@ -1048,28 +1054,53 @@ public class Chunk {
             glNormal3f(nx, ny, nz);
 
             float diffuse = Math.max(0f, nx * lx + ny * ly + nz * lz);
-            float waveOffset = wy - baseY;
-            float crest = Math.max(0f, waveOffset / (WATER_WAVE_AMPLITUDE + 0.0001f));
-            float depth = Math.max(0f, baseY - terrainY);
-            float depth01 = Math.min(1f, depth / 8.0f);
-            float shallowMix = 1f - depth01;
+            float waveOffset = center;
+            float waveVelocity = getWaveVelocity(wx, wz, timeSeconds);
+            float crest = clamp01(waveOffset / (WATER_WAVE_AMPLITUDE * 0.95f + 0.0001f));
+            float slopeMag = (float) Math.sqrt(dx * dx + dz * dz);
+            float breaking = clamp01((slopeMag - WATER_FOAM_SLOPE_START) / WATER_FOAM_SLOPE_RANGE);
+            float falling = clamp01((-waveVelocity - WATER_FOAM_FALL_SPEED) / WATER_FOAM_FALL_RANGE);
+            float curvature = (left + right + back + front - 4f * center) / (eps * eps);
+            float curvatureFoam = clamp01((-curvature - 0.03f) / 0.14f);
 
-            float deepR = 0.05f;
-            float deepG = 0.22f;
-            float deepB = 0.38f;
-            float shallowR = 0.12f;
-            float shallowG = 0.44f;
-            float shallowB = 0.50f;
+            float depth = Math.max(0f, baseY - terrainY);
+            float depth01 = clamp01(depth / 8.0f);
+            float shallowMix = 1f - depth01;
+            float shoreFoam = clamp01((2.2f - depth) / 2.2f) * clamp01((slopeMag - 0.03f) / 0.16f);
+
+            float foamNoise = 0.5f + 0.5f * (float) Math.sin(wx * 0.22f + wz * 0.31f + timeSeconds * 3.4f + waveOffset * 3.6f);
+            float foam = crest * (0.42f * breaking + 0.36f * falling + 0.22f * curvatureFoam);
+            foam = Math.max(foam, shoreFoam * 0.65f);
+            foam = clamp01(foam * (0.72f + 0.28f * foamNoise));
+
+            float altitude01 = clamp01((baseY - WATER_LEVEL) / 18f);
+            float deepR = lerp(0.04f, 0.07f, altitude01);
+            float deepG = lerp(0.18f, 0.28f, altitude01);
+            float deepB = lerp(0.32f, 0.46f, altitude01);
+            float shallowR = lerp(0.13f, 0.18f, altitude01);
+            float shallowG = lerp(0.42f, 0.50f, altitude01);
+            float shallowB = lerp(0.48f, 0.58f, altitude01);
 
             float baseR = deepR + (shallowR - deepR) * shallowMix;
             float baseG = deepG + (shallowG - deepG) * shallowMix;
             float baseB = deepB + (shallowB - deepB) * shallowMix;
 
-            float brightness = Math.min(1f, 0.45f + diffuse * 0.35f + crest * 0.30f);
-            glColor4f(baseR * (0.75f + brightness * 0.45f),
-                    baseG * (0.75f + brightness * 0.45f),
-                    baseB * (0.78f + brightness * 0.42f),
-                    0.62f);
+            float positionTint = (float) Math.sin((wx + wz) * 0.015f + timeSeconds * 0.25f) * 0.03f;
+            baseG = clamp01(baseG + positionTint * 0.6f + shallowMix * 0.04f);
+            baseB = clamp01(baseB + positionTint * 0.9f);
+            baseR = clamp01(baseR - positionTint * 0.2f);
+
+            float brightness = Math.min(1f, 0.42f + diffuse * 0.36f + crest * 0.16f + breaking * 0.18f);
+            float litR = baseR * (0.72f + brightness * 0.50f);
+            float litG = baseG * (0.72f + brightness * 0.50f);
+            float litB = baseB * (0.75f + brightness * 0.46f);
+
+            float foamMix = foam * 0.92f;
+            float finalR = litR + (1f - litR) * foamMix;
+            float finalG = litG + (1f - litG) * foamMix;
+            float finalB = litB + (1f - litB) * foamMix;
+            float alpha = Math.min(0.9f, 0.56f + shallowMix * 0.10f + foam * 0.22f);
+            glColor4f(finalR, finalG, finalB, alpha);
         }
 
         glTexCoord2f(wx * texScale, wz * texScale);
@@ -1081,12 +1112,39 @@ public class Chunk {
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds) {
-        float phaseA = ((wx + wz * 0.65f) / WATER_WAVE_LENGTH_1) + timeSeconds * WATER_WAVE_SPEED;
-        float phaseB = ((wx * -0.45f + wz) / WATER_WAVE_LENGTH_2) + timeSeconds * WATER_WAVE_SPEED * 1.55f;
-        float phaseC = ((wx * 0.2f - wz * 0.9f) / WATER_WAVE_LENGTH_3) + timeSeconds * WATER_WAVE_SPEED * 2.3f;
+        float currentBias = (float) Math.sin(wx * 0.03f + wz * 0.02f) * 0.18f;
+        float phaseA = ((wx + wz * 0.65f) / WATER_WAVE_LENGTH_1) + currentBias + timeSeconds * WATER_WAVE_SPEED;
+        float phaseB = ((wx * -0.45f + wz) / WATER_WAVE_LENGTH_2) + currentBias * 0.4f
+                + timeSeconds * WATER_WAVE_SPEED * 1.55f;
+        float phaseC = ((wx * 0.2f - wz * 0.9f) / WATER_WAVE_LENGTH_3) - currentBias * 0.6f
+                + timeSeconds * WATER_WAVE_SPEED * 2.3f;
         float primary = (float) (Math.sin(phaseA) * 0.5 + Math.sin(phaseB) * 0.32 + Math.sin(phaseC) * 0.18);
         float choppy = (float) Math.sin(phaseA * 1.8f + phaseC * 0.7f);
         return (primary + choppy * 0.2f) * WATER_WAVE_AMPLITUDE;
+    }
+
+    private float getWaveVelocity(float wx, float wz, float timeSeconds) {
+        float currentBias = (float) Math.sin(wx * 0.03f + wz * 0.02f) * 0.18f;
+        float phaseA = ((wx + wz * 0.65f) / WATER_WAVE_LENGTH_1) + currentBias + timeSeconds * WATER_WAVE_SPEED;
+        float phaseB = ((wx * -0.45f + wz) / WATER_WAVE_LENGTH_2) + currentBias * 0.4f
+                + timeSeconds * WATER_WAVE_SPEED * 1.55f;
+        float phaseC = ((wx * 0.2f - wz * 0.9f) / WATER_WAVE_LENGTH_3) - currentBias * 0.6f
+                + timeSeconds * WATER_WAVE_SPEED * 2.3f;
+
+        float dPhaseA = WATER_WAVE_SPEED;
+        float dPhaseB = WATER_WAVE_SPEED * 1.55f;
+        float dPhaseC = WATER_WAVE_SPEED * 2.3f;
+
+        float dPrimary = (float) (Math.cos(phaseA) * 0.5f * dPhaseA
+                + Math.cos(phaseB) * 0.32f * dPhaseB
+                + Math.cos(phaseC) * 0.18f * dPhaseC);
+        float choppyPhase = phaseA * 1.8f + phaseC * 0.7f;
+        float dChoppy = (float) (Math.cos(choppyPhase) * (1.8f * dPhaseA + 0.7f * dPhaseC));
+        return (dPrimary + dChoppy * 0.2f) * WATER_WAVE_AMPLITUDE;
+    }
+
+    private static float clamp01(float value) {
+        return Math.max(0f, Math.min(1f, value));
     }
 
     private void buildGrassBatch() {
