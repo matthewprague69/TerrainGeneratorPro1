@@ -118,6 +118,9 @@ public class TerrainManager {
     private static final int MAX_PENDING_RENDER_QUEUE = 4096;
     private static final int MAX_INFLIGHT_CHUNK_BUILDS = CHUNK_GENERATOR_THREADS * 8;
     private static final int MAX_INFLIGHT_FEATURE_BUILDS = FEATURE_GENERATOR_THREADS * 32;
+    private static final int WATER_SIM_UPDATES_NEAR_BUDGET = 18;
+    private static final int WATER_SIM_UPDATES_MID_BUDGET = 12;
+    private static final int WATER_SIM_UPDATES_FAR_BUDGET = 8;
 
     private static final float SNOW_DENT_MIN_STEP_DISTANCE = 0.24f;
     private static final float SNOW_DENT_RADIUS = 1.15f;
@@ -1118,6 +1121,9 @@ public class TerrainManager {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         int renderedWaterChunks = 0;
+        int nearUpdates = 0;
+        int midUpdates = 0;
+        int farUpdates = 0;
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
             if (dist > renderDist) {
@@ -1128,8 +1134,16 @@ public class TerrainManager {
             }
             if (!weatherSystem.isWaterFrozen()) {
                 int simulationCadenceFrames = getWaterSimulationCadenceFrames(dist);
-                if (waterSimulationFrameId % simulationCadenceFrames == 0) {
+                if (waterSimulationFrameId % simulationCadenceFrames == 0
+                        && canRunWaterSimulationUpdate(dist, nearUpdates, midUpdates, farUpdates)) {
                     c.updateWaterSimulation(baseWaterSimDt * simulationCadenceFrames);
+                    if (dist <= 2) {
+                        nearUpdates++;
+                    } else if (dist <= 6) {
+                        midUpdates++;
+                    } else {
+                        farUpdates++;
+                    }
                 }
             }
             c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
@@ -1138,6 +1152,17 @@ public class TerrainManager {
         }
         perfWaterChunksDrawn = renderedWaterChunks;
         recordStage(PipelineStage.DRAW_WATER, System.nanoTime() - start);
+    }
+
+    private static boolean canRunWaterSimulationUpdate(int chunkDistance,
+                                                      int nearUpdates, int midUpdates, int farUpdates) {
+        if (chunkDistance <= 2) {
+            return nearUpdates < WATER_SIM_UPDATES_NEAR_BUDGET;
+        }
+        if (chunkDistance <= 6) {
+            return midUpdates < WATER_SIM_UPDATES_MID_BUDGET;
+        }
+        return farUpdates < WATER_SIM_UPDATES_FAR_BUDGET;
     }
 
     private static int getWaterSimulationCadenceFrames(int chunkDistance) {

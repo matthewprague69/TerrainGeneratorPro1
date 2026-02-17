@@ -929,8 +929,6 @@ public class Chunk {
 
     private void buildWaterGeometry() {
         waterPatches.clear();
-        ensureWaterSimInitialized();
-        syncWaterSimEdgesFromNeighbors();
         int step = 1; // Keep water topology identical across chunks to avoid LOD border cracks.
 
         for (int z = 0; z < SIZE; z += step) {
@@ -943,15 +941,10 @@ public class Chunk {
                 float y01 = heights[x][z2];
                 float y11 = heights[x2][z2];
 
-                float d00 = waterSimChunk.getDepthAtGrid(x, z);
-                float d10 = waterSimChunk.getDepthAtGrid(x2, z);
-                float d01 = waterSimChunk.getDepthAtGrid(x, z2);
-                float d11 = waterSimChunk.getDepthAtGrid(x2, z2);
-
-                boolean oceanWet00 = d00 >= MIN_RENDERABLE_WATER_DEPTH && y00 < WATER_LEVEL + 0.02f;
-                boolean oceanWet10 = d10 >= MIN_RENDERABLE_WATER_DEPTH && y10 < WATER_LEVEL + 0.02f;
-                boolean oceanWet01 = d01 >= MIN_RENDERABLE_WATER_DEPTH && y01 < WATER_LEVEL + 0.02f;
-                boolean oceanWet11 = d11 >= MIN_RENDERABLE_WATER_DEPTH && y11 < WATER_LEVEL + 0.02f;
+                boolean oceanWet00 = y00 < WATER_LEVEL + 0.02f;
+                boolean oceanWet10 = y10 < WATER_LEVEL + 0.02f;
+                boolean oceanWet01 = y01 < WATER_LEVEL + 0.02f;
+                boolean oceanWet11 = y11 < WATER_LEVEL + 0.02f;
                 int oceanCorners = (oceanWet00 ? 1 : 0) + (oceanWet10 ? 1 : 0) + (oceanWet01 ? 1 : 0) + (oceanWet11 ? 1 : 0);
                 if (oceanCorners == 0) {
                     continue;
