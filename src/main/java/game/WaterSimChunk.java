@@ -12,6 +12,9 @@ public class WaterSimChunk {
     private final float[][] waterDepth;
     private final float[][] velX;
     private final float[][] velZ;
+    private final float[][] tmpDepth;
+    private final float[][] tmpVelX;
+    private final float[][] tmpVelZ;
 
     public WaterSimChunk(int gridSize) {
         this.gridSize = gridSize;
@@ -19,6 +22,9 @@ public class WaterSimChunk {
         this.waterDepth = new float[gridSize + 1][gridSize + 1];
         this.velX = new float[gridSize + 1][gridSize + 1];
         this.velZ = new float[gridSize + 1][gridSize + 1];
+        this.tmpDepth = new float[gridSize + 1][gridSize + 1];
+        this.tmpVelX = new float[gridSize + 1][gridSize + 1];
+        this.tmpVelZ = new float[gridSize + 1][gridSize + 1];
     }
 
     public void initializeFromTerrainAndSurface(float[][] terrainHeights, float[][] riverSurface, float waterLevel) {
@@ -72,6 +78,52 @@ public class WaterSimChunk {
         float ux = velX[xi][zi];
         float uz = velZ[xi][zi];
         return (float) Math.sqrt(ux * ux + uz * uz);
+    }
+
+    public void stepSimulation(float dt) {
+        float clampedDt = clamp(dt, 1.0f / 240.0f, 1.0f / 20.0f);
+        float g = 9.81f;
+        float friction = 1.35f;
+
+        for (int x = 0; x <= gridSize; x++) {
+            for (int z = 0; z <= gridSize; z++) {
+                int xl = Math.max(0, x - 1);
+                int xr = Math.min(gridSize, x + 1);
+                int zb = Math.max(0, z - 1);
+                int zf = Math.min(gridSize, z + 1);
+
+                float etaL = bedHeight[xl][z] + waterDepth[xl][z];
+                float etaR = bedHeight[xr][z] + waterDepth[xr][z];
+                float etaB = bedHeight[x][zb] + waterDepth[x][zb];
+                float etaF = bedHeight[x][zf] + waterDepth[x][zf];
+
+                float dEtaDx = (etaR - etaL) * 0.5f;
+                float dEtaDz = (etaF - etaB) * 0.5f;
+
+                float ux = velX[x][z] - g * dEtaDx * clampedDt;
+                float uz = velZ[x][z] - g * dEtaDz * clampedDt;
+
+                float damp = Math.max(0f, 1f - friction * clampedDt);
+                ux *= damp;
+                uz *= damp;
+
+                float fluxX = ux * waterDepth[x][z];
+                float fluxZ = uz * waterDepth[x][z];
+                float depth = waterDepth[x][z] - (fluxX + fluxZ) * 0.15f * clampedDt;
+
+                tmpVelX[x][z] = ux;
+                tmpVelZ[x][z] = uz;
+                tmpDepth[x][z] = Math.max(0f, depth);
+            }
+        }
+
+        for (int x = 0; x <= gridSize; x++) {
+            for (int z = 0; z <= gridSize; z++) {
+                waterDepth[x][z] = tmpDepth[x][z];
+                velX[x][z] = tmpVelX[x][z];
+                velZ[x][z] = tmpVelZ[x][z];
+            }
+        }
     }
 
     private static float lerp(float a, float b, float t) {

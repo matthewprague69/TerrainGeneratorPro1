@@ -1083,6 +1083,7 @@ public class TerrainManager {
     public void drawWater(float wx, float wz) {
         long start = System.nanoTime();
         float waterTimeSeconds = (float) (System.nanoTime() * 1.0e-9);
+        final float waterSimDt = 1.0f / 60.0f;
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         int renderedWaterChunks = 0;
@@ -1093,6 +1094,9 @@ public class TerrainManager {
             }
             if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
                 continue;
+            }
+            if (!weatherSystem.isWaterFrozen()) {
+                c.updateWaterSimulation(waterSimDt);
             }
             c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
                     weatherSystem.getIceThickness(), waterTimeSeconds);

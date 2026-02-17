@@ -1005,6 +1005,16 @@ public class Chunk {
         waterSimChunk.initializeFromTerrainAndSurface(heights, riverSurface, WATER_LEVEL);
     }
 
+    public void updateWaterSimulation(float dtSeconds) {
+        if (waterPatches.isEmpty()) {
+            return;
+        }
+        if (waterSimChunk == null) {
+            ensureWaterSimInitialized();
+        }
+        waterSimChunk.stepSimulation(dtSeconds);
+    }
+
     private void renderWaterSurface(float timeSeconds, boolean frozen) {
         if (waterPatches.isEmpty()) {
             return;
