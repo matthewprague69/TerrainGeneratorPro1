@@ -29,6 +29,8 @@ public class WaterSimChunk {
     private static final float SHORE_RUNUP_RISE_LIMIT = 2.4f;
     private static final float SHORE_SHEET_TRANSFER_MAX = 0.22f;
     private static final float SHORE_BREAKER_FOAM_BONUS = 0.42f;
+    private static final float SHORE_COLLISION_EDGE_RISE = 0.34f;
+    private static final float SHORE_INLAND_DEPTH_CAP = 0.22f;
 
     public WaterSimChunk(int gridSize) {
         this.gridSize = gridSize;
@@ -459,31 +461,77 @@ public class WaterSimChunk {
                 float wxNegX = Math.max(0f, -nx);
                 float wzPos = Math.max(0f, nz);
                 float wzNeg = Math.max(0f, -nz);
-                float wSum = wxPosX + wxNegX + wzPos + wzNeg;
+
+                float bed = bedHeight[x][z];
+                float wSum = 0f;
+                if (xr != x && wxPosX > 0f) {
+                    float rise = bedHeight[xr][z] - bed;
+                    float shoreTarget = Math.max(0f, bedHeight[xr][z] - maxSurface[xr][z]);
+                    if (rise <= SHORE_COLLISION_EDGE_RISE + tmpWaveMemory[x][z] * 0.08f && shoreTarget < SHORE_RUNUP_RISE_LIMIT * 0.75f) {
+                        wSum += wxPosX;
+                    }
+                }
+                if (xl != x && wxNegX > 0f) {
+                    float rise = bedHeight[xl][z] - bed;
+                    float shoreTarget = Math.max(0f, bedHeight[xl][z] - maxSurface[xl][z]);
+                    if (rise <= SHORE_COLLISION_EDGE_RISE + tmpWaveMemory[x][z] * 0.08f && shoreTarget < SHORE_RUNUP_RISE_LIMIT * 0.75f) {
+                        wSum += wxNegX;
+                    }
+                }
+                if (zf != z && wzPos > 0f) {
+                    float rise = bedHeight[x][zf] - bed;
+                    float shoreTarget = Math.max(0f, bedHeight[x][zf] - maxSurface[x][zf]);
+                    if (rise <= SHORE_COLLISION_EDGE_RISE + tmpWaveMemory[x][z] * 0.08f && shoreTarget < SHORE_RUNUP_RISE_LIMIT * 0.75f) {
+                        wSum += wzPos;
+                    }
+                }
+                if (zb != z && wzNeg > 0f) {
+                    float rise = bedHeight[x][zb] - bed;
+                    float shoreTarget = Math.max(0f, bedHeight[x][zb] - maxSurface[x][zb]);
+                    if (rise <= SHORE_COLLISION_EDGE_RISE + tmpWaveMemory[x][z] * 0.08f && shoreTarget < SHORE_RUNUP_RISE_LIMIT * 0.75f) {
+                        wSum += wzNeg;
+                    }
+                }
                 if (wSum < 0.0001f) {
                     continue;
                 }
 
                 float sent = 0f;
                 if (xr != x && wxPosX > 0f) {
-                    float share = transfer * (wxPosX / wSum);
-                    tmpDepthSpread[xr][z] += share;
-                    sent += share;
+                    float rise = bedHeight[xr][z] - bed;
+                    float shoreTarget = Math.max(0f, bedHeight[xr][z] - maxSurface[xr][z]);
+                    if (rise <= SHORE_COLLISION_EDGE_RISE + tmpWaveMemory[x][z] * 0.08f && shoreTarget < SHORE_RUNUP_RISE_LIMIT * 0.75f) {
+                        float share = transfer * (wxPosX / wSum);
+                        tmpDepthSpread[xr][z] += share;
+                        sent += share;
+                    }
                 }
                 if (xl != x && wxNegX > 0f) {
-                    float share = transfer * (wxNegX / wSum);
-                    tmpDepthSpread[xl][z] += share;
-                    sent += share;
+                    float rise = bedHeight[xl][z] - bed;
+                    float shoreTarget = Math.max(0f, bedHeight[xl][z] - maxSurface[xl][z]);
+                    if (rise <= SHORE_COLLISION_EDGE_RISE + tmpWaveMemory[x][z] * 0.08f && shoreTarget < SHORE_RUNUP_RISE_LIMIT * 0.75f) {
+                        float share = transfer * (wxNegX / wSum);
+                        tmpDepthSpread[xl][z] += share;
+                        sent += share;
+                    }
                 }
                 if (zf != z && wzPos > 0f) {
-                    float share = transfer * (wzPos / wSum);
-                    tmpDepthSpread[x][zf] += share;
-                    sent += share;
+                    float rise = bedHeight[x][zf] - bed;
+                    float shoreTarget = Math.max(0f, bedHeight[x][zf] - maxSurface[x][zf]);
+                    if (rise <= SHORE_COLLISION_EDGE_RISE + tmpWaveMemory[x][z] * 0.08f && shoreTarget < SHORE_RUNUP_RISE_LIMIT * 0.75f) {
+                        float share = transfer * (wzPos / wSum);
+                        tmpDepthSpread[x][zf] += share;
+                        sent += share;
+                    }
                 }
                 if (zb != z && wzNeg > 0f) {
-                    float share = transfer * (wzNeg / wSum);
-                    tmpDepthSpread[x][zb] += share;
-                    sent += share;
+                    float rise = bedHeight[x][zb] - bed;
+                    float shoreTarget = Math.max(0f, bedHeight[x][zb] - maxSurface[x][zb]);
+                    if (rise <= SHORE_COLLISION_EDGE_RISE + tmpWaveMemory[x][z] * 0.08f && shoreTarget < SHORE_RUNUP_RISE_LIMIT * 0.75f) {
+                        float share = transfer * (wzNeg / wSum);
+                        tmpDepthSpread[x][zb] += share;
+                        sent += share;
+                    }
                 }
 
                 float lateral = sent * (0.22f + 0.30f * tmpWaveMemory[x][z]) * shoreline;
@@ -519,6 +567,12 @@ public class WaterSimChunk {
                 waterDepth[x][z] = Math.max(0f, tmpDepthSpread[x][z]);
 
                 float bed = bedHeight[x][z];
+                float inlandRiseForCap = Math.max(0f, bed - maxSurface[x][z]);
+                if (inlandRiseForCap > 0f) {
+                    float cap = SHORE_INLAND_DEPTH_CAP * (1f - clamp(inlandRiseForCap / SHORE_RUNUP_RISE_LIMIT, 0f, 1f));
+                    waterDepth[x][z] = Math.min(waterDepth[x][z], cap);
+                }
+
                 float maxDepth = Math.max(0f, maxSurface[x][z] - bed);
                 float pressure = maxDepth > 0.0001f ? (tmpDepth[x][z] / maxDepth) : clamp(tmpDepth[x][z] / 0.18f, 0f, 1f);
                 float terrainCollisionDamp = 0.55f + 0.45f * clamp(pressure, 0f, 1f);
