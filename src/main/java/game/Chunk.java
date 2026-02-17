@@ -1127,19 +1127,10 @@ public class Chunk {
             float midR = lerp(0.10f, 0.18f, altitude01);
             float midG = lerp(0.37f, 0.56f, altitude01);
             float midB = lerp(0.56f, 0.82f, altitude01);
-            float shallowR = lerp(0.23f, 0.34f, altitude01);
-            float shallowG = lerp(0.60f, 0.74f, altitude01);
-            float shallowB = lerp(0.70f, 0.84f, altitude01);
-
-            float baseR = depthSmooth < 0.5f
-                    ? lerp(shallowR, midR, depthSmooth * 2f)
-                    : lerp(midR, deepR, (depthSmooth - 0.5f) * 2f);
-            float baseG = depthSmooth < 0.5f
-                    ? lerp(shallowG, midG, depthSmooth * 2f)
-                    : lerp(midG, deepG, (depthSmooth - 0.5f) * 2f);
-            float baseB = depthSmooth < 0.5f
-                    ? lerp(shallowB, midB, depthSmooth * 2f)
-                    : lerp(midB, deepB, (depthSmooth - 0.5f) * 2f);
+            // Keep shoreline color closer to body-water tone so shore is not visually treated as a separate no-wave zone.
+            float baseR = lerp(midR, deepR, depthSmooth * 0.82f);
+            float baseG = lerp(midG, deepG, depthSmooth * 0.82f);
+            float baseB = lerp(midB, deepB, depthSmooth * 0.82f);
 
             // Tie color to wave shape so crests/troughs read as water motion, not random tint patches.
             float trough = clamp01((-waveOffset) / (WATER_WAVE_AMPLITUDE * waveScale + 0.0001f));
@@ -1149,7 +1140,7 @@ public class Chunk {
 
             float positionTint = (float) Math.sin((wx + wz) * 0.015f + timeSeconds * 0.25f) * 0.035f;
             float terrainHeightTint = clamp01((terrainY - WATER_LEVEL + 6.0f) / 18.0f);
-            baseG = clamp01(baseG + positionTint * 0.6f + shorelineMix * 0.05f + terrainHeightTint * 0.03f);
+            baseG = clamp01(baseG + positionTint * 0.5f + shorelineMix * 0.02f + terrainHeightTint * 0.03f);
             baseB = clamp01(baseB + positionTint * 0.9f);
             baseR = clamp01(baseR - positionTint * 0.2f);
 
@@ -1211,14 +1202,15 @@ public class Chunk {
         // Preserve wave energy toward shore (with damping) so waves can reach terrain edges.
         float shallowBand = 1f - smoothstep01(clamp01((simulatedDepth - 0.18f) / 1.10f));
         float openWater = clamp01((simulatedDepth - 1.8f) / 7.0f);
-        float waveStrength = 0.36f + openWater * openWater * 0.70f;
+        // Do not fade waves out at shore; keep strong baseline amplitude everywhere.
+        float waveStrength = 0.95f + openWater * 0.35f;
         float vastWater = smoothstep01(clamp01((simulatedDepth - 4.0f) / 8.0f));
         float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
         float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
         float shoalingBoost = 1.0f + shallowBand * clamp01((terrainSlope - 0.06f) / 0.22f) * 0.95f;
-        float shoreDamping = 1.0f - shallowBand * 0.12f;
+        float shoreDamping = 1.0f;
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
-                * (0.10f + waveStrength * 0.46f * largeSwellBoost) * shoreDamping * shoalingBoost;
+                * (0.38f + waveStrength * 0.56f * largeSwellBoost) * shoreDamping * shoalingBoost;
 
         float minSurface = terrainHeight + 0.01f;
         float finalSurface = simulatedSurface + detailRipple;
@@ -1268,7 +1260,8 @@ public class Chunk {
     private static float getWaveScale(float baseWaterHeight, float terrainHeight) {
         float depth = Math.max(0f, baseWaterHeight - terrainHeight);
         float openWaterFactor = clamp01((depth - 0.8f) / 6.0f);
-        return 0.95f + openWaterFactor * 4.05f;
+        // Keep large waves active near shore; still allow a mild increase in deeper water.
+        return 2.75f + openWaterFactor * 2.25f;
     }
 
     private static float clamp01(float value) {
