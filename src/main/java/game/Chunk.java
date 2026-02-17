@@ -1103,17 +1103,16 @@ public class Chunk {
             float shorelineMix = 1f - depthSmooth;
             float shoreFoam = clamp01((1.0f - depth) / 1.0f) * clamp01((slopeMag - 0.10f) / 0.22f);
 
-            float foamNoise = 0.5f + 0.5f * (float) Math.sin(wx * 0.18f + wz * 0.24f + timeSeconds * 2.6f + waveOffset * 2.8f);
-            float collisionPattern = 0.5f + 0.5f * (float) Math.sin(wx * 0.18f + wz * 0.14f + timeSeconds * 2.1f)
-                    * (float) Math.sin(wx * -0.12f + wz * 0.22f - timeSeconds * 2.4f);
-            float collisionFoam = smoothstep01(clamp01((collisionPattern - 0.46f) / 0.34f))
-                    * clamp01((slopeMag - 0.07f) / 0.20f);
-            float largeBodyFoam = crest * clamp01((depth - 2.2f) / 5.0f);
-            float foam = crest * (0.86f * breaking + 0.58f * falling + 0.40f * curvatureFoam);
-            foam = Math.max(foam, shoreFoam * 0.58f);
-            foam = Math.max(foam, collisionFoam * (0.45f + 0.35f * foamNoise));
-            foam = Math.max(foam, largeBodyFoam * (0.50f + 0.50f * foamNoise));
-            foam = clamp01(foam * (0.94f + 0.22f * foamNoise));
+            float foamNoise = 0.5f + 0.5f * (float) Math.sin(wx * 0.11f + wz * 0.09f + timeSeconds * 1.8f + waveOffset * 2.1f);
+            float terrainSteepnessFoam = clamp01((slopeMag - 0.09f) / 0.18f) * clamp01((1.8f - depth) / 1.8f);
+            float crestCurvatureFoam = crest * (0.70f * breaking + 0.45f * falling + 0.42f * curvatureFoam);
+            float largeBodyFoam = crest * clamp01((depth - 2.6f) / 5.5f) * clamp01((slopeMag - 0.06f) / 0.16f);
+
+            // Foam placement is terrain/wave driven (height/depth/slope), not synthetic dot masks.
+            float foam = Math.max(crestCurvatureFoam, shoreFoam * 0.64f);
+            foam = Math.max(foam, terrainSteepnessFoam * 0.52f);
+            foam = Math.max(foam, largeBodyFoam * (0.50f + 0.38f * foamNoise));
+            foam = clamp01(foam * (0.92f + 0.14f * foamNoise));
 
             float altitude01 = clamp01((baseY - WATER_LEVEL) / 18f);
             float deepR = lerp(0.06f, 0.14f, altitude01);
