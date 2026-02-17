@@ -37,6 +37,8 @@ public class Player {
     private static final float WATER_IDLE_BOB_SPEED = 1.8f;
     private static final float WATER_FAST_MOVE_SINK_MAX = 0.22f;
     private static final float WATER_ENTRY_SINK_MAX = 0.38f;
+    private static final float WATER_WAVE_FOLLOW_FORCE = 11.5f;
+    private static final float WATER_IDLE_STICKINESS = 7.0f;
 
     private boolean wasInWater = false;
     private float previousWaterSurfaceY = Chunk.WATER_LEVEL;
@@ -127,7 +129,7 @@ public class Player {
                 previousWaterSurfaceY = waterSurfaceY;
             }
 
-            float waveLiftVelocity = (waterSurfaceY - previousWaterSurfaceY) * 5.5f;
+            float waveLiftVelocity = (waterSurfaceY - previousWaterSurfaceY) * WATER_WAVE_FOLLOW_FORCE;
             velocityY += waveLiftVelocity;
             previousWaterSurfaceY = waterSurfaceY;
 
@@ -142,6 +144,13 @@ public class Player {
             float idleBob = (float) Math.sin(time * WATER_IDLE_BOB_SPEED) * WATER_IDLE_BOB_AMPLITUDE;
             float targetSurfaceY = waterSurfaceY + eyeHeight - WATER_SURFACE_FLOAT_OFFSET + idleBob - entrySinkOffset;
             velocityY += (targetSurfaceY - y) * WATER_BUOYANCY * dt;
+
+            // When floating mostly still, directly follow wave trajectory to avoid looking anchored.
+            float movement01 = Math.min(1f, horizontalSpeed / 2.4f);
+            float input01 = (spacePressed || shiftPressed) ? 1f : 0f;
+            float active01 = Math.max(movement01, input01);
+            float idleFollow = (1f - active01) * Math.min(1f, dt * WATER_IDLE_STICKINESS);
+            y += (targetSurfaceY - y) * idleFollow;
 
             if (spacePressed) {
                 velocityY += SWIM_UP_ACCEL * dt;
