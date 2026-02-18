@@ -184,6 +184,7 @@ public class TerrainManager {
     private int grassDetailDistance;
     private int impostorAngleCount = 1;
     private int impostorQualityPreset = 1;
+    private int visualQualityPreset = 2;
     private int impostorHighQualityDistance = 10;
     private float windDirectionDegrees = 45f;
     private float windStrength = 0.5f;
@@ -207,6 +208,22 @@ public class TerrainManager {
     private int perfVisibleFeatures = 0;
     private Frustum lastCameraFrustum = null;
     private long waterSimulationFrameId = 0L;
+    private long visibleChunkFrameId = 0L;
+    private int visibleChunkFramePcx = Integer.MIN_VALUE;
+    private int visibleChunkFramePcz = Integer.MIN_VALUE;
+    private Frustum visibleChunkFrameFrustum = null;
+    private final List<ChunkDistanceEntry> visibleRenderChunks = new ArrayList<>();
+    private final List<ChunkDistanceEntry> visibleShadowChunks = new ArrayList<>();
+
+    private static final class ChunkDistanceEntry {
+        private final Chunk chunk;
+        private final int distance;
+
+        private ChunkDistanceEntry(Chunk chunk, int distance) {
+            this.chunk = chunk;
+            this.distance = distance;
+        }
+    }
 
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
         this(seed, scale, renderDist, renderDist - 1,  skyRenderer);
@@ -1089,23 +1106,17 @@ public class TerrainManager {
         long start = System.nanoTime();
         enableFogDynamic();
 
-        int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
-        int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        ensureVisibleChunkLists(wx, wz);
         int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
         int renderedTerrainChunks = 0;
         int renderedFeatures = 0;
-        for (Chunk c : chunks.values()) {
-            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > renderDist) {
-                continue;
-            }
-            if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
-                continue;
-            }
+        for (ChunkDistanceEntry entry : visibleRenderChunks) {
+            Chunk c = entry.chunk;
+            int dist = entry.distance;
             c.drawTerrainAndFeatures(dist, impostorDistance, grassDetailDistance,
-                    featureRenderDist, weatherSystem.getSnowCoverage());
+                    featureRenderDist, visualQualityPreset <= 0 ? 0f : weatherSystem.getSnowCoverage());
             renderedTerrainChunks++;
             renderedFeatures += c.getFeatures().size();
         }
@@ -1121,17 +1132,11 @@ public class TerrainManager {
         float waterTimeSeconds = (float) (System.nanoTime() * 1.0e-9);
         final float baseWaterSimDt = 1.0f / 60.0f;
         waterSimulationFrameId++;
-        int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
-        int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        ensureVisibleChunkLists(wx, wz);
         int renderedWaterChunks = 0;
-        for (Chunk c : chunks.values()) {
-            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > renderDist) {
-                continue;
-            }
-            if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
-                continue;
-            }
+        for (ChunkDistanceEntry entry : visibleRenderChunks) {
+            Chunk c = entry.chunk;
+            int dist = entry.distance;
             if (!weatherSystem.isWaterFrozen()) {
                 int simulationCadenceFrames = getWaterSimulationCadenceFrames(dist);
                 long chunkKey = key(c.cx, c.cz);
@@ -1160,17 +1165,14 @@ public class TerrainManager {
 
     public void drawDepth(float wx, float wz) {
         long start = System.nanoTime();
-        int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
-        int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        ensureVisibleChunkLists(wx, wz);
         int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
         int renderedDepthChunks = 0;
-        for (Chunk c : chunks.values()) {
-            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > shadowRenderDist) {
-                continue;
-            }
+        for (ChunkDistanceEntry entry : visibleShadowChunks) {
+            Chunk c = entry.chunk;
+            int dist = entry.distance;
             c.renderDepth(dist, impostorDistance, grassDetailDistance,
                     featureRenderDist);
             renderedDepthChunks++;
@@ -1201,6 +1203,33 @@ public class TerrainManager {
         glFogfv(GL_FOG_COLOR, fogColorBuffer);
 
         glHint(GL_FOG_HINT, GL_NICEST);
+    }
+
+    private void ensureVisibleChunkLists(float wx, float wz) {
+        int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
+        int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        if (visibleChunkFramePcx == pcx && visibleChunkFramePcz == pcz
+                && visibleChunkFrameFrustum == lastCameraFrustum) {
+            return;
+        }
+
+        visibleChunkFrameId++;
+        visibleChunkFramePcx = pcx;
+        visibleChunkFramePcz = pcz;
+        visibleChunkFrameFrustum = lastCameraFrustum;
+        visibleRenderChunks.clear();
+        visibleShadowChunks.clear();
+
+        for (Chunk c : chunks.values()) {
+            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+            boolean visible = lastCameraFrustum == null || isChunkVisible(lastCameraFrustum, c.cx, c.cz);
+            if (dist <= renderDist && visible) {
+                visibleRenderChunks.add(new ChunkDistanceEntry(c, dist));
+            }
+            if (dist <= shadowRenderDist && visible) {
+                visibleShadowChunks.add(new ChunkDistanceEntry(c, dist));
+            }
+        }
     }
 
     public float[] getFogSettings() {
@@ -1632,6 +1661,9 @@ public class TerrainManager {
     }
 
     public void renderWeatherEffects(float camX, float camY, float camZ) {
+        if (visualQualityPreset <= 0) {
+            return;
+        }
         float surfaceY = getHeight(camX, camZ);
         float minSurface = Chunk.WATER_LEVEL;
         if (weatherSystem.isWaterFrozen()) {
@@ -1640,6 +1672,14 @@ public class TerrainManager {
         surfaceY = Math.max(surfaceY, minSurface);
         float altitudeSnowStrength = Chunk.getAltitudeSnowCoverage(surfaceY);
         weatherSystem.renderPrecipitation(camX, camY, camZ, surfaceY, altitudeSnowStrength);
+    }
+
+    public void setVisualQualityPreset(int preset) {
+        visualQualityPreset = Math.max(0, Math.min(2, preset));
+    }
+
+    public int getVisualQualityPreset() {
+        return visualQualityPreset;
     }
 
     public int getSnowTexture() {
