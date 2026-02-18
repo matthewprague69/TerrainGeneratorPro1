@@ -124,6 +124,7 @@ public class Chunk {
     private static final float WATER_WAVE_LENGTH_2 = 9f;
     private static final float WATER_WAVE_LENGTH_3 = 4.8f;
     private static final float WATER_LARGE_SWELL_MULTIPLIER = 1.6f;
+    private static final float WATER_MEGA_SWELL_MULTIPLIER = 2.65f;
     private static final float WATER_FOAM_SLOPE_START = 0.10f;
     private static final float WATER_FOAM_SLOPE_RANGE = 0.24f;
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
@@ -1343,19 +1344,26 @@ public class Chunk {
             simulatedSpeed = waterSimChunk.sampleSpeed(localX, localZ);
         }
 
-        // Larger waves in deep/open water, but controlled to avoid unrealistic spikes.
-        float openWater = clamp01((simulatedDepth - 1.8f) / 7.0f);
+        // Amplify wave energy as water gets deeper/further from shore so open ocean builds visibly larger swells.
+        float openWater = clamp01((simulatedDepth - 1.35f) / 8.6f);
         float waveStrength = openWater * openWater;
-        float vastWater = smoothstep01(clamp01((simulatedDepth - 4.0f) / 8.0f));
-        float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
-        float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
+        float vastWater = smoothstep01(clamp01((simulatedDepth - 3.2f) / 8.8f));
+        float oceanCore = smoothstep01(clamp01((simulatedDepth - 7.0f) / 11.0f));
+        float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.18f));
+        float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.45f + velocityBoost * 0.55f);
+        float megaSwellBoost = 1.0f + (WATER_MEGA_SWELL_MULTIPLIER - 1.0f) * oceanCore * (0.60f + velocityBoost * 0.40f);
         float wetness = smoothstep01(clamp01(simulatedDepth / 0.30f));
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
-                * (waveStrength * 0.44f * largeSwellBoost) * wetness;
+                * (waveStrength * 0.54f * largeSwellBoost * megaSwellBoost) * wetness;
+
+        // Add a slower deep-water swell train that only appears once we're well into open ocean.
+        float megaPhase = ((wx * 0.56f + wz * 0.44f) / 34.0f) + timeSeconds * WATER_WAVE_SPEED * 0.45f;
+        float megaSwell = (float) Math.sin(megaPhase) * WATER_WAVE_AMPLITUDE * waveScale
+                * (0.30f * oceanCore * oceanCore * megaSwellBoost);
 
         float bedHeight = simulatedSurface - simulatedDepth;
         float minimumSurface = bedHeight + Math.min(simulatedDepth, MIN_RENDERABLE_WATER_DEPTH * 0.5f);
-        return Math.max(minimumSurface, simulatedSurface + detailRipple);
+        return Math.max(minimumSurface, simulatedSurface + detailRipple + megaSwell);
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {
@@ -1382,8 +1390,8 @@ public class Chunk {
 
     private static float getWaveScale(float baseWaterHeight, float terrainHeight) {
         float depth = Math.max(0f, baseWaterHeight - terrainHeight);
-        float openWaterFactor = clamp01((depth - 0.8f) / 6.0f);
-        return 0.95f + openWaterFactor * 4.05f;
+        float openWaterFactor = clamp01((depth - 0.65f) / 7.8f);
+        return 0.92f + openWaterFactor * 5.15f;
     }
 
     private static float clamp01(float value) {
