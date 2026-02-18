@@ -524,8 +524,8 @@ public class Chunk {
         } else {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            // Keep depth writes on for translucent water to reduce side-angle sorting artifacts.
-            glDepthMask(true);
+            // Disable depth writes for translucent water to avoid self-occlusion dark blocks at grazing angles.
+            glDepthMask(false);
 
             renderWaterSurface(waterTimeSeconds, false, chunkDistance, cameraWx, cameraWz);
         }
@@ -1239,7 +1239,9 @@ public class Chunk {
             float finalB = litB + (1f - litB) * foamMix;
 
             // Higher opacity to keep water clearly readable while still preserving some depth transparency.
-            float alpha = Math.min(0.99f, 0.77f + shorelineMix * 0.15f + foam * 0.20f + fresnel * 0.08f);
+            float sideOpacityBoost = smoothstep01(clamp01((1f - ny - 0.18f) / 0.60f));
+            float alpha = Math.min(0.99f,
+                    Math.max(0.84f, 0.77f + shorelineMix * 0.15f + foam * 0.20f + fresnel * 0.10f + sideOpacityBoost * 0.11f));
             glColor4f(finalR, finalG, finalB, alpha);
         }
 
