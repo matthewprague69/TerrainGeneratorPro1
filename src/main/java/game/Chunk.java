@@ -1055,6 +1055,9 @@ public class Chunk {
             return;
         }
 
+        ensureWaterSimInitialized();
+        syncWaterSimEdgesFromNeighbors();
+
         float texScale = 0.12f;
         float[] lightDir = manager.getLightDirection();
         float lx = -lightDir[0];
@@ -1064,33 +1067,43 @@ public class Chunk {
 
         glBegin(GL_TRIANGLES);
         for (WaterPatch patch : waterPatches) {
-            boolean wet1 = patch.depth1 >= MIN_RENDERABLE_WATER_DEPTH;
-            boolean wet2 = patch.depth2 >= MIN_RENDERABLE_WATER_DEPTH;
-            boolean wet3 = patch.depth3 >= MIN_RENDERABLE_WATER_DEPTH;
-            boolean wet4 = patch.depth4 >= MIN_RENDERABLE_WATER_DEPTH;
+            float surface1 = waterSimChunk.sampleSurface((patch.wx1 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float surface2 = waterSimChunk.sampleSurface((patch.wx2 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float surface3 = waterSimChunk.sampleSurface((patch.wx2 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+            float surface4 = waterSimChunk.sampleSurface((patch.wx1 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+
+            float depth1 = waterSimChunk.sampleDepth((patch.wx1 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float depth2 = waterSimChunk.sampleDepth((patch.wx2 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float depth3 = waterSimChunk.sampleDepth((patch.wx2 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+            float depth4 = waterSimChunk.sampleDepth((patch.wx1 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+
+            boolean wet1 = depth1 >= MIN_RENDERABLE_WATER_DEPTH;
+            boolean wet2 = depth2 >= MIN_RENDERABLE_WATER_DEPTH;
+            boolean wet3 = depth3 >= MIN_RENDERABLE_WATER_DEPTH;
+            boolean wet4 = depth4 >= MIN_RENDERABLE_WATER_DEPTH;
             if (!wet1 && !wet2 && !wet3 && !wet4) {
                 continue;
             }
 
-            float waveScale1 = getWaveScale(patch.wy1, patch.terrainY1);
-            float waveScale2 = getWaveScale(patch.wy2, patch.terrainY2);
-            float waveScale3 = getWaveScale(patch.wy3, patch.terrainY3);
-            float waveScale4 = getWaveScale(patch.wy4, patch.terrainY4);
+            float waveScale1 = getWaveScale(surface1, patch.terrainY1);
+            float waveScale2 = getWaveScale(surface2, patch.terrainY2);
+            float waveScale3 = getWaveScale(surface3, patch.terrainY3);
+            float waveScale4 = getWaveScale(surface4, patch.terrainY4);
 
             float waveAtten1 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx1, patch.wz1, cameraWx, cameraWz);
             float waveAtten2 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx2, patch.wz1, cameraWx, cameraWz);
             float waveAtten3 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx2, patch.wz2, cameraWx, cameraWz);
             float waveAtten4 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx1, patch.wz2, cameraWx, cameraWz);
 
-            float waveWy1 = (waveAtten1 <= 0f) ? patch.wy1 : getWaterHeightAt(patch.wy1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
-            float waveWy2 = (waveAtten2 <= 0f) ? patch.wy2 : getWaterHeightAt(patch.wy2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
-            float waveWy3 = (waveAtten3 <= 0f) ? patch.wy3 : getWaterHeightAt(patch.wy3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
-            float waveWy4 = (waveAtten4 <= 0f) ? patch.wy4 : getWaterHeightAt(patch.wy4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
+            float waveWy1 = (waveAtten1 <= 0f) ? surface1 : getWaterHeightAt(surface1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
+            float waveWy2 = (waveAtten2 <= 0f) ? surface2 : getWaterHeightAt(surface2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
+            float waveWy3 = (waveAtten3 <= 0f) ? surface3 : getWaterHeightAt(surface3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
+            float waveWy4 = (waveAtten4 <= 0f) ? surface4 : getWaterHeightAt(surface4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
 
-            float wy1 = lerp(patch.wy1, waveWy1, waveAtten1);
-            float wy2 = lerp(patch.wy2, waveWy2, waveAtten2);
-            float wy3 = lerp(patch.wy3, waveWy3, waveAtten3);
-            float wy4 = lerp(patch.wy4, waveWy4, waveAtten4);
+            float wy1 = lerp(surface1, waveWy1, waveAtten1);
+            float wy2 = lerp(surface2, waveWy2, waveAtten2);
+            float wy3 = lerp(surface3, waveWy3, waveAtten3);
+            float wy4 = lerp(surface4, waveWy4, waveAtten4);
 
             float invDx = 1f / Math.max(0.0001f, patch.wx2 - patch.wx1);
             float invDz = 1f / Math.max(0.0001f, patch.wz2 - patch.wz1);
@@ -1108,20 +1121,20 @@ public class Chunk {
 
             // Triangle 1: (1,2,3)
             if (wet1 && wet2 && wet3) {
-                submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
+                submitWaterVertex(patch.wx1, patch.wz1, wy1, surface1, patch.terrainY1,
                         timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature);
-                submitWaterVertex(patch.wx2, patch.wz1, wy2, patch.wy2, patch.terrainY2,
+                submitWaterVertex(patch.wx2, patch.wz1, wy2, surface2, patch.terrainY2,
                         timeSeconds, frozen, lx, ly, lz, texScale, waveScale2, dx2, dz2, curvature);
-                submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
+                submitWaterVertex(patch.wx2, patch.wz2, wy3, surface3, patch.terrainY3,
                         timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature);
             }
             // Triangle 2: (1,3,4)
             if (wet1 && wet3 && wet4) {
-                submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
+                submitWaterVertex(patch.wx1, patch.wz1, wy1, surface1, patch.terrainY1,
                         timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature);
-                submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
+                submitWaterVertex(patch.wx2, patch.wz2, wy3, surface3, patch.terrainY3,
                         timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature);
-                submitWaterVertex(patch.wx1, patch.wz2, wy4, patch.wy4, patch.terrainY4,
+                submitWaterVertex(patch.wx1, patch.wz2, wy4, surface4, patch.terrainY4,
                         timeSeconds, frozen, lx, ly, lz, texScale, waveScale4, dx4, dz4, curvature);
             }
         }
