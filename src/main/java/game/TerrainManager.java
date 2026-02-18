@@ -1117,16 +1117,18 @@ public class TerrainManager {
         waterSimulationFrameId++;
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        int waterRenderDist = getWaterRenderDistance();
+        int waterSimulationDist = Math.max(1, waterRenderDist - 2);
         int renderedWaterChunks = 0;
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > renderDist) {
+            if (dist > waterRenderDist) {
                 continue;
             }
             if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
                 continue;
             }
-            if (!weatherSystem.isWaterFrozen()) {
+            if (!weatherSystem.isWaterFrozen() && dist <= waterSimulationDist) {
                 int simulationCadenceFrames = getWaterSimulationCadenceFrames(dist);
                 if (waterSimulationFrameId % simulationCadenceFrames == 0) {
                     c.updateWaterSimulation(baseWaterSimDt * simulationCadenceFrames);
@@ -1138,6 +1140,14 @@ public class TerrainManager {
         }
         perfWaterChunksDrawn = renderedWaterChunks;
         recordStage(PipelineStage.DRAW_WATER, System.nanoTime() - start);
+    }
+
+    private int getWaterRenderDistance() {
+        int target = Math.max(3, renderDist - 2);
+        if (featureRenderDist > 0) {
+            target = Math.min(target, featureRenderDist + 2);
+        }
+        return Math.max(2, Math.min(renderDist, target));
     }
 
     private static int getWaterSimulationCadenceFrames(int chunkDistance) {
