@@ -489,7 +489,7 @@ public class Chunk {
 
     }
 
-    public void drawWater(boolean frozen, float snowCoverage, float iceThickness, float waterTimeSeconds, int chunkDistance, float cameraWx, float cameraWz) {
+    public void drawWater(boolean frozen, float snowCoverage, float iceThickness, float waterTimeSeconds, int chunkDistance, float cameraWx, float cameraWz, boolean animatedWater) {
         // Water geometry is built via the render-resource pipeline; avoid building it on the draw thread.
         if (waterPatches.isEmpty()) {
             return;
@@ -518,7 +518,7 @@ public class Chunk {
             float lightLuma = (lightColor[0] + lightColor[1] + lightColor[2]) / 3f;
             float iceBrightness = Math.max(0.16f, Math.min(1f, lightLuma * 1.1f));
             glColor4f(iceBrightness, iceBrightness, iceBrightness, 1.0f);
-            renderWaterSurface(0f, true, chunkDistance, cameraWx, cameraWz);
+            renderWaterSurface(0f, true, chunkDistance, cameraWx, cameraWz, animatedWater);
             glPopMatrix();
             glDisable(GL_POLYGON_OFFSET_FILL);
         } else {
@@ -527,7 +527,7 @@ public class Chunk {
             // Keep depth writes on to avoid see-through gaps between overlapping water triangles.
             glDepthMask(true);
 
-            renderWaterSurface(waterTimeSeconds, false, chunkDistance, cameraWx, cameraWz);
+            renderWaterSurface(waterTimeSeconds, false, chunkDistance, cameraWx, cameraWz, animatedWater);
         }
 
         glDisable(GL_FOG);
@@ -1055,7 +1055,7 @@ public class Chunk {
         return getWaterHeightAt(simulatedSurface, wx, wz, timeSeconds, false, waveScale);
     }
 
-    private void renderWaterSurface(float timeSeconds, boolean frozen, int chunkDistance, float cameraWx, float cameraWz) {
+    private void renderWaterSurface(float timeSeconds, boolean frozen, int chunkDistance, float cameraWx, float cameraWz, boolean animatedWater) {
         if (waterPatches.isEmpty()) {
             return;
         }
@@ -1095,10 +1095,11 @@ public class Chunk {
             float waveScale3 = getWaveScale(surface3, patch.terrainY3);
             float waveScale4 = getWaveScale(surface4, patch.terrainY4);
 
-            float waveAtten1 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx1, patch.wz1, cameraWx, cameraWz);
-            float waveAtten2 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx2, patch.wz1, cameraWx, cameraWz);
-            float waveAtten3 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx2, patch.wz2, cameraWx, cameraWz);
-            float waveAtten4 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx1, patch.wz2, cameraWx, cameraWz);
+            float waveAttenBase = (!animatedWater || frozen) ? 0f : getWaveAttenuationAtDistance(patch.wx1, patch.wz1, cameraWx, cameraWz);
+            float waveAtten1 = waveAttenBase;
+            float waveAtten2 = waveAttenBase;
+            float waveAtten3 = waveAttenBase;
+            float waveAtten4 = waveAttenBase;
 
             float waveWy1 = (waveAtten1 <= 0f) ? surface1 : getWaterHeightAt(surface1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
             float waveWy2 = (waveAtten2 <= 0f) ? surface2 : getWaterHeightAt(surface2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
