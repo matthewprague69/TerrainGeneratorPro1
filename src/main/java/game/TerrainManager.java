@@ -1061,6 +1061,10 @@ public class TerrainManager {
     }
 
     public float getWaterSurfaceHeight(float wx, float wz) {
+        if (weatherSystem.isWaterFrozen()) {
+            return Chunk.WATER_LEVEL + weatherSystem.getIceThickness();
+        }
+
         int cx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int cz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         Chunk c = chunks.get(key(cx, cz));

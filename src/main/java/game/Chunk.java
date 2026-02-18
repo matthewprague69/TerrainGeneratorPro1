@@ -1047,7 +1047,12 @@ public class Chunk {
         ensureWaterSimInitialized();
         float localX = wx / scale - cx * SIZE;
         float localZ = wz / scale - cz * SIZE;
-        return waterSimChunk.sampleSurface(localX, localZ);
+
+        float simulatedSurface = waterSimChunk.sampleSurface(localX, localZ);
+        float terrainHeight = getHeight(wx, wz);
+        float waveScale = getWaveScale(simulatedSurface, terrainHeight);
+        float timeSeconds = (float) (System.nanoTime() * 1.0e-9);
+        return getWaterHeightAt(simulatedSurface, wx, wz, timeSeconds, false, waveScale);
     }
 
     private void renderWaterSurface(float timeSeconds, boolean frozen, int chunkDistance, float cameraWx, float cameraWz) {
