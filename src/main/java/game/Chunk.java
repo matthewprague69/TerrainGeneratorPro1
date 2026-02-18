@@ -938,11 +938,11 @@ public class Chunk {
     }
 
     private void buildWaterGeometry() {
-        waterPatches.clear();
         ensureWaterSimInitialized();
         syncWaterSimEdgesFromNeighbors();
         int baseStep = Math.min(8, 1 << Math.max(0, lod));
         int edgeBand = Math.max(1, baseStep);
+        List<WaterPatch> nextWaterPatches = new ArrayList<>(Math.max(64, waterPatches.size()));
 
         for (int z = 0; z < SIZE; ) {
             int stepZ = (z < edgeBand || z >= SIZE - edgeBand) ? 1 : baseStep;
@@ -976,7 +976,7 @@ public class Chunk {
                 float wx2 = (cx * SIZE + x2) * scale;
                 float wz2 = (cz * SIZE + z2) * scale;
 
-                waterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2,
+                nextWaterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2,
                         y00 + d00, y10 + d10, y11 + d11, y01 + d01,
                         y00, y10, y11, y01,
                         d00, d10, d11, d01));
@@ -985,6 +985,29 @@ public class Chunk {
             }
             z = z2;
         }
+
+        if (nextWaterPatches.isEmpty() && !waterPatches.isEmpty() && hasRenderableWaterInSimulation()) {
+            // Keep previous water mesh if a transient rebuild produced no patches (prevents visible water flicker).
+            return;
+        }
+
+        waterPatches.clear();
+        waterPatches.addAll(nextWaterPatches);
+    }
+
+    private boolean hasRenderableWaterInSimulation() {
+        if (waterSimChunk == null) {
+            return false;
+        }
+        for (int z = 0; z <= SIZE; z++) {
+            for (int x = 0; x <= SIZE; x++) {
+                float depth = waterSimChunk.getDepthAtGrid(x, z);
+                if (depth >= MIN_RENDERABLE_WATER_DEPTH && heights[x][z] < WATER_LEVEL + 0.02f) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
 
