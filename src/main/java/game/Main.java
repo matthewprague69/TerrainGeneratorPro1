@@ -85,7 +85,10 @@ public class Main {
 
         sky = new SkyRenderer(); // create sky first
         terrain = new TerrainManager(1234L, 1f, 8, 4, sky); // pass sky into terrain manager
-        terrain.setShadowRenderDistance(10);
+
+        boolean weakGpu = isLikelyWeakGpu();
+        terrain.setShadowRenderDistance(weakGpu ? 7 : 10);
+        terrain.setQualityPreset(weakGpu ? 1 : 2);
 
         float half = Chunk.SIZE * terrain.getScale() * 0.5f;
         player = new Player(half, half, terrain);
@@ -102,9 +105,17 @@ public class Main {
         primaryMonitor = glfwGetPrimaryMonitor();
         glfwShowWindow(window);
 
-        shadowRenderer = new ShadowRenderer(2048);
+        shadowRenderer = new ShadowRenderer(isLikelyWeakGpu() ? 1024 : 2048);
     }
 
+
+    private boolean isLikelyWeakGpu() {
+        String renderer = glGetString(GL_RENDERER);
+        String vendor = glGetString(GL_VENDOR);
+        String gpu = ((renderer == null ? "" : renderer) + " " + (vendor == null ? "" : vendor)).toLowerCase(Locale.ROOT);
+        return gpu.contains("intel") || gpu.contains("uhd") || gpu.contains("iris") || gpu.contains("vega 3")
+                || gpu.contains("radeon r") || gpu.contains("mali") || gpu.contains("adreno");
+    }
     private void setupProjection() {
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
@@ -355,6 +366,8 @@ public class Main {
         drawMenuRow("Shadow render distance", terrain.getShadowRenderDistance(), panelX + 20, rowY,
                 mouseX, mouseY);
         rowY -= 40;
+        drawMenuRowText("Quality preset", getQualityPresetLabel(), panelX + 20, rowY, mouseX, mouseY);
+        rowY -= 40;
         drawMenuRowText("Fullscreen", fullscreen ? "ON" : "OFF", panelX + 20, rowY, mouseX, mouseY);
         rowY -= 40;
         drawMenuRowText("Resolution", getResolutionLabel(), panelX + 20, rowY, mouseX, mouseY);
@@ -482,7 +495,15 @@ public class Main {
             return;
         }
         rowY -= 40;
-        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 14);
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 14)) {
+            return;
+        }
+        rowY -= 40;
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 15)) {
+            return;
+        }
+        rowY -= 40;
+        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 16);
     }
 
     private boolean handleRowClick(double mouseX, double mouseY, float x, float y, int rowIndex) {
@@ -527,25 +548,28 @@ public class Main {
                 terrain.setShadowRenderDistance(terrain.getShadowRenderDistance() + delta);
                 break;
             case 8:
-                toggleFullscreen();
+                terrain.setQualityPreset(Math.max(0, Math.min(2, terrain.getQualityPreset() + delta)));
                 break;
             case 9:
-                changeResolution(delta);
+                toggleFullscreen();
                 break;
             case 10:
+                changeResolution(delta);
+                break;
+            case 11:
                 vsyncEnabled = !vsyncEnabled;
                 applyVSync();
                 break;
-            case 11:
+            case 12:
                 terrain.setWeatherType(adjustWeatherType(terrain.getWeatherType(), delta));
                 break;
-            case 12:
+            case 13:
                 terrain.setWindDirectionDegrees(terrain.getWindDirectionDegrees() + delta * 15f);
                 break;
-            case 13:
+            case 14:
                 terrain.setWindStrength(terrain.getWindStrength() + delta * 0.05f);
                 break;
-            case 14:
+            case 15:
                 sky.setTimeSpeed(sky.getTimeSpeed() + delta * 0.25f);
                 break;
             default:
@@ -591,6 +615,18 @@ public class Main {
 
     private String getImpostorQualityLabel() {
         switch (terrain.getImpostorQualityPreset()) {
+            case 2:
+                return "High";
+            case 1:
+                return "Medium";
+            default:
+                return "Low";
+        }
+    }
+
+
+    private String getQualityPresetLabel() {
+        switch (terrain.getQualityPreset()) {
             case 2:
                 return "High";
             case 1:

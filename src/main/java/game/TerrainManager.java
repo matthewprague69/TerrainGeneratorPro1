@@ -185,6 +185,10 @@ public class TerrainManager {
     private int impostorAngleCount = 1;
     private int impostorQualityPreset = 1;
     private int impostorHighQualityDistance = 10;
+    private int qualityPreset = 2;
+    private boolean snowLayerEnabled = true;
+    private boolean weatherEffectsEnabled = true;
+    private boolean animatedWaterEnabled = true;
     private float windDirectionDegrees = 45f;
     private float windStrength = 0.5f;
     private boolean renderDistanceDirty = true;
@@ -207,6 +211,9 @@ public class TerrainManager {
     private int perfVisibleFeatures = 0;
     private Frustum lastCameraFrustum = null;
     private long waterSimulationFrameId = 0L;
+    private final List<Chunk> frameVisibleTerrainChunks = new ArrayList<>();
+    private final List<Chunk> frameVisibleWaterChunks = new ArrayList<>();
+    private final List<Chunk> frameVisibleShadowChunks = new ArrayList<>();
 
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
         this(seed, scale, renderDist, renderDist - 1,  skyRenderer);
@@ -243,6 +250,7 @@ public class TerrainManager {
             perfStageNanos.put(stage, 0L);
             perfStageCalls.put(stage, 0);
         }
+        applyQualityPresetInternal(qualityPreset);
     }
 
     private void resetPerformanceFrame() {
@@ -341,6 +349,7 @@ public class TerrainManager {
             stageStart = System.nanoTime();
             processPendingFeatureGenerations(pcx, pcz);
             recordStage(PipelineStage.PROCESS_PENDING_FEATURE_GENERATIONS, System.nanoTime() - stageStart);
+            rebuildVisibleChunkLists(pcx, pcz, frustum);
             perfTotalUpdateNanos = System.nanoTime() - updateStart;
             return;
         }
@@ -359,6 +368,8 @@ public class TerrainManager {
         stageStart = System.nanoTime();
         reprioritizePendingQueues(pcx, pcz, frustum);
         recordStage(PipelineStage.REPRIORITIZE_QUEUES, System.nanoTime() - stageStart);
+
+        rebuildVisibleChunkLists(pcx, pcz, frustum);
 
         // Generate/unload features based on featureRenderDist
         stageStart = System.nanoTime();
@@ -397,7 +408,25 @@ public class TerrainManager {
         stageStart = System.nanoTime();
         processPendingFeatureGenerations(pcx, pcz);
         recordStage(PipelineStage.PROCESS_PENDING_FEATURE_GENERATIONS, System.nanoTime() - stageStart);
+        rebuildVisibleChunkLists(pcx, pcz, frustum);
         perfTotalUpdateNanos = System.nanoTime() - updateStart;
+    }
+
+    private void rebuildVisibleChunkLists(int pcx, int pcz, Frustum frustum) {
+        frameVisibleTerrainChunks.clear();
+        frameVisibleWaterChunks.clear();
+        frameVisibleShadowChunks.clear();
+        for (Chunk c : chunks.values()) {
+            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+            boolean visible = frustum == null || isChunkVisible(frustum, c.cx, c.cz);
+            if (visible && dist <= renderDist) {
+                frameVisibleTerrainChunks.add(c);
+                frameVisibleWaterChunks.add(c);
+            }
+            if (dist <= shadowRenderDist) {
+                frameVisibleShadowChunks.add(c);
+            }
+        }
     }
 
     private void updateNeededChunks(int pcx, int pcz, int prevChunkX, int prevChunkZ) {
@@ -1096,16 +1125,10 @@ public class TerrainManager {
 
         int renderedTerrainChunks = 0;
         int renderedFeatures = 0;
-        for (Chunk c : chunks.values()) {
+        for (Chunk c : frameVisibleTerrainChunks) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > renderDist) {
-                continue;
-            }
-            if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
-                continue;
-            }
             c.drawTerrainAndFeatures(dist, impostorDistance, grassDetailDistance,
-                    featureRenderDist, weatherSystem.getSnowCoverage());
+                    featureRenderDist, snowLayerEnabled ? weatherSystem.getSnowCoverage() : 0f);
             renderedTerrainChunks++;
             renderedFeatures += c.getFeatures().size();
         }
@@ -1124,14 +1147,8 @@ public class TerrainManager {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         int renderedWaterChunks = 0;
-        for (Chunk c : chunks.values()) {
+        for (Chunk c : frameVisibleWaterChunks) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > renderDist) {
-                continue;
-            }
-            if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
-                continue;
-            }
             if (!weatherSystem.isWaterFrozen()) {
                 int simulationCadenceFrames = getWaterSimulationCadenceFrames(dist);
                 long chunkKey = key(c.cx, c.cz);
@@ -1141,7 +1158,7 @@ public class TerrainManager {
                 }
             }
             c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
-                    weatherSystem.getIceThickness(), waterTimeSeconds, dist, wx, wz);
+                    weatherSystem.getIceThickness(), waterTimeSeconds, dist, wx, wz, animatedWaterEnabled);
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;
@@ -1166,11 +1183,8 @@ public class TerrainManager {
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
         int renderedDepthChunks = 0;
-        for (Chunk c : chunks.values()) {
+        for (Chunk c : frameVisibleShadowChunks) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > shadowRenderDist) {
-                continue;
-            }
             c.renderDepth(dist, impostorDistance, grassDetailDistance,
                     featureRenderDist);
             renderedDepthChunks++;
@@ -1632,6 +1646,9 @@ public class TerrainManager {
     }
 
     public void renderWeatherEffects(float camX, float camY, float camZ) {
+        if (!weatherEffectsEnabled) {
+            return;
+        }
         float surfaceY = getHeight(camX, camZ);
         float minSurface = Chunk.WATER_LEVEL;
         if (weatherSystem.isWaterFrozen()) {
@@ -1648,6 +1665,39 @@ public class TerrainManager {
 
     public float getIceThickness() {
         return weatherSystem.getIceThickness();
+    }
+
+    public void setQualityPreset(int preset) {
+        qualityPreset = Math.max(0, Math.min(2, preset));
+        applyQualityPresetInternal(qualityPreset);
+    }
+
+    public int getQualityPreset() {
+        return qualityPreset;
+    }
+
+    public boolean isAnimatedWaterEnabled() {
+        return animatedWaterEnabled;
+    }
+
+    private void applyQualityPresetInternal(int preset) {
+        if (preset <= 0) {
+            snowLayerEnabled = false;
+            weatherEffectsEnabled = false;
+            animatedWaterEnabled = false;
+            impostorQualityPreset = Math.min(impostorQualityPreset, 0);
+            return;
+        }
+        if (preset == 1) {
+            snowLayerEnabled = true;
+            weatherEffectsEnabled = false;
+            animatedWaterEnabled = true;
+            impostorQualityPreset = Math.min(impostorQualityPreset, 1);
+            return;
+        }
+        snowLayerEnabled = true;
+        weatherEffectsEnabled = true;
+        animatedWaterEnabled = true;
     }
 
     public int getIceTexture() {
