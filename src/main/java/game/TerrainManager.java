@@ -190,6 +190,7 @@ public class TerrainManager {
     private int lastUpdateChunkZ = Integer.MIN_VALUE;
     private final long seed;
     private static final int BIOME_WEIGHT_REGION_SIZE = 4;
+    private static final int MAX_WATER_RENDER_DISTANCE = 16;
 
     private final Map<String, Integer> textureMap = new HashMap<>();
     private final int snowTex;
@@ -1118,22 +1119,26 @@ public class TerrainManager {
         int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         int renderedWaterChunks = 0;
+        int waterRenderDist = Math.min(renderDist, MAX_WATER_RENDER_DISTANCE);
+        boolean frozen = weatherSystem.isWaterFrozen();
+        float snowCoverage = weatherSystem.getWaterSnowCoverage();
+        float iceThickness = weatherSystem.getIceThickness();
+
         for (Chunk c : chunks.values()) {
             int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > renderDist) {
+            if (dist > waterRenderDist) {
                 continue;
             }
             if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
                 continue;
             }
-            if (!weatherSystem.isWaterFrozen()) {
+            if (!frozen) {
                 int simulationCadenceFrames = getWaterSimulationCadenceFrames(dist);
                 if (waterSimulationFrameId % simulationCadenceFrames == 0) {
                     c.updateWaterSimulation(baseWaterSimDt * simulationCadenceFrames);
                 }
             }
-            c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
-                    weatherSystem.getIceThickness(), waterTimeSeconds);
+            c.drawWater(frozen, snowCoverage, iceThickness, waterTimeSeconds);
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;
@@ -1144,10 +1149,13 @@ public class TerrainManager {
         if (chunkDistance <= 2) {
             return 1;
         }
-        if (chunkDistance <= 6) {
+        if (chunkDistance <= 5) {
             return 2;
         }
-        return 4;
+        if (chunkDistance <= 9) {
+            return 4;
+        }
+        return 8;
     }
 
     public void drawDepth(float wx, float wz) {
