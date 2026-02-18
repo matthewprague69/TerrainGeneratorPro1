@@ -130,6 +130,7 @@ public class Chunk {
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
     private static final float WATER_FOAM_FALL_RANGE = 1.55f;
     private static final float MIN_RENDERABLE_WATER_DEPTH = 0.06f;
+    private static final float WATER_EDGE_SYNC_BLEND_SOFT = 0.28f;
     private static final LinkedHashMap<String, ImpostorEntry> IMPOSTOR_TEXTURES =
             new LinkedHashMap<>(256, 0.75f, true);
 
@@ -944,7 +945,7 @@ public class Chunk {
     private void buildWaterGeometry() {
         List<WaterPatch> nextWaterPatches = new ArrayList<>();
         ensureWaterSimInitialized();
-        syncWaterSimEdgesFromNeighbors();
+        syncWaterSimEdgesFromNeighbors(1f);
         int baseStep = Math.min(8, 1 << Math.max(0, lod));
         int edgeBand = Math.max(1, baseStep);
 
@@ -1006,26 +1007,26 @@ public class Chunk {
         }
     }
 
-    private void syncWaterSimEdgesFromNeighbors() {
+    private void syncWaterSimEdgesFromNeighbors(float blendFactor) {
         if (waterSimChunk == null) {
             return;
         }
 
         Chunk left = manager.getChunk(cx - 1, cz);
         if (left != null && left.waterSimChunk != null) {
-            waterSimChunk.blendLeftEdgeFrom(left.waterSimChunk);
+            waterSimChunk.blendLeftEdgeFrom(left.waterSimChunk, blendFactor);
         }
         Chunk right = manager.getChunk(cx + 1, cz);
         if (right != null && right.waterSimChunk != null) {
-            waterSimChunk.blendRightEdgeFrom(right.waterSimChunk);
+            waterSimChunk.blendRightEdgeFrom(right.waterSimChunk, blendFactor);
         }
         Chunk top = manager.getChunk(cx, cz - 1);
         if (top != null && top.waterSimChunk != null) {
-            waterSimChunk.blendTopEdgeFrom(top.waterSimChunk);
+            waterSimChunk.blendTopEdgeFrom(top.waterSimChunk, blendFactor);
         }
         Chunk bottom = manager.getChunk(cx, cz + 1);
         if (bottom != null && bottom.waterSimChunk != null) {
-            waterSimChunk.blendBottomEdgeFrom(bottom.waterSimChunk);
+            waterSimChunk.blendBottomEdgeFrom(bottom.waterSimChunk, blendFactor);
         }
     }
 
@@ -1033,11 +1034,14 @@ public class Chunk {
         if (waterPatches.isEmpty()) {
             return;
         }
+        boolean wasDirty = waterSimDirty;
         ensureWaterSimInitialized();
-        syncWaterSimEdgesFromNeighbors();
+
+        // New chunks should quickly stitch to existing neighbors, but ongoing updates use soft blending
+        // so stale far-Lod neighbors do not hard-reset active edge simulation every frame.
+        float edgeBlend = wasDirty ? 1f : WATER_EDGE_SYNC_BLEND_SOFT;
+        syncWaterSimEdgesFromNeighbors(edgeBlend);
         waterSimChunk.stepSimulation(dtSeconds);
-        // Re-sync borders after stepping to keep neighboring chunk seams watertight.
-        syncWaterSimEdgesFromNeighbors();
     }
 
     public float getWaterDepthAtWorld(float wx, float wz) {
@@ -1049,7 +1053,7 @@ public class Chunk {
 
     public void disturbWaterAtWorld(float wx, float wz, float radiusWorld, float impulse) {
         ensureWaterSimInitialized();
-        syncWaterSimEdgesFromNeighbors();
+        syncWaterSimEdgesFromNeighbors(WATER_EDGE_SYNC_BLEND_SOFT);
 
         float localX = wx / scale - cx * SIZE;
         float localZ = wz / scale - cz * SIZE;
@@ -1080,7 +1084,7 @@ public class Chunk {
 
         ensureWaterSimInitialized();
         if (chunkDistance <= 10) {
-            syncWaterSimEdgesFromNeighbors();
+            syncWaterSimEdgesFromNeighbors(WATER_EDGE_SYNC_BLEND_SOFT);
         }
 
         float texScale = 0.12f;

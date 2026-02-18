@@ -139,7 +139,12 @@ public class WaterSimChunk {
         return gridSize;
     }
 
-    public void blendLeftEdgeFrom(WaterSimChunk neighbor) {
+    private static float blendValue(float current, float incoming, float blendFactor) {
+        float t = clamp(blendFactor, 0f, 1f);
+        return current + (incoming - current) * t;
+    }
+
+    public void blendLeftEdgeFrom(WaterSimChunk neighbor, float blendFactor) {
         if (neighbor == null || neighbor.gridSize != gridSize) {
             return;
         }
@@ -147,14 +152,18 @@ public class WaterSimChunk {
             float nDepth = neighbor.waterDepth[gridSize][z];
             float nUx = neighbor.velX[gridSize][z];
             float nUz = neighbor.velZ[gridSize][z];
-            waterDepth[0][z] = nDepth;
-            velX[0][z] = nUx;
-            velZ[0][z] = nUz;
-            disturbance[0][z] = neighbor.disturbance[gridSize][z];
+            waterDepth[0][z] = blendValue(waterDepth[0][z], nDepth, blendFactor);
+            velX[0][z] = blendValue(velX[0][z], nUx, blendFactor);
+            velZ[0][z] = blendValue(velZ[0][z], nUz, blendFactor);
+            disturbance[0][z] = blendValue(disturbance[0][z], neighbor.disturbance[gridSize][z], blendFactor);
         }
     }
 
-    public void blendRightEdgeFrom(WaterSimChunk neighbor) {
+    public void blendLeftEdgeFrom(WaterSimChunk neighbor) {
+        blendLeftEdgeFrom(neighbor, 1f);
+    }
+
+    public void blendRightEdgeFrom(WaterSimChunk neighbor, float blendFactor) {
         if (neighbor == null || neighbor.gridSize != gridSize) {
             return;
         }
@@ -162,14 +171,18 @@ public class WaterSimChunk {
             float nDepth = neighbor.waterDepth[0][z];
             float nUx = neighbor.velX[0][z];
             float nUz = neighbor.velZ[0][z];
-            waterDepth[gridSize][z] = nDepth;
-            velX[gridSize][z] = nUx;
-            velZ[gridSize][z] = nUz;
-            disturbance[gridSize][z] = neighbor.disturbance[0][z];
+            waterDepth[gridSize][z] = blendValue(waterDepth[gridSize][z], nDepth, blendFactor);
+            velX[gridSize][z] = blendValue(velX[gridSize][z], nUx, blendFactor);
+            velZ[gridSize][z] = blendValue(velZ[gridSize][z], nUz, blendFactor);
+            disturbance[gridSize][z] = blendValue(disturbance[gridSize][z], neighbor.disturbance[0][z], blendFactor);
         }
     }
 
-    public void blendTopEdgeFrom(WaterSimChunk neighbor) {
+    public void blendRightEdgeFrom(WaterSimChunk neighbor) {
+        blendRightEdgeFrom(neighbor, 1f);
+    }
+
+    public void blendTopEdgeFrom(WaterSimChunk neighbor, float blendFactor) {
         if (neighbor == null || neighbor.gridSize != gridSize) {
             return;
         }
@@ -177,14 +190,18 @@ public class WaterSimChunk {
             float nDepth = neighbor.waterDepth[x][gridSize];
             float nUx = neighbor.velX[x][gridSize];
             float nUz = neighbor.velZ[x][gridSize];
-            waterDepth[x][0] = nDepth;
-            velX[x][0] = nUx;
-            velZ[x][0] = nUz;
-            disturbance[x][0] = neighbor.disturbance[x][gridSize];
+            waterDepth[x][0] = blendValue(waterDepth[x][0], nDepth, blendFactor);
+            velX[x][0] = blendValue(velX[x][0], nUx, blendFactor);
+            velZ[x][0] = blendValue(velZ[x][0], nUz, blendFactor);
+            disturbance[x][0] = blendValue(disturbance[x][0], neighbor.disturbance[x][gridSize], blendFactor);
         }
     }
 
-    public void blendBottomEdgeFrom(WaterSimChunk neighbor) {
+    public void blendTopEdgeFrom(WaterSimChunk neighbor) {
+        blendTopEdgeFrom(neighbor, 1f);
+    }
+
+    public void blendBottomEdgeFrom(WaterSimChunk neighbor, float blendFactor) {
         if (neighbor == null || neighbor.gridSize != gridSize) {
             return;
         }
@@ -192,11 +209,15 @@ public class WaterSimChunk {
             float nDepth = neighbor.waterDepth[x][0];
             float nUx = neighbor.velX[x][0];
             float nUz = neighbor.velZ[x][0];
-            waterDepth[x][gridSize] = nDepth;
-            velX[x][gridSize] = nUx;
-            velZ[x][gridSize] = nUz;
-            disturbance[x][gridSize] = neighbor.disturbance[x][0];
+            waterDepth[x][gridSize] = blendValue(waterDepth[x][gridSize], nDepth, blendFactor);
+            velX[x][gridSize] = blendValue(velX[x][gridSize], nUx, blendFactor);
+            velZ[x][gridSize] = blendValue(velZ[x][gridSize], nUz, blendFactor);
+            disturbance[x][gridSize] = blendValue(disturbance[x][gridSize], neighbor.disturbance[x][0], blendFactor);
         }
+    }
+
+    public void blendBottomEdgeFrom(WaterSimChunk neighbor) {
+        blendBottomEdgeFrom(neighbor, 1f);
     }
 
 
