@@ -1296,7 +1296,9 @@ public class Chunk {
         float vastWater = smoothstep01(clamp01((simulatedDepth - 4.0f) / 8.0f));
         float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
         float windStrength = manager.getWindStrength();
-        float windAmplitudeBoost = 0.75f + windStrength * 1.15f;
+        float windCalmToStorm = smoothstep01(windStrength);
+        // Keep water almost flat at 0 wind, then ramp quickly as wind rises.
+        float windAmplitudeBoost = 0.005f + windCalmToStorm * 1.995f;
         float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
         float wetness = smoothstep01(clamp01(simulatedDepth / 0.30f));
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
