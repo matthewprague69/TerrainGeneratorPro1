@@ -541,10 +541,6 @@ public class TerrainManager {
                 if (!needsBuild) {
                     continue;
                 }
-                boolean visible = isChunkVisible(frustum, cx, cz);
-                if (!visible && dist > LOD_PRIORITY_RADIUS) {
-                    continue;
-                }
                 if (rebuiltPending.size() >= MAX_PENDING_CHUNK_QUEUE && dist > LOD_PRIORITY_RADIUS) {
                     continue;
                 }
@@ -672,7 +668,7 @@ public class TerrainManager {
             return;
         }
 
-        seedVisibleLodMismatches(pcx, pcz, frustum);
+        seedLodMismatches(pcx, pcz, frustum);
 
         int backlog = pendingChunks.size();
         int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
@@ -703,16 +699,22 @@ public class TerrainManager {
         List<Long> nearVisible = new ArrayList<>();
         List<Long> upgradeVisible = new ArrayList<>();
         List<Long> farVisible = new ArrayList<>();
+        List<Long> nearHidden = new ArrayList<>();
+        List<Long> farHidden = new ArrayList<>();
 
         for (long key : pendingChunks) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            if (!isChunkVisible(frustum, cx, cz)) {
-                continue;
-            }
+            boolean visible = isChunkVisible(frustum, cx, cz);
             int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
             if (isUpgradeRequest(key)) {
                 upgradeVisible.add(key);
+            } else if (!visible) {
+                if (dist <= LOD_PRIORITY_RADIUS) {
+                    nearHidden.add(key);
+                } else {
+                    farHidden.add(key);
+                }
             } else if (dist <= LOD_PRIORITY_RADIUS) {
                 nearVisible.add(key);
             } else {
@@ -723,6 +725,8 @@ public class TerrainManager {
         upgradeVisible.sort(priorityComparator);
         nearVisible.sort(priorityComparator);
         farVisible.sort(priorityComparator);
+        nearHidden.sort(priorityComparator);
+        farHidden.sort(priorityComparator);
 
         int processed = 0;
         int nearBudget = Math.min(budget, Math.max(LOD_PRIORITY_MIN_BUDGET, (budget * 2) / 3));
@@ -745,11 +749,29 @@ public class TerrainManager {
             }
         }
 
+        for (long key : nearHidden) {
+            if (processed >= nearBudget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                break;
+            }
+            if (tryDispatchChunkGeneration(key, true)) {
+                processed++;
+            }
+        }
+
         if (processed >= budget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
             return;
         }
 
         for (long key : farVisible) {
+            if (processed >= budget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
+                break;
+            }
+            if (tryDispatchChunkGeneration(key, false)) {
+                processed++;
+            }
+        }
+
+        for (long key : farHidden) {
             if (processed >= budget || System.nanoTime() - start > CHUNK_BUDGET_NS) {
                 break;
             }
@@ -765,14 +787,15 @@ public class TerrainManager {
         return existing != null && pendingLod != null && pendingLod < existing.getLOD();
     }
 
-    private void seedVisibleLodMismatches(int pcx, int pcz, Frustum frustum) {
+    private void seedLodMismatches(int pcx, int pcz, Frustum frustum) {
         for (long key : neededKeys) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            if (!isChunkVisible(frustum, cx, cz)) {
+            boolean visible = frustum == null || isChunkVisible(frustum, cx, cz);
+            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            if (!visible && dist > cacheRenderDist) {
                 continue;
             }
-            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
             int targetLOD = computeTargetLod(dist);
             Chunk existing = chunks.get(key);
             if (existing == null || existing.getLOD() != targetLOD) {
