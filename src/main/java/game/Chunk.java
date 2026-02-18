@@ -62,6 +62,8 @@ public class Chunk {
     private final int lod;
 
     private final float[][] heights = new float[SIZE + 1][SIZE + 1];
+    private float cachedMinHeight = Float.POSITIVE_INFINITY;
+    private float cachedMaxHeight = Float.NEGATIVE_INFINITY;
     private float cachedMaxAltitudeSnowCoverage = -1f;
     private final List<Feature> features = new ArrayList<>();
     private final boolean[][] featureMask = new boolean[SIZE][SIZE];
@@ -143,10 +145,15 @@ public class Chunk {
         private final float terrainY2;
         private final float terrainY3;
         private final float terrainY4;
+        private final float depth1;
+        private final float depth2;
+        private final float depth3;
+        private final float depth4;
 
         private WaterPatch(float wx1, float wz1, float wx2, float wz2,
                            float wy1, float wy2, float wy3, float wy4,
-                           float terrainY1, float terrainY2, float terrainY3, float terrainY4) {
+                           float terrainY1, float terrainY2, float terrainY3, float terrainY4,
+                           float depth1, float depth2, float depth3, float depth4) {
             this.wx1 = wx1;
             this.wz1 = wz1;
             this.wx2 = wx2;
@@ -159,6 +166,10 @@ public class Chunk {
             this.terrainY2 = terrainY2;
             this.terrainY3 = terrainY3;
             this.terrainY4 = terrainY4;
+            this.depth1 = depth1;
+            this.depth2 = depth2;
+            this.depth3 = depth3;
+            this.depth4 = depth4;
         }
     }
 
@@ -474,17 +485,19 @@ public class Chunk {
         if (generateFeatures)
             generateFeatures();
         stitchEdges();
+        recomputeTerrainBounds();
         buildTerrainBuffers();
         recalculateHeavyFeatureCount();
         buildFeatureBatches();
 
     }
 
-    public void drawWater(boolean frozen, float snowCoverage, float iceThickness, float waterTimeSeconds) {
-        if (!renderResourcesBuilt && waterPatches.isEmpty()) {
-            stitchEdges();
-            buildWaterDisplayList();
+    public void drawWater(boolean frozen, float snowCoverage, float iceThickness, float waterTimeSeconds, int chunkDistance, float cameraWx, float cameraWz) {
+        // Water geometry is built via the render-resource pipeline; avoid building it on the draw thread.
+        if (waterPatches.isEmpty()) {
+            return;
         }
+
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
         glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);
@@ -508,16 +521,16 @@ public class Chunk {
             float lightLuma = (lightColor[0] + lightColor[1] + lightColor[2]) / 3f;
             float iceBrightness = Math.max(0.16f, Math.min(1f, lightLuma * 1.1f));
             glColor4f(iceBrightness, iceBrightness, iceBrightness, 1.0f);
-            renderWaterSurface(0f, true);
+            renderWaterSurface(0f, true, chunkDistance, cameraWx, cameraWz);
             glPopMatrix();
             glDisable(GL_POLYGON_OFFSET_FILL);
         } else {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            // Keep depth writes on for translucent water to reduce side-angle sorting artifacts.
+            // Keep depth writes on to avoid see-through gaps between overlapping water triangles.
             glDepthMask(true);
 
-            renderWaterSurface(waterTimeSeconds, false);
+            renderWaterSurface(waterTimeSeconds, false, chunkDistance, cameraWx, cameraWz);
         }
 
         glDisable(GL_FOG);
@@ -928,15 +941,18 @@ public class Chunk {
     }
 
     private void buildWaterGeometry() {
-        waterPatches.clear();
+        List<WaterPatch> nextWaterPatches = new ArrayList<>();
         ensureWaterSimInitialized();
         syncWaterSimEdgesFromNeighbors();
-        int step = 1; // Keep water topology identical across chunks to avoid LOD border cracks.
+        int baseStep = Math.min(8, 1 << Math.max(0, lod));
+        int edgeBand = Math.max(1, baseStep);
 
-        for (int z = 0; z < SIZE; z += step) {
-            int z2 = Math.min(z + step, SIZE);
-            for (int x = 0; x < SIZE; x += step) {
-                int x2 = Math.min(x + step, SIZE);
+        for (int z = 0; z < SIZE; ) {
+            int stepZ = (z < edgeBand || z >= SIZE - edgeBand) ? 1 : baseStep;
+            int z2 = Math.min(z + stepZ, SIZE);
+            for (int x = 0; x < SIZE; ) {
+                int stepX = (x < edgeBand || x >= SIZE - edgeBand) ? 1 : baseStep;
+                int x2 = Math.min(x + stepX, SIZE);
 
                 float y00 = heights[x][z];
                 float y10 = heights[x2][z];
@@ -954,6 +970,7 @@ public class Chunk {
                 boolean oceanWet11 = d11 >= MIN_RENDERABLE_WATER_DEPTH && y11 < WATER_LEVEL + 0.02f;
                 int oceanCorners = (oceanWet00 ? 1 : 0) + (oceanWet10 ? 1 : 0) + (oceanWet01 ? 1 : 0) + (oceanWet11 ? 1 : 0);
                 if (oceanCorners == 0) {
+                    x = x2;
                     continue;
                 }
 
@@ -962,11 +979,18 @@ public class Chunk {
                 float wx2 = (cx * SIZE + x2) * scale;
                 float wz2 = (cz * SIZE + z2) * scale;
 
-                waterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2,
-                        WATER_LEVEL, WATER_LEVEL, WATER_LEVEL, WATER_LEVEL,
-                        y00, y10, y11, y01));
+                nextWaterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2,
+                        y00 + d00, y10 + d10, y11 + d11, y01 + d01,
+                        y00, y10, y11, y01,
+                        d00, d10, d11, d01));
+
+                x = x2;
             }
+            z = z2;
         }
+
+        waterPatches.clear();
+        waterPatches.addAll(nextWaterPatches);
     }
 
 
@@ -1022,17 +1046,39 @@ public class Chunk {
         return waterSimChunk.sampleDepth(localX, localZ);
     }
 
+    public void disturbWaterAtWorld(float wx, float wz, float radiusWorld, float impulse) {
+        ensureWaterSimInitialized();
+        syncWaterSimEdgesFromNeighbors();
+
+        float localX = wx / scale - cx * SIZE;
+        float localZ = wz / scale - cz * SIZE;
+        if (localX < -2f || localZ < -2f || localX > SIZE + 2f || localZ > SIZE + 2f) {
+            return;
+        }
+
+        float radiusLocal = radiusWorld / Math.max(0.0001f, scale);
+        waterSimChunk.disturb(localX, localZ, radiusLocal, impulse);
+    }
+
     public float getWaterSurfaceAtWorld(float wx, float wz) {
         ensureWaterSimInitialized();
         float localX = wx / scale - cx * SIZE;
         float localZ = wz / scale - cz * SIZE;
-        return waterSimChunk.sampleSurface(localX, localZ);
+
+        float simulatedSurface = waterSimChunk.sampleSurface(localX, localZ);
+        float terrainHeight = getHeight(wx, wz);
+        float waveScale = getWaveScale(simulatedSurface, terrainHeight);
+        float timeSeconds = (float) (System.nanoTime() * 1.0e-9);
+        return getWaterHeightAt(simulatedSurface, wx, wz, timeSeconds, false, waveScale);
     }
 
-    private void renderWaterSurface(float timeSeconds, boolean frozen) {
+    private void renderWaterSurface(float timeSeconds, boolean frozen, int chunkDistance, float cameraWx, float cameraWz) {
         if (waterPatches.isEmpty()) {
             return;
         }
+
+        ensureWaterSimInitialized();
+        syncWaterSimEdgesFromNeighbors();
 
         float texScale = 0.12f;
         float[] lightDir = manager.getLightDirection();
@@ -1040,17 +1086,51 @@ public class Chunk {
         float ly = -lightDir[1];
         float lz = -lightDir[2];
 
+
         glBegin(GL_TRIANGLES);
         for (WaterPatch patch : waterPatches) {
-            float waveScale1 = getWaveScale(patch.wy1, patch.terrainY1);
-            float waveScale2 = getWaveScale(patch.wy2, patch.terrainY2);
-            float waveScale3 = getWaveScale(patch.wy3, patch.terrainY3);
-            float waveScale4 = getWaveScale(patch.wy4, patch.terrainY4);
+            float surface1 = waterSimChunk.sampleSurface((patch.wx1 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float surface2 = waterSimChunk.sampleSurface((patch.wx2 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float surface3 = waterSimChunk.sampleSurface((patch.wx2 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+            float surface4 = waterSimChunk.sampleSurface((patch.wx1 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
 
-            float wy1 = getWaterHeightAt(patch.wy1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
-            float wy2 = getWaterHeightAt(patch.wy2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
-            float wy3 = getWaterHeightAt(patch.wy3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
-            float wy4 = getWaterHeightAt(patch.wy4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
+            float depth1 = waterSimChunk.sampleDepth((patch.wx1 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float depth2 = waterSimChunk.sampleDepth((patch.wx2 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float depth3 = waterSimChunk.sampleDepth((patch.wx2 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+            float depth4 = waterSimChunk.sampleDepth((patch.wx1 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+
+            float disturbance1 = waterSimChunk.sampleDisturbance((patch.wx1 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float disturbance2 = waterSimChunk.sampleDisturbance((patch.wx2 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float disturbance3 = waterSimChunk.sampleDisturbance((patch.wx2 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+            float disturbance4 = waterSimChunk.sampleDisturbance((patch.wx1 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+
+            boolean wet1 = depth1 >= MIN_RENDERABLE_WATER_DEPTH;
+            boolean wet2 = depth2 >= MIN_RENDERABLE_WATER_DEPTH;
+            boolean wet3 = depth3 >= MIN_RENDERABLE_WATER_DEPTH;
+            boolean wet4 = depth4 >= MIN_RENDERABLE_WATER_DEPTH;
+            if (!wet1 && !wet2 && !wet3 && !wet4) {
+                continue;
+            }
+
+            float waveScale1 = getWaveScale(surface1, patch.terrainY1);
+            float waveScale2 = getWaveScale(surface2, patch.terrainY2);
+            float waveScale3 = getWaveScale(surface3, patch.terrainY3);
+            float waveScale4 = getWaveScale(surface4, patch.terrainY4);
+
+            float waveAtten1 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx1, patch.wz1, cameraWx, cameraWz);
+            float waveAtten2 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx2, patch.wz1, cameraWx, cameraWz);
+            float waveAtten3 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx2, patch.wz2, cameraWx, cameraWz);
+            float waveAtten4 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx1, patch.wz2, cameraWx, cameraWz);
+
+            float waveWy1 = (waveAtten1 <= 0f) ? surface1 : getWaterHeightAt(surface1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
+            float waveWy2 = (waveAtten2 <= 0f) ? surface2 : getWaterHeightAt(surface2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
+            float waveWy3 = (waveAtten3 <= 0f) ? surface3 : getWaterHeightAt(surface3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
+            float waveWy4 = (waveAtten4 <= 0f) ? surface4 : getWaterHeightAt(surface4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
+
+            float wy1 = lerp(surface1, waveWy1, waveAtten1);
+            float wy2 = lerp(surface2, waveWy2, waveAtten2);
+            float wy3 = lerp(surface3, waveWy3, waveAtten3);
+            float wy4 = lerp(surface4, waveWy4, waveAtten4);
 
             float invDx = 1f / Math.max(0.0001f, patch.wx2 - patch.wx1);
             float invDz = 1f / Math.max(0.0001f, patch.wz2 - patch.wz1);
@@ -1067,26 +1147,30 @@ public class Chunk {
             float curvature = Math.abs((wy1 + wy3) - (wy2 + wy4)) * (0.5f * (invDx + invDz));
 
             // Triangle 1: (1,2,3)
-            submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature);
-            submitWaterVertex(patch.wx2, patch.wz1, wy2, patch.wy2, patch.terrainY2,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale2, dx2, dz2, curvature);
-            submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature);
+            if (wet1 && wet2 && wet3) {
+                submitWaterVertex(patch.wx1, patch.wz1, wy1, surface1, patch.terrainY1,
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature, disturbance1);
+                submitWaterVertex(patch.wx2, patch.wz1, wy2, surface2, patch.terrainY2,
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale2, dx2, dz2, curvature, disturbance2);
+                submitWaterVertex(patch.wx2, patch.wz2, wy3, surface3, patch.terrainY3,
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature, disturbance3);
+            }
             // Triangle 2: (1,3,4)
-            submitWaterVertex(patch.wx1, patch.wz1, wy1, patch.wy1, patch.terrainY1,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature);
-            submitWaterVertex(patch.wx2, patch.wz2, wy3, patch.wy3, patch.terrainY3,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature);
-            submitWaterVertex(patch.wx1, patch.wz2, wy4, patch.wy4, patch.terrainY4,
-                    timeSeconds, frozen, lx, ly, lz, texScale, waveScale4, dx4, dz4, curvature);
+            if (wet1 && wet3 && wet4) {
+                submitWaterVertex(patch.wx1, patch.wz1, wy1, surface1, patch.terrainY1,
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature, disturbance1);
+                submitWaterVertex(patch.wx2, patch.wz2, wy3, surface3, patch.terrainY3,
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature, disturbance3);
+                submitWaterVertex(patch.wx1, patch.wz2, wy4, surface4, patch.terrainY4,
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale4, dx4, dz4, curvature, disturbance4);
+            }
         }
         glEnd();
     }
 
     private void submitWaterVertex(float wx, float wz, float wy, float baseY, float terrainY,
                                    float timeSeconds, boolean frozen, float lx, float ly, float lz, float texScale,
-                                   float waveScale, float dx, float dz, float curvature) {
+                                   float waveScale, float dx, float dz, float curvature, float disturbance) {
         if (frozen) {
             glColor4f(1f, 1f, 1f, 1f);
             glNormal3f(0f, 1f, 0f);
@@ -1126,6 +1210,9 @@ public class Chunk {
             float foam = Math.max(crestCurvatureFoam, shoreFoam * 0.64f);
             foam = Math.max(foam, terrainSteepnessFoam * 0.52f);
             foam = Math.max(foam, largeBodyFoam * (0.50f + 0.38f * foamNoise));
+            float disturbanceVisual = smoothstep01(clamp01((disturbance - 0.08f) / 0.55f));
+            float rippleFoam = clamp01(disturbanceVisual * (0.38f + slopeMag * 0.95f + (1f - depthSmooth) * 0.32f));
+            foam = Math.max(foam, rippleFoam);
             foam = clamp01(foam * (0.92f + 0.14f * foamNoise));
 
             float altitude01 = clamp01((baseY - WATER_LEVEL) / 18f);
@@ -1177,17 +1264,39 @@ public class Chunk {
 
             float shoreSuppress = clamp01((depth - 0.9f) / 2.6f);
             float foamMix = clamp01((foam * 0.96f + breaking * 0.14f) * shoreSuppress);
-            float finalR = litR + (1f - litR) * foamMix;
-            float finalG = litG + (1f - litG) * foamMix;
-            float finalB = litB + (1f - litB) * foamMix;
+            float rippleWhiten = clamp01(disturbanceVisual * (0.30f + 0.50f * (1f - depthSmooth)));
+            float finalR = litR + (1f - litR) * Math.max(foamMix, rippleWhiten * 0.72f);
+            float finalG = litG + (1f - litG) * Math.max(foamMix, rippleWhiten * 0.78f);
+            float finalB = litB + (1f - litB) * Math.max(foamMix, rippleWhiten * 0.84f);
 
             // Higher opacity to keep water clearly readable while still preserving some depth transparency.
-            float alpha = Math.min(0.99f, 0.77f + shorelineMix * 0.15f + foam * 0.20f + fresnel * 0.08f);
+            float sideOpacityBoost = smoothstep01(clamp01((1f - ny - 0.18f) / 0.60f));
+            float alpha = Math.min(0.99f,
+                    Math.max(0.90f, 0.79f + shorelineMix * 0.16f + foam * 0.20f + fresnel * 0.10f + sideOpacityBoost * 0.10f + disturbanceVisual * 0.03f));
             glColor4f(finalR, finalG, finalB, alpha);
         }
 
         glTexCoord2f(wx * texScale, wz * texScale);
         glVertex3f(wx, wy, wz);
+    }
+
+    private float getWaveAttenuationAtDistance(float wx, float wz, float cameraWx, float cameraWz) {
+        float chunkWorldSpan = SIZE * scale;
+        float dxChunks = (wx - cameraWx) / chunkWorldSpan;
+        float dzChunks = (wz - cameraWz) / chunkWorldSpan;
+        float distanceChunks = (float) Math.sqrt(dxChunks * dxChunks + dzChunks * dzChunks);
+
+        final float fullDetailDistanceChunks = 14.0f;
+        final float flatWaterDistanceChunks = 21.0f;
+        if (distanceChunks <= fullDetailDistanceChunks) {
+            return 1f;
+        }
+        if (distanceChunks >= flatWaterDistanceChunks) {
+            return 0f;
+        }
+
+        float t = (distanceChunks - fullDetailDistanceChunks) / (flatWaterDistanceChunks - fullDetailDistanceChunks);
+        return 1f - smoothstep01(t);
     }
 
     private float getWaterHeightAt(float baseHeight, float wx, float wz, float timeSeconds, boolean frozen,
@@ -1213,9 +1322,13 @@ public class Chunk {
         float vastWater = smoothstep01(clamp01((simulatedDepth - 4.0f) / 8.0f));
         float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
         float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
+        float wetness = smoothstep01(clamp01(simulatedDepth / 0.30f));
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
-                * (0.06f + waveStrength * 0.44f * largeSwellBoost);
-        return simulatedSurface + detailRipple;
+                * (waveStrength * 0.44f * largeSwellBoost) * wetness;
+
+        float bedHeight = simulatedSurface - simulatedDepth;
+        float minimumSurface = bedHeight + Math.min(simulatedDepth, MIN_RENDERABLE_WATER_DEPTH * 0.5f);
+        return Math.max(minimumSurface, simulatedSurface + detailRipple);
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {
@@ -2317,7 +2430,8 @@ public class Chunk {
 
     public void markRenderDirty() {
         renderResourcesBuilt = false;
-        waterSimChunk = null;
+        // Keep the previous simulation allocated so already-rendered water stays visually stable
+        // while replacement LOD/render resources are queued.
         waterSimDirty = true;
     }
 
@@ -2330,6 +2444,7 @@ public class Chunk {
             return;
         }
         stitchEdges();
+        recomputeTerrainBounds();
         buildTerrainBuffers();
         buildWaterDisplayList();
         recalculateHeavyFeatureCount();
@@ -2345,6 +2460,28 @@ public class Chunk {
         return scale;
     }
 
+    public float getVisibleMinHeight() {
+        return Math.min(cachedMinHeight, WATER_LEVEL) - 2.5f;
+    }
+
+    public float getVisibleMaxHeight() {
+        return Math.max(cachedMaxHeight, WATER_LEVEL + WATER_WAVE_AMPLITUDE) + 3.0f;
+    }
+
+    private void recomputeTerrainBounds() {
+        float min = Float.POSITIVE_INFINITY;
+        float max = Float.NEGATIVE_INFINITY;
+        for (int x = 0; x <= SIZE; x++) {
+            for (int z = 0; z <= SIZE; z++) {
+                float h = heights[x][z];
+                if (h < min) min = h;
+                if (h > max) max = h;
+            }
+        }
+        cachedMinHeight = min;
+        cachedMaxHeight = max;
+    }
+
     private void applyPrecomputedData(ChunkBuildData data) {
         copyHeightsInto(data.heights, heights);
         copyMaskInto(data.featureMask, featureMask);
@@ -2352,6 +2489,7 @@ public class Chunk {
         if (data.lakes != null) {
             features.addAll(data.lakes);
         }
+        recomputeTerrainBounds();
         recalculateHeavyFeatureCount();
         featuresGenerated = false;
     }
