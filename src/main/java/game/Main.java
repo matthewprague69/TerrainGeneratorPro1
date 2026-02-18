@@ -31,6 +31,10 @@ public class Main {
     private SkyRenderer sky;
     private ShadowRenderer shadowRenderer;
     private int shadowMapSize = 2048;
+    private float[] cachedLightMatrix = null;
+    private float[] cachedShadowDir = new float[] { 0f, -1f, 0f };
+    private int shadowUpdateIntervalFrames = 1;
+    private int shadowFrameCounter = 0;
 
     private boolean fullscreen = false;
     private int windowedWidth = 1600;
@@ -109,9 +113,38 @@ public class Main {
         if (gpuInfo.contains("intel") || gpuInfo.contains("uhd") || gpuInfo.contains("iris")
                 || gpuInfo.contains("vega 8") || gpuInfo.contains("radeon graphics")) {
             shadowMapSize = 1024;
+            shadowUpdateIntervalFrames = 2;
             terrain.setShadowRenderDistance(Math.min(terrain.getShadowRenderDistance(), 8));
         }
         shadowRenderer = new ShadowRenderer(shadowMapSize);
+    }
+
+
+    private boolean shouldRefreshShadowMap(float[] currentShadowDir) {
+        if (cachedLightMatrix == null || shadowFrameCounter % shadowUpdateIntervalFrames == 0) {
+            return true;
+        }
+        return shadowDirectionChanged(currentShadowDir);
+    }
+
+    private boolean shadowDirectionChanged(float[] currentShadowDir) {
+        float dx = currentShadowDir[0] - cachedShadowDir[0];
+        float dy = currentShadowDir[1] - cachedShadowDir[1];
+        float dz = currentShadowDir[2] - cachedShadowDir[2];
+        float deltaSq = dx * dx + dy * dy + dz * dz;
+        return deltaSq > 0.0004f;
+    }
+
+    private void tuneShadowUpdateRate(TerrainManager.PerformanceSnapshot snapshot) {
+        TerrainManager.StageStats depthStats = snapshot.stages.get(TerrainManager.PipelineStage.DRAW_DEPTH);
+        long depthNanos = depthStats != null ? depthStats.nanos : 0L;
+        double depthMs = depthNanos / 1_000_000.0;
+
+        if (depthMs > 5.0) {
+            shadowUpdateIntervalFrames = Math.min(4, shadowUpdateIntervalFrames + 1);
+        } else if (depthMs < 2.0) {
+            shadowUpdateIntervalFrames = Math.max(1, shadowUpdateIntervalFrames - 1);
+        }
     }
 
     private void setupProjection() {
@@ -301,6 +334,8 @@ public class Main {
         PixelTextRenderer.drawText("Draw load chunks terrain/water/depth=" + snapshot.terrainChunksDrawn + "/"
                 + snapshot.waterChunksDrawn + "/" + snapshot.depthChunksDrawn
                 + " | visible features=" + snapshot.visibleFeatures, panelX + 12f, y, 1.0f);
+        y -= 16f;
+        PixelTextRenderer.drawText("Shadow update cadence: every " + shadowUpdateIntervalFrames + " frame(s)", panelX + 12f, y, 1.0f);
         y -= 20f;
 
         long total = Math.max(1L, snapshot.estimatedFrameNanos);
@@ -782,11 +817,28 @@ public class Main {
             terrain.update(player.getX(), player.getFootY(), player.getZ(), frustum, dt);
             sky.update(dt);
 
+            TerrainManager.PerformanceSnapshot perfSnapshot = terrain.getPerformanceSnapshot();
+            tuneShadowUpdateRate(perfSnapshot);
+
             float[] shadowDir = sky.getShadowDirection();
             float[] lightDir = sky.getLightDirection();
             float lightStrength = sky.getSkyBrightness();
             float[] lightColor = sky.getLightColor();
-            float[] lightMatrix = shadowRenderer.renderShadowMap(
+
+            if (shouldRefreshShadowMap(shadowDir)) {
+                cachedLightMatrix = shadowRenderer.renderShadowMap(
+                        terrain,
+                        shadowDir,
+                        player.getX(),
+                        player.getY(),
+                        player.getZ(),
+                        framebufferWidth,
+                        framebufferHeight
+                );
+                cachedShadowDir = shadowDir.clone();
+            }
+            shadowFrameCounter++;
+            float[] lightMatrix = cachedLightMatrix != null ? cachedLightMatrix : shadowRenderer.renderShadowMap(
                     terrain,
                     shadowDir,
                     player.getX(),
