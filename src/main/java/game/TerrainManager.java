@@ -444,6 +444,7 @@ public class TerrainManager {
     }
 
     private void refreshChunkLods(int pcx, int pcz, Frustum frustum) {
+        int preloadRadius = lodPreloadRadius();
         for (long key : neededKeys) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
@@ -453,7 +454,7 @@ public class TerrainManager {
             if (existing == null || existing.getLOD() == targetLOD) {
                 continue;
             }
-            boolean forceNear = dist <= LOD_PRIORITY_RADIUS;
+            boolean forceNear = dist <= preloadRadius;
             boolean visible = frustum != null && isChunkVisible(frustum, cx, cz);
             if (forceNear || visible) {
                 queueChunkGeneration(key, cx, cz, targetLOD, dist);
@@ -493,6 +494,10 @@ public class TerrainManager {
         return 0;
     }
 
+    private int lodPreloadRadius() {
+        return Math.min(cacheRenderDist, Math.max(LOD_NEAR_THRESHOLD, featureRenderDist));
+    }
+
     private void removeNeededChunk(int cx, int cz) {
         neededKeys.remove(key(cx, cz));
     }
@@ -526,6 +531,7 @@ public class TerrainManager {
 
     private void reprioritizePendingQueues(int pcx, int pcz, Frustum frustum) {
         if (frustum != null) {
+            int preloadRadius = lodPreloadRadius();
             ArrayDeque<Long> rebuiltPending = new ArrayDeque<>();
             Map<Long, Integer> rebuiltLods = new HashMap<>();
             for (long key : neededKeys) {
@@ -542,7 +548,7 @@ public class TerrainManager {
                     continue;
                 }
                 boolean visible = isChunkVisible(frustum, cx, cz);
-                if (!visible && dist > LOD_PRIORITY_RADIUS) {
+                if (!visible && dist > preloadRadius) {
                     continue;
                 }
                 if (rebuiltPending.size() >= MAX_PENDING_CHUNK_QUEUE && dist > LOD_PRIORITY_RADIUS) {
@@ -673,6 +679,7 @@ public class TerrainManager {
         }
 
         seedVisibleLodMismatches(pcx, pcz, frustum);
+        int preloadRadius = lodPreloadRadius();
 
         int backlog = pendingChunks.size();
         int budget = MAX_CHUNKS_PER_FRAME + Math.min(8, backlog / 10);
@@ -707,10 +714,10 @@ public class TerrainManager {
         for (long key : pendingChunks) {
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            if (!isChunkVisible(frustum, cx, cz)) {
+            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+            if (!isChunkVisible(frustum, cx, cz) && dist > preloadRadius) {
                 continue;
             }
-            int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
             if (isUpgradeRequest(key)) {
                 upgradeVisible.add(key);
             } else if (dist <= LOD_PRIORITY_RADIUS) {
