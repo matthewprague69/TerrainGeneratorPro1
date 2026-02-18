@@ -598,6 +598,7 @@ public class TerrainManager {
 
         ArrayDeque<Chunk> visibleNear = new ArrayDeque<>();
         ArrayDeque<Chunk> visibleFar = new ArrayDeque<>();
+        int renderBuildPreloadRadius = lodPreloadRadius();
         if (!pendingRenderBuilds.isEmpty()) {
             Iterator<Chunk> iterator = pendingRenderBuilds.iterator();
             while (iterator.hasNext()) {
@@ -615,7 +616,7 @@ public class TerrainManager {
 
                 int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
                 boolean visible = frustum != null && isChunkVisible(frustum, chunk.cx, chunk.cz);
-                if (dist > cacheRenderDist || !visible) {
+                if (dist > cacheRenderDist || (!visible && dist > renderBuildPreloadRadius)) {
                     pendingRenderBuildKeys.remove(key);
                     if (pendingReplacement == chunk) {
                         pendingChunkReplacements.remove(key);
@@ -642,10 +643,10 @@ public class TerrainManager {
                 }
                 int cx = (int) (key >> 32);
                 int cz = (int) key;
-                if (!isChunkVisible(frustum, cx, cz)) {
+                int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
+                if (!isChunkVisible(frustum, cx, cz) && dist > renderBuildPreloadRadius) {
                     continue;
                 }
-                int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
                 if (dist > cacheRenderDist) {
                     continue;
                 }
@@ -935,23 +936,19 @@ public class TerrainManager {
     }
 
     private void refreshNeighborEdges(Chunk chunk, int pcx, int pcz) {
-        Chunk right = getChunk(chunk.cx + 1, chunk.cz);
-        if (right != null) {
-            right.markRenderDirty();
-            int dist = Math.max(Math.abs(right.cx - pcx), Math.abs(right.cz - pcz));
-            queueRenderBuild(right, dist);
-        }
-        Chunk bottom = getChunk(chunk.cx, chunk.cz + 1);
-        if (bottom != null) {
-            bottom.markRenderDirty();
-            int dist = Math.max(Math.abs(bottom.cx - pcx), Math.abs(bottom.cz - pcz));
-            queueRenderBuild(bottom, dist);
-        }
-        Chunk bottomRight = getChunk(chunk.cx + 1, chunk.cz + 1);
-        if (bottomRight != null) {
-            bottomRight.markRenderDirty();
-            int dist = Math.max(Math.abs(bottomRight.cx - pcx), Math.abs(bottomRight.cz - pcz));
-            queueRenderBuild(bottomRight, dist);
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                Chunk neighbor = getChunk(chunk.cx + dx, chunk.cz + dz);
+                if (neighbor == null) {
+                    continue;
+                }
+                neighbor.markRenderDirty();
+                int dist = Math.max(Math.abs(neighbor.cx - pcx), Math.abs(neighbor.cz - pcz));
+                queueRenderBuild(neighbor, dist);
+            }
         }
     }
 
@@ -961,7 +958,8 @@ public class TerrainManager {
             return;
         }
         Frustum frustum = lastCameraFrustum;
-        if (frustum != null && !isChunkVisible(frustum, chunk.cx, chunk.cz)) {
+        boolean visible = frustum == null || isChunkVisible(frustum, chunk.cx, chunk.cz);
+        if (!visible && dist > lodPreloadRadius()) {
             Chunk pendingReplacement = pendingChunkReplacements.get(key);
             if (pendingReplacement == chunk) {
                 pendingChunkReplacements.remove(key);
