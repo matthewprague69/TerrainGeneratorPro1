@@ -254,8 +254,8 @@ public class WaterSimChunk {
         float damping = (float) Math.pow(0.92f, frameScale);
         float pressureBlend = 0.24f * frameScale;
         float diffusion = 0.12f * frameScale;
-        float disturbanceDecay = (float) Math.pow(0.92f, frameScale * 0.55f);
-        float disturbanceDiffusion = 0.16f * frameScale;
+        float disturbanceDecay = (float) Math.pow(0.84f, frameScale);
+        float disturbanceDiffusion = 0.10f * frameScale;
 
         // Pass 1: terrain-aware velocity update.
         for (int x = 0; x <= gridSize; x++) {
@@ -319,10 +319,8 @@ public class WaterSimChunk {
 
                 float centerDisturbance = disturbance[x][z];
                 float avgDisturbance = (disturbance[xl][z] + disturbance[xr][z] + disturbance[x][zb] + disturbance[x][zf]) * 0.25f;
-                float disturbanceAdvect = (Math.abs(tmpVelX[x][z]) + Math.abs(tmpVelZ[x][z])) * 0.12f;
                 float nextDisturbance = centerDisturbance * disturbanceDecay;
                 nextDisturbance += (avgDisturbance - centerDisturbance) * disturbanceDiffusion;
-                nextDisturbance += disturbanceAdvect;
                 tmpDisturbance[x][z] = clamp(nextDisturbance, 0f, 1f);
             }
         }
