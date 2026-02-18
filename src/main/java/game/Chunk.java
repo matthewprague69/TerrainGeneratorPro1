@@ -1295,10 +1295,12 @@ public class Chunk {
         float waveStrength = openWater * openWater;
         float vastWater = smoothstep01(clamp01((simulatedDepth - 4.0f) / 8.0f));
         float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
+        float windStrength = manager.getWindStrength();
+        float windAmplitudeBoost = 0.75f + windStrength * 1.15f;
         float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
         float wetness = smoothstep01(clamp01(simulatedDepth / 0.30f));
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
-                * (waveStrength * 0.44f * largeSwellBoost) * wetness;
+                * (waveStrength * 0.44f * largeSwellBoost * windAmplitudeBoost) * wetness;
 
         float bedHeight = simulatedSurface - simulatedDepth;
         float minimumSurface = bedHeight + Math.min(simulatedDepth, MIN_RENDERABLE_WATER_DEPTH * 0.5f);
@@ -1306,22 +1308,34 @@ public class Chunk {
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {
+        // Wind controls the dominant wave travel direction and how energetic/choppy the surface is.
+        float windStrength = manager.getWindStrength();
+        float windDirRad = (float) Math.toRadians(manager.getWindDirectionDegrees());
+        float windX = (float) Math.cos(windDirRad);
+        float windZ = (float) Math.sin(windDirRad);
+        float crossX = -windZ;
+        float crossZ = windX;
+
+        float windProjection = wx * windX + wz * windZ;
+        float crossProjection = wx * crossX + wz * crossZ;
+        float windSpeedBoost = 0.70f + windStrength * 1.10f;
+
         // Keep ordered, readable wave trains and add only mild asymmetry/opposition.
         float spatialBias = (float) Math.sin(wx * 0.011f + wz * 0.014f) * 0.10f;
-        float phaseA = ((wx + wz * 0.65f) / WATER_WAVE_LENGTH_1) + spatialBias
-                + timeSeconds * WATER_WAVE_SPEED * 1.10f;
-        float phaseB = ((wx * -0.45f + wz) / WATER_WAVE_LENGTH_2) + spatialBias * 0.5f
-                - timeSeconds * WATER_WAVE_SPEED * 1.35f;
-        float phaseC = ((wx * 0.2f - wz * 0.9f) / WATER_WAVE_LENGTH_3) - spatialBias * 0.4f
-                + timeSeconds * WATER_WAVE_SPEED * 1.90f;
+        float phaseA = (windProjection / WATER_WAVE_LENGTH_1) + (crossProjection * 0.24f / WATER_WAVE_LENGTH_1)
+                + spatialBias + timeSeconds * WATER_WAVE_SPEED * (0.85f + windSpeedBoost * 0.70f);
+        float phaseB = ((windProjection * 0.65f - crossProjection) / WATER_WAVE_LENGTH_2) + spatialBias * 0.5f
+                - timeSeconds * WATER_WAVE_SPEED * (0.95f + windSpeedBoost * 0.95f);
+        float phaseC = ((windProjection * 0.35f + crossProjection * 1.1f) / WATER_WAVE_LENGTH_3) - spatialBias * 0.4f
+                + timeSeconds * WATER_WAVE_SPEED * (1.15f + windSpeedBoost * 1.25f);
 
         float primary = (float) (Math.sin(phaseA) * 0.48f + Math.sin(phaseB) * 0.34f + Math.sin(phaseC) * 0.18f);
 
         float crestShape = primary >= 0f ? primary * primary * 0.92f : -Math.abs(primary) * 0.60f;
-        float chop = (float) Math.sin(phaseA * 1.42f + phaseC * 0.72f) * 0.14f;
+        float chop = (float) Math.sin(phaseA * 1.42f + phaseC * 0.72f) * (0.08f + 0.13f * windStrength);
         float interference = (float) Math.sin((wx * 0.76f + wz * 0.94f) / 5.2f + timeSeconds * 2.1f)
                 * (float) Math.sin((wx * -0.91f + wz * 0.58f) / 4.6f - timeSeconds * 2.0f)
-                * 0.14f;
+                * (0.10f + 0.12f * windStrength);
 
         float modulation = 0.92f + 0.08f * (float) Math.sin(wx * 0.019f - wz * 0.016f);
         return (crestShape + chop + interference) * modulation * WATER_WAVE_AMPLITUDE * waveScale;

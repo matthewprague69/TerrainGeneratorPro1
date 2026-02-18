@@ -318,7 +318,7 @@ public class Main {
     private void drawMenuOverlay(int width, int height, double mouseX, double mouseY) {
         UIRenderer.begin2D(width, height);
         float panelWidth = 520f;
-        float panelHeight = 660f;
+        float panelHeight = 740f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
 
@@ -362,6 +362,10 @@ public class Main {
         drawMenuRowText("VSync", getVsyncLabel(), panelX + 20, rowY, mouseX, mouseY);
         rowY -= 40;
         drawMenuRowText("Weather", getWeatherLabel(), panelX + 20, rowY, mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("Wind direction", getWindDirectionLabel(), panelX + 20, rowY, mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("Wind strength", getWindStrengthLabel(), panelX + 20, rowY, mouseX, mouseY);
         rowY -= 40;
         drawMenuRowText("World tick speed", String.format(Locale.US, "%.2fx", sky.getTimeSpeed()),
                 panelX + 20, rowY, mouseX, mouseY);
@@ -417,7 +421,7 @@ public class Main {
 
     private void handleMenuClick(double mouseX, double mouseY, int width, int height) {
         float panelWidth = 520f;
-        float panelHeight = 660f;
+        float panelHeight = 740f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
         float rowY = panelY + panelHeight - 80;
@@ -470,7 +474,15 @@ public class Main {
             return;
         }
         rowY -= 40;
-        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 12);
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 12)) {
+            return;
+        }
+        rowY -= 40;
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 13)) {
+            return;
+        }
+        rowY -= 40;
+        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 14);
     }
 
     private boolean handleRowClick(double mouseX, double mouseY, float x, float y, int rowIndex) {
@@ -528,6 +540,12 @@ public class Main {
                 terrain.setWeatherType(adjustWeatherType(terrain.getWeatherType(), delta));
                 break;
             case 12:
+                terrain.setWindDirectionDegrees(terrain.getWindDirectionDegrees() + delta * 15f);
+                break;
+            case 13:
+                terrain.setWindStrength(terrain.getWindStrength() + delta * 0.05f);
+                break;
+            case 14:
                 sky.setTimeSpeed(sky.getTimeSpeed() + delta * 0.25f);
                 break;
             default:
@@ -580,6 +598,14 @@ public class Main {
             default:
                 return "Low";
         }
+    }
+
+    private String getWindDirectionLabel() {
+        return String.format(Locale.US, "%.0f°", terrain.getWindDirectionDegrees());
+    }
+
+    private String getWindStrengthLabel() {
+        return String.format(Locale.US, "%.0f%%", terrain.getWindStrength() * 100f);
     }
 
     private void loop() {

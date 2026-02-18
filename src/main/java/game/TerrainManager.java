@@ -185,6 +185,8 @@ public class TerrainManager {
     private int impostorAngleCount = 1;
     private int impostorQualityPreset = 1;
     private int impostorHighQualityDistance = 10;
+    private float windDirectionDegrees = 45f;
+    private float windStrength = 0.5f;
     private boolean renderDistanceDirty = true;
     private int lastUpdateChunkX = Integer.MIN_VALUE;
     private int lastUpdateChunkZ = Integer.MIN_VALUE;
@@ -1238,6 +1240,26 @@ public class TerrainManager {
 
     public float getScale() {
         return scale;
+    }
+
+    public float getWindDirectionDegrees() {
+        return windDirectionDegrees;
+    }
+
+    public void setWindDirectionDegrees(float windDirectionDegrees) {
+        float wrapped = windDirectionDegrees % 360f;
+        if (wrapped < 0f) {
+            wrapped += 360f;
+        }
+        this.windDirectionDegrees = wrapped;
+    }
+
+    public float getWindStrength() {
+        return windStrength;
+    }
+
+    public void setWindStrength(float windStrength) {
+        this.windStrength = Math.max(0f, Math.min(1f, windStrength));
     }
 
     public Map<Biome, Float> getBiomeWeights(double wx, double wz) {
