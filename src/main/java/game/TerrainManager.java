@@ -16,6 +16,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 public class TerrainManager {
     public enum PipelineStage {
@@ -30,6 +31,7 @@ public class TerrainManager {
         DISPOSE_FAR_CHUNKS,
         PROCESS_PENDING_CHUNK_GENERATIONS,
         PROCESS_PENDING_FEATURE_GENERATIONS,
+        UPDATE_WATER_SIMULATION,
         DRAW_TERRAIN_AND_FEATURES,
         DRAW_WATER,
         DRAW_DEPTH
@@ -101,6 +103,7 @@ public class TerrainManager {
     private static final int AVAILABLE_CORES = Math.max(1, Runtime.getRuntime().availableProcessors());
     private static final int CHUNK_GENERATOR_THREADS = Math.max(2, Math.min(8, AVAILABLE_CORES));
     private static final int FEATURE_GENERATOR_THREADS = Math.max(1, Math.min(4, AVAILABLE_CORES / 2));
+    private static final int WATER_SIMULATION_THREADS = Math.max(1, Math.min(AVAILABLE_CORES, 6));
     private static final int MAX_CHUNKS_PER_FRAME = 20;
     private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 4;
     private static final long CHUNK_BUDGET_NS = 10_000_000L;
@@ -148,6 +151,11 @@ public class TerrainManager {
     });
     private final ExecutorService featureGenerator = Executors.newFixedThreadPool(FEATURE_GENERATOR_THREADS, r -> {
         Thread t = new Thread(r, "feature-generator");
+        t.setDaemon(true);
+        return t;
+    });
+    private final ExecutorService waterSimulationExecutor = Executors.newFixedThreadPool(WATER_SIMULATION_THREADS, r -> {
+        Thread t = new Thread(r, "water-simulation");
         t.setDaemon(true);
         return t;
     });
@@ -222,6 +230,16 @@ public class TerrainManager {
         private ChunkDistanceEntry(Chunk chunk, int distance) {
             this.chunk = chunk;
             this.distance = distance;
+        }
+    }
+
+    private static final class WaterSimulationTask {
+        private final Chunk chunk;
+        private final float dtSeconds;
+
+        private WaterSimulationTask(Chunk chunk, float dtSeconds) {
+            this.chunk = chunk;
+            this.dtSeconds = dtSeconds;
         }
     }
 
@@ -1133,24 +1151,61 @@ public class TerrainManager {
         final float baseWaterSimDt = 1.0f / 60.0f;
         waterSimulationFrameId++;
         ensureVisibleChunkLists(wx, wz);
+
+        long waterUpdateStart = System.nanoTime();
+        List<WaterSimulationTask> waterSimulationTasks = new ArrayList<>();
+        if (!weatherSystem.isWaterFrozen()) {
+            for (ChunkDistanceEntry entry : visibleRenderChunks) {
+                int dist = entry.distance;
+                int simulationCadenceFrames = getWaterSimulationCadenceFrames(dist);
+                long chunkKey = key(entry.chunk.cx, entry.chunk.cz);
+                int phase = Math.floorMod(Long.hashCode(chunkKey), simulationCadenceFrames);
+                if (Math.floorMod(waterSimulationFrameId + phase, simulationCadenceFrames) == 0) {
+                    waterSimulationTasks.add(new WaterSimulationTask(entry.chunk,
+                            baseWaterSimDt * simulationCadenceFrames));
+                }
+            }
+        }
+        runWaterSimulationTasks(waterSimulationTasks);
+        recordStage(PipelineStage.UPDATE_WATER_SIMULATION, System.nanoTime() - waterUpdateStart);
+
         int renderedWaterChunks = 0;
         for (ChunkDistanceEntry entry : visibleRenderChunks) {
             Chunk c = entry.chunk;
             int dist = entry.distance;
-            if (!weatherSystem.isWaterFrozen()) {
-                int simulationCadenceFrames = getWaterSimulationCadenceFrames(dist);
-                long chunkKey = key(c.cx, c.cz);
-                int phase = Math.floorMod(Long.hashCode(chunkKey), simulationCadenceFrames);
-                if (Math.floorMod(waterSimulationFrameId + phase, simulationCadenceFrames) == 0) {
-                    c.updateWaterSimulation(baseWaterSimDt * simulationCadenceFrames);
-                }
-            }
             c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
                     weatherSystem.getIceThickness(), waterTimeSeconds, dist, wx, wz);
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;
         recordStage(PipelineStage.DRAW_WATER, System.nanoTime() - start);
+    }
+
+    private void runWaterSimulationTasks(List<WaterSimulationTask> tasks) {
+        if (tasks.isEmpty()) {
+            return;
+        }
+
+        if (WATER_SIMULATION_THREADS <= 1 || tasks.size() <= 1) {
+            for (WaterSimulationTask task : tasks) {
+                task.chunk.updateWaterSimulationStep(task.dtSeconds);
+            }
+        } else {
+            List<Future<?>> futures = new ArrayList<>(tasks.size());
+            for (WaterSimulationTask task : tasks) {
+                futures.add(waterSimulationExecutor.submit(() -> task.chunk.updateWaterSimulationStep(task.dtSeconds)));
+            }
+            for (Future<?> future : futures) {
+                try {
+                    future.get();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        for (WaterSimulationTask task : tasks) {
+            task.chunk.synchronizeWaterSimulationEdges();
+        }
     }
 
     private static int getWaterSimulationCadenceFrames(int chunkDistance) {

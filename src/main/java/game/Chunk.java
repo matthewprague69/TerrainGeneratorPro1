@@ -1029,9 +1029,23 @@ public class Chunk {
         if (waterPatches.isEmpty()) {
             return;
         }
+        updateWaterSimulationStep(dtSeconds);
+        synchronizeWaterSimulationEdges();
+    }
+
+    void updateWaterSimulationStep(float dtSeconds) {
+        if (waterPatches.isEmpty()) {
+            return;
+        }
         ensureWaterSimInitialized();
-        syncWaterSimEdgesFromNeighbors();
         waterSimChunk.stepSimulation(dtSeconds);
+    }
+
+    void synchronizeWaterSimulationEdges() {
+        if (waterPatches.isEmpty()) {
+            return;
+        }
+        ensureWaterSimInitialized();
         // Re-sync borders after stepping to keep neighboring chunk seams watertight.
         syncWaterSimEdgesFromNeighbors();
     }
