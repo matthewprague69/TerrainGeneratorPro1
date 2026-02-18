@@ -1135,7 +1135,7 @@ public class TerrainManager {
                 }
             }
             c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
-                    weatherSystem.getIceThickness(), waterTimeSeconds);
+                    weatherSystem.getIceThickness(), waterTimeSeconds, dist);
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;
