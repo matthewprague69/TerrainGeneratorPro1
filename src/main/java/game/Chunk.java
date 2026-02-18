@@ -124,6 +124,9 @@ public class Chunk {
     private static final float WATER_WAVE_LENGTH_2 = 9f;
     private static final float WATER_WAVE_LENGTH_3 = 4.8f;
     private static final float WATER_LARGE_SWELL_MULTIPLIER = 1.6f;
+    private static final float WATER_OCEAN_SWELL_AMPLITUDE = 3.4f;
+    private static final float WATER_OCEAN_SWELL_LENGTH = 68f;
+    private static final float WATER_OCEAN_SWELL_SPEED = 0.24f;
     private static final float WATER_FOAM_SLOPE_START = 0.10f;
     private static final float WATER_FOAM_SLOPE_RANGE = 0.24f;
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
@@ -1326,9 +1329,37 @@ public class Chunk {
         float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
                 * (waveStrength * 0.44f * largeSwellBoost) * wetness;
 
+        // Deep ocean gets larger swells, especially where surrounding water is also deep/open.
+        float oceanDepthFactor = smoothstep01(clamp01((simulatedDepth - 6.0f) / 11.0f));
+        float oceanExpanseFactor = oceanDepthFactor;
+        if (waterSimChunk != null && oceanDepthFactor > 0.05f) {
+            float localX = (wx / scale) - (cx * SIZE);
+            float localZ = (wz / scale) - (cz * SIZE);
+            float ringRadius = 2.7f;
+            float dL = waterSimChunk.sampleDepth(localX - ringRadius, localZ);
+            float dR = waterSimChunk.sampleDepth(localX + ringRadius, localZ);
+            float dT = waterSimChunk.sampleDepth(localX, localZ - ringRadius);
+            float dB = waterSimChunk.sampleDepth(localX, localZ + ringRadius);
+            float surroundingDepth = (dL + dR + dT + dB) * 0.25f;
+            oceanExpanseFactor = smoothstep01(clamp01((surroundingDepth - 4.5f) / 8.0f));
+        }
+
+        float oceanSwell = getOceanSwellOffset(wx, wz, timeSeconds)
+                * oceanDepthFactor * oceanExpanseFactor * (0.72f + velocityBoost * 0.28f);
+
         float bedHeight = simulatedSurface - simulatedDepth;
         float minimumSurface = bedHeight + Math.min(simulatedDepth, MIN_RENDERABLE_WATER_DEPTH * 0.5f);
-        return Math.max(minimumSurface, simulatedSurface + detailRipple);
+        return Math.max(minimumSurface, simulatedSurface + detailRipple + oceanSwell);
+    }
+
+
+    private float getOceanSwellOffset(float wx, float wz, float timeSeconds) {
+        float phaseA = ((wx + wz * 0.38f) / WATER_OCEAN_SWELL_LENGTH) + timeSeconds * WATER_OCEAN_SWELL_SPEED;
+        float phaseB = ((-wx * 0.22f + wz) / (WATER_OCEAN_SWELL_LENGTH * 0.63f)) - timeSeconds * WATER_OCEAN_SWELL_SPEED * 1.18f;
+        float primary = (float) Math.sin(phaseA);
+        float secondary = (float) Math.sin(phaseB) * 0.46f;
+        float shaped = primary >= 0f ? primary * primary : -Math.abs(primary) * 0.55f;
+        return (shaped + secondary) * WATER_OCEAN_SWELL_AMPLITUDE;
     }
 
     private float getWaveOffset(float wx, float wz, float timeSeconds, float waveScale) {
