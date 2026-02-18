@@ -168,6 +168,53 @@ public class WaterSimChunk {
         }
     }
 
+
+    public void disturb(float localX, float localZ, float radius, float impulse) {
+        float cx = clamp(localX, 0f, gridSize);
+        float cz = clamp(localZ, 0f, gridSize);
+        float r = Math.max(0.25f, radius);
+        float strength = impulse;
+
+        int minX = Math.max(0, (int) Math.floor(cx - r - 1f));
+        int maxX = Math.min(gridSize, (int) Math.ceil(cx + r + 1f));
+        int minZ = Math.max(0, (int) Math.floor(cz - r - 1f));
+        int maxZ = Math.min(gridSize, (int) Math.ceil(cz + r + 1f));
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                float dx = x - cx;
+                float dz = z - cz;
+                float dist = (float) Math.sqrt(dx * dx + dz * dz);
+                if (dist > r) {
+                    continue;
+                }
+
+                float falloff = 1f - (dist / r);
+                float pulse = falloff * falloff * (3f - 2f * falloff);
+
+                float bed = bedHeight[x][z];
+                float maxDepth = Math.max(0f, maxSurface[x][z] - bed);
+                if (maxDepth <= 0.0001f) {
+                    continue;
+                }
+
+                float depth = waterDepth[x][z];
+                float pressure = clamp(depth / maxDepth, 0f, 1f);
+                float response = 0.35f + pressure * 0.65f;
+
+                float radialX = dist > 0.0001f ? dx / dist : 0f;
+                float radialZ = dist > 0.0001f ? dz / dist : 0f;
+
+                float velKick = strength * pulse * response;
+                velX[x][z] += radialX * velKick;
+                velZ[x][z] += radialZ * velKick;
+
+                float depthKick = Math.abs(strength) * pulse * 0.02f * response;
+                waterDepth[x][z] = clamp(depth + depthKick, 0f, maxDepth);
+            }
+        }
+    }
+
     public void stepSimulation(float dt) {
         float clampedDt = clamp(dt, 1.0f / 240.0f, 1.0f / 20.0f);
         float frameScale = clampedDt * 60.0f;

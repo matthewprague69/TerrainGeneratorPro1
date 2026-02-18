@@ -44,6 +44,11 @@ public class Player {
     private static final float WATER_WAVE_SLOPE_PUSH = 3.0f;
     private static final float WATER_WAVE_VERTICAL_ACCEL_COUPLING = 0.65f;
     private static final float WATER_DIVE_BUOYANCY_REDUCTION = 0.58f;
+    private static final float SWIM_RIPPLE_BASE_RADIUS = 0.9f;
+    private static final float SWIM_RIPPLE_SPEED_RADIUS = 0.65f;
+    private static final float SWIM_RIPPLE_BASE_IMPULSE = 0.18f;
+    private static final float SWIM_RIPPLE_SPEED_IMPULSE = 0.65f;
+    private static final float SWIM_RIPPLE_INTERVAL = 0.08f;
 
     private boolean wasInWater = false;
     private float previousWaterSurfaceY = Chunk.WATER_LEVEL;
@@ -51,6 +56,7 @@ public class Player {
     private float entrySinkOffset = 0f;
     private float waterVelocityX = 0f;
     private float waterVelocityZ = 0f;
+    private float swimRippleTimer = 0f;
 
     // Terrain for collision
     private final TerrainManager tm;
@@ -167,6 +173,20 @@ public class Player {
         float movedDist = (float) Math.sqrt((x - prevX) * (x - prevX) + (z - prevZ) * (z - prevZ));
         float horizontalSpeed = dt > 0.00001f ? movedDist / dt : 0f;
 
+        if (inWater) {
+            swimRippleTimer -= dt;
+            float swimSpeed = (float) Math.sqrt(waterVelocityX * waterVelocityX + waterVelocityZ * waterVelocityZ);
+            float speed01 = Math.min(1f, swimSpeed / (moveSpeed * SWIM_SPEED_MULTIPLIER + 0.0001f));
+            if (swimRippleTimer <= 0f && speed01 > 0.04f) {
+                float radius = SWIM_RIPPLE_BASE_RADIUS + SWIM_RIPPLE_SPEED_RADIUS * speed01;
+                float impulse = SWIM_RIPPLE_BASE_IMPULSE + SWIM_RIPPLE_SPEED_IMPULSE * speed01;
+                tm.disturbWater(x, z, radius, impulse);
+                swimRippleTimer = SWIM_RIPPLE_INTERVAL * (1.1f - speed01 * 0.45f);
+            }
+        } else {
+            swimRippleTimer = 0f;
+        }
+
         boolean spacePressed = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
         boolean shiftPressed = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
                 || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
@@ -211,9 +231,11 @@ public class Player {
 
             if (spacePressed) {
                 velocityY += SWIM_UP_ACCEL * dt;
+                tm.disturbWater(x, z, 1.15f, 0.35f);
             }
             if (shiftPressed) {
                 velocityY -= SWIM_DOWN_ACCEL * dt;
+                tm.disturbWater(x, z, 1.0f, 0.28f);
             }
 
             onGround = false;

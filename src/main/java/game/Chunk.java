@@ -1043,6 +1043,20 @@ public class Chunk {
         return waterSimChunk.sampleDepth(localX, localZ);
     }
 
+    public void disturbWaterAtWorld(float wx, float wz, float radiusWorld, float impulse) {
+        ensureWaterSimInitialized();
+        syncWaterSimEdgesFromNeighbors();
+
+        float localX = wx / scale - cx * SIZE;
+        float localZ = wz / scale - cz * SIZE;
+        if (localX < -2f || localZ < -2f || localX > SIZE + 2f || localZ > SIZE + 2f) {
+            return;
+        }
+
+        float radiusLocal = radiusWorld / Math.max(0.0001f, scale);
+        waterSimChunk.disturb(localX, localZ, radiusLocal, impulse);
+    }
+
     public float getWaterSurfaceAtWorld(float wx, float wz) {
         ensureWaterSimInitialized();
         float localX = wx / scale - cx * SIZE;
