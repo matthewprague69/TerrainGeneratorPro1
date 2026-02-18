@@ -255,6 +255,22 @@ public class TerrainManager {
         private final List<ChunkDistanceEntry> shadowEntries = new ArrayList<>();
     }
 
+    private static final class LodUpdateRequest {
+        private final long key;
+        private final int cx;
+        private final int cz;
+        private final int targetLod;
+        private final int distance;
+
+        private LodUpdateRequest(long key, int cx, int cz, int targetLod, int distance) {
+            this.key = key;
+            this.cx = cx;
+            this.cz = cz;
+            this.targetLod = targetLod;
+            this.distance = distance;
+        }
+    }
+
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
         this(seed, scale, renderDist, renderDist - 1,  skyRenderer);
     }
@@ -491,19 +507,68 @@ public class TerrainManager {
     }
 
     private void refreshChunkLods(int pcx, int pcz, Frustum frustum) {
-        for (long key : neededKeys) {
+        ArrayList<Long> neededSnapshot = new ArrayList<>(neededKeys);
+        if (neededSnapshot.isEmpty()) {
+            return;
+        }
+
+        List<LodUpdateRequest> requests = collectLodUpdateRequests(neededSnapshot, pcx, pcz, frustum);
+        requests.sort(Comparator.comparingInt(r -> r.distance));
+        for (LodUpdateRequest request : requests) {
+            queueChunkGeneration(request.key, request.cx, request.cz, request.targetLod, request.distance);
+        }
+    }
+
+    private List<LodUpdateRequest> collectLodUpdateRequests(List<Long> neededSnapshot, int pcx, int pcz,
+                                                            Frustum frustum) {
+        int workers = Math.max(1, Math.min(CULLING_THREADS, neededSnapshot.size()));
+        if (workers == 1 || neededSnapshot.size() < 64) {
+            List<LodUpdateRequest> requests = new ArrayList<>();
+            collectLodUpdateRequestsInto(neededSnapshot, 0, neededSnapshot.size(), pcx, pcz, frustum, requests);
+            return requests;
+        }
+
+        int batchSize = (neededSnapshot.size() + workers - 1) / workers;
+        List<Future<List<LodUpdateRequest>>> futures = new ArrayList<>(workers);
+        for (int i = 0; i < workers; i++) {
+            final int from = i * batchSize;
+            if (from >= neededSnapshot.size()) {
+                break;
+            }
+            final int to = Math.min(neededSnapshot.size(), from + batchSize);
+            futures.add(cullingExecutor.submit(() -> {
+                List<LodUpdateRequest> requests = new ArrayList<>();
+                collectLodUpdateRequestsInto(neededSnapshot, from, to, pcx, pcz, frustum, requests);
+                return requests;
+            }));
+        }
+
+        List<LodUpdateRequest> merged = new ArrayList<>();
+        for (Future<List<LodUpdateRequest>> future : futures) {
+            try {
+                merged.addAll(future.get());
+            } catch (Exception ignored) {
+            }
+        }
+        return merged;
+    }
+
+    private void collectLodUpdateRequestsInto(List<Long> neededSnapshot, int from, int to, int pcx, int pcz,
+                                              Frustum frustum, List<LodUpdateRequest> out) {
+        for (int i = from; i < to; i++) {
+            long key = neededSnapshot.get(i);
             int cx = (int) (key >> 32);
             int cz = (int) key;
             int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
-            int targetLOD = computeTargetLod(dist);
+            int targetLod = computeTargetLod(dist);
             Chunk existing = chunks.get(key);
-            if (existing == null || existing.getLOD() == targetLOD) {
+            if (existing == null || existing.getLOD() == targetLod) {
                 continue;
             }
             boolean forceNear = dist <= LOD_PRIORITY_RADIUS;
             boolean visible = frustum != null && isChunkVisible(frustum, cx, cz);
             if (forceNear || visible) {
-                queueChunkGeneration(key, cx, cz, targetLOD, dist);
+                out.add(new LodUpdateRequest(key, cx, cz, targetLod, dist));
             }
         }
     }
