@@ -2425,6 +2425,14 @@ public class Chunk {
         waterSimDirty = true;
     }
 
+    public void inheritWaterStateFrom(Chunk previous) {
+        if (previous == null || previous.waterSimChunk == null) {
+            return;
+        }
+        ensureWaterSimInitialized();
+        waterSimChunk.adoptFrom(previous.waterSimChunk);
+    }
+
     public boolean needsRenderResources() {
         return !renderResourcesBuilt;
     }

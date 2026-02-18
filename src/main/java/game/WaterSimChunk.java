@@ -168,6 +168,22 @@ public class WaterSimChunk {
         }
     }
 
+    public void adoptFrom(WaterSimChunk other) {
+        if (other == null || other.gridSize != gridSize) {
+            return;
+        }
+        for (int x = 0; x <= gridSize; x++) {
+            for (int z = 0; z <= gridSize; z++) {
+                float sourceSurface = other.bedHeight[x][z] + other.waterDepth[x][z];
+                float bed = bedHeight[x][z];
+                float maxDepth = Math.max(0f, maxSurface[x][z] - bed);
+                waterDepth[x][z] = clamp(sourceSurface - bed, 0f, maxDepth);
+                velX[x][z] = other.velX[x][z];
+                velZ[x][z] = other.velZ[x][z];
+            }
+        }
+    }
+
     public void stepSimulation(float dt) {
         float clampedDt = clamp(dt, 1.0f / 240.0f, 1.0f / 20.0f);
         float frameScale = clampedDt * 60.0f;

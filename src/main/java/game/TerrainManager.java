@@ -915,6 +915,9 @@ public class TerrainManager {
                 continue;
             }
             Chunk built = new Chunk(data.cx, data.cz, terrainNoise, scale, data.biome, this, data.lod, data);
+            if (existing != null) {
+                built.inheritWaterStateFrom(existing);
+            }
             if (existing != null && built.needsRenderResources()) {
                 pendingChunkReplacements.put(key, built);
                 queueRenderBuild(built, dist);
@@ -936,19 +939,23 @@ public class TerrainManager {
     }
 
     private void refreshNeighborEdges(Chunk chunk, int pcx, int pcz) {
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                if (dx == 0 && dz == 0) {
-                    continue;
-                }
-                Chunk neighbor = getChunk(chunk.cx + dx, chunk.cz + dz);
-                if (neighbor == null) {
-                    continue;
-                }
-                neighbor.markRenderDirty();
-                int dist = Math.max(Math.abs(neighbor.cx - pcx), Math.abs(neighbor.cz - pcz));
-                queueRenderBuild(neighbor, dist);
-            }
+        Chunk right = getChunk(chunk.cx + 1, chunk.cz);
+        if (right != null) {
+            right.markRenderDirty();
+            int dist = Math.max(Math.abs(right.cx - pcx), Math.abs(right.cz - pcz));
+            queueRenderBuild(right, dist);
+        }
+        Chunk bottom = getChunk(chunk.cx, chunk.cz + 1);
+        if (bottom != null) {
+            bottom.markRenderDirty();
+            int dist = Math.max(Math.abs(bottom.cx - pcx), Math.abs(bottom.cz - pcz));
+            queueRenderBuild(bottom, dist);
+        }
+        Chunk bottomRight = getChunk(chunk.cx + 1, chunk.cz + 1);
+        if (bottomRight != null) {
+            bottomRight.markRenderDirty();
+            int dist = Math.max(Math.abs(bottomRight.cx - pcx), Math.abs(bottomRight.cz - pcz));
+            queueRenderBuild(bottomRight, dist);
         }
     }
 
