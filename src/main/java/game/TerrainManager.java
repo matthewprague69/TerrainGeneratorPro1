@@ -139,6 +139,7 @@ public class TerrainManager {
             new ConcurrentLinkedQueue<>();
     private final ArrayDeque<Chunk> pendingRenderBuilds = new ArrayDeque<>();
     private final Set<Long> pendingRenderBuildKeys = new HashSet<>();
+    private final Set<Long> pendingRenderBuildAllowOffscreen = new HashSet<>();
     private final Map<Long, Chunk> pendingChunkReplacements = new HashMap<>();
     private final Map<Long, float[][][]> biomeWeightCache = new HashMap<>();
     private final ExecutorService chunkGenerator = Executors.newFixedThreadPool(CHUNK_GENERATOR_THREADS, r -> {
@@ -600,8 +601,10 @@ public class TerrainManager {
                 Chunk chunk = iterator.next();
                 long key = key(chunk.cx, chunk.cz);
                 Chunk pendingReplacement = pendingChunkReplacements.get(key);
+                boolean allowOffscreen = pendingRenderBuildAllowOffscreen.contains(key);
                 if (chunks.get(key) != chunk && pendingReplacement != chunk) {
                     pendingRenderBuildKeys.remove(key);
+                    pendingRenderBuildAllowOffscreen.remove(key);
                     if (pendingReplacement != null) {
                         chunk.dispose();
                     }
@@ -611,8 +614,9 @@ public class TerrainManager {
 
                 int dist = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cz - pcz));
                 boolean visible = frustum != null && isChunkVisible(frustum, chunk.cx, chunk.cz);
-                if (dist > cacheRenderDist || !visible) {
+                if (dist > cacheRenderDist || (!visible && !allowOffscreen)) {
                     pendingRenderBuildKeys.remove(key);
+                    pendingRenderBuildAllowOffscreen.remove(key);
                     if (pendingReplacement == chunk) {
                         pendingChunkReplacements.remove(key);
                         chunk.dispose();
@@ -937,29 +941,36 @@ public class TerrainManager {
         if (right != null) {
             right.markRenderDirty();
             int dist = Math.max(Math.abs(right.cx - pcx), Math.abs(right.cz - pcz));
-            queueRenderBuild(right, dist);
+            queueRenderBuild(right, dist, true);
         }
         Chunk bottom = getChunk(chunk.cx, chunk.cz + 1);
         if (bottom != null) {
             bottom.markRenderDirty();
             int dist = Math.max(Math.abs(bottom.cx - pcx), Math.abs(bottom.cz - pcz));
-            queueRenderBuild(bottom, dist);
+            queueRenderBuild(bottom, dist, true);
         }
         Chunk bottomRight = getChunk(chunk.cx + 1, chunk.cz + 1);
         if (bottomRight != null) {
             bottomRight.markRenderDirty();
             int dist = Math.max(Math.abs(bottomRight.cx - pcx), Math.abs(bottomRight.cz - pcz));
-            queueRenderBuild(bottomRight, dist);
+            queueRenderBuild(bottomRight, dist, true);
         }
     }
 
     private void queueRenderBuild(Chunk chunk, int dist) {
+        queueRenderBuild(chunk, dist, false);
+    }
+
+    private void queueRenderBuild(Chunk chunk, int dist, boolean allowOffscreen) {
         long key = key(chunk.cx, chunk.cz);
         if (pendingRenderBuildKeys.contains(key)) {
+            if (allowOffscreen) {
+                pendingRenderBuildAllowOffscreen.add(key);
+            }
             return;
         }
         Frustum frustum = lastCameraFrustum;
-        if (frustum != null && !isChunkVisible(frustum, chunk.cx, chunk.cz)) {
+        if (!allowOffscreen && frustum != null && !isChunkVisible(frustum, chunk.cx, chunk.cz)) {
             Chunk pendingReplacement = pendingChunkReplacements.get(key);
             if (pendingReplacement == chunk) {
                 pendingChunkReplacements.remove(key);
@@ -971,6 +982,9 @@ public class TerrainManager {
             return;
         }
         pendingRenderBuildKeys.add(key);
+        if (allowOffscreen) {
+            pendingRenderBuildAllowOffscreen.add(key);
+        }
         if (dist <= 2) {
             pendingRenderBuilds.addFirst(chunk);
         } else {
@@ -990,6 +1004,7 @@ public class TerrainManager {
             Chunk chunk = pendingRenderBuilds.poll();
             long key = key(chunk.cx, chunk.cz);
             pendingRenderBuildKeys.remove(key);
+            pendingRenderBuildAllowOffscreen.remove(key);
             Chunk pendingReplacement = pendingChunkReplacements.get(key);
             if (chunks.get(key) != chunk && pendingReplacement != chunk) {
                 if (pendingReplacement != null) {
