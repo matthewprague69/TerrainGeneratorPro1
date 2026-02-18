@@ -844,12 +844,18 @@ public class Main {
 
     public void run() {
         init();
-        loop();
-        TextureLoader.disposeAll();
-        glfwFreeCallbacks(window);
-        glfwDestroyWindow(window);
-        glfwTerminate();
-        glfwSetErrorCallback(null).free();
+        try {
+            loop();
+        } finally {
+            if (terrain != null) {
+                terrain.shutdown();
+            }
+            TextureLoader.disposeAll();
+            glfwFreeCallbacks(window);
+            glfwDestroyWindow(window);
+            glfwTerminate();
+            glfwSetErrorCallback(null).free();
+        }
     }
 
     private float[] readModelViewMatrix() {

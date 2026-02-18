@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 public class TerrainManager {
     public enum PipelineStage {
@@ -104,6 +105,7 @@ public class TerrainManager {
     private static final int CHUNK_GENERATOR_THREADS = Math.max(2, Math.min(8, AVAILABLE_CORES));
     private static final int FEATURE_GENERATOR_THREADS = Math.max(1, Math.min(4, AVAILABLE_CORES / 2));
     private static final int WATER_SIMULATION_THREADS = Math.max(1, Math.min(AVAILABLE_CORES, 6));
+    private static final int CULLING_THREADS = Math.max(1, Math.min(AVAILABLE_CORES, 8));
     private static final int MAX_CHUNKS_PER_FRAME = 20;
     private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 4;
     private static final long CHUNK_BUDGET_NS = 10_000_000L;
@@ -156,6 +158,11 @@ public class TerrainManager {
     });
     private final ExecutorService waterSimulationExecutor = Executors.newFixedThreadPool(WATER_SIMULATION_THREADS, r -> {
         Thread t = new Thread(r, "water-simulation");
+        t.setDaemon(true);
+        return t;
+    });
+    private final ExecutorService cullingExecutor = Executors.newFixedThreadPool(CULLING_THREADS, r -> {
+        Thread t = new Thread(r, "chunk-culling");
         t.setDaemon(true);
         return t;
     });
@@ -241,6 +248,11 @@ public class TerrainManager {
             this.chunk = chunk;
             this.dtSeconds = dtSeconds;
         }
+    }
+
+    private static final class VisibleChunkBucket {
+        private final List<ChunkDistanceEntry> renderEntries = new ArrayList<>();
+        private final List<ChunkDistanceEntry> shadowEntries = new ArrayList<>();
     }
 
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
@@ -1275,15 +1287,78 @@ public class TerrainManager {
         visibleRenderChunks.clear();
         visibleShadowChunks.clear();
 
-        for (Chunk c : chunks.values()) {
-            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            boolean visible = lastCameraFrustum == null || isChunkVisible(lastCameraFrustum, c.cx, c.cz);
-            if (dist <= renderDist && visible) {
-                visibleRenderChunks.add(new ChunkDistanceEntry(c, dist));
+        ArrayList<Chunk> chunkSnapshot = new ArrayList<>(chunks.values());
+        if (chunkSnapshot.isEmpty()) {
+            return;
+        }
+
+        Frustum frustum = lastCameraFrustum;
+        int workers = Math.max(1, Math.min(CULLING_THREADS, chunkSnapshot.size()));
+        if (workers == 1 || chunkSnapshot.size() < 24) {
+            for (Chunk c : chunkSnapshot) {
+                int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+                boolean visible = frustum == null || isChunkVisible(frustum, c.cx, c.cz);
+                if (dist <= renderDist && visible) {
+                    visibleRenderChunks.add(new ChunkDistanceEntry(c, dist));
+                }
+                if (dist <= shadowRenderDist && visible) {
+                    visibleShadowChunks.add(new ChunkDistanceEntry(c, dist));
+                }
             }
-            if (dist <= shadowRenderDist && visible) {
-                visibleShadowChunks.add(new ChunkDistanceEntry(c, dist));
+            return;
+        }
+
+        int batchSize = (chunkSnapshot.size() + workers - 1) / workers;
+        List<Future<VisibleChunkBucket>> futures = new ArrayList<>(workers);
+        for (int i = 0; i < workers; i++) {
+            final int from = i * batchSize;
+            if (from >= chunkSnapshot.size()) {
+                break;
             }
+            final int to = Math.min(chunkSnapshot.size(), from + batchSize);
+            futures.add(cullingExecutor.submit(() -> {
+                VisibleChunkBucket bucket = new VisibleChunkBucket();
+                for (int idx = from; idx < to; idx++) {
+                    Chunk c = chunkSnapshot.get(idx);
+                    int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+                    boolean visible = frustum == null || isChunkVisible(frustum, c.cx, c.cz);
+                    if (dist <= renderDist && visible) {
+                        bucket.renderEntries.add(new ChunkDistanceEntry(c, dist));
+                    }
+                    if (dist <= shadowRenderDist && visible) {
+                        bucket.shadowEntries.add(new ChunkDistanceEntry(c, dist));
+                    }
+                }
+                return bucket;
+            }));
+        }
+
+        for (Future<VisibleChunkBucket> future : futures) {
+            try {
+                VisibleChunkBucket bucket = future.get();
+                visibleRenderChunks.addAll(bucket.renderEntries);
+                visibleShadowChunks.addAll(bucket.shadowEntries);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    public void shutdown() {
+        shutdownExecutor(featureGenerator);
+        shutdownExecutor(chunkGenerator);
+        shutdownExecutor(waterSimulationExecutor);
+        shutdownExecutor(cullingExecutor);
+    }
+
+    private static void shutdownExecutor(ExecutorService executor) {
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException ex) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 
