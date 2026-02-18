@@ -130,7 +130,7 @@ public class Chunk {
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
     private static final float WATER_FOAM_FALL_RANGE = 1.55f;
     private static final float MIN_RENDERABLE_WATER_DEPTH = 0.06f;
-    private static final float WATER_EDGE_SYNC_BLEND_SOFT = 0.28f;
+    private static final float WATER_EDGE_SYNC_BLEND_SOFT = 0.62f;
     private static final LinkedHashMap<String, ImpostorEntry> IMPOSTOR_TEXTURES =
             new LinkedHashMap<>(256, 0.75f, true);
 
@@ -1083,9 +1083,9 @@ public class Chunk {
         }
 
         ensureWaterSimInitialized();
-        if (chunkDistance <= 10) {
-            syncWaterSimEdgesFromNeighbors(WATER_EDGE_SYNC_BLEND_SOFT);
-        }
+        // Render-time seam lock: enforce exact shared edge state so no cracks/gaps appear between chunks
+        // even when far chunks simulate on different cadences/LODs.
+        syncWaterSimEdgesFromNeighbors(1f);
 
         float texScale = 0.12f;
         float[] lightDir = manager.getLightDirection();
