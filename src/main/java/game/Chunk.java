@@ -490,10 +490,11 @@ public class Chunk {
     }
 
     public void drawWater(boolean frozen, float snowCoverage, float iceThickness, float waterTimeSeconds) {
-        if (!renderResourcesBuilt && waterPatches.isEmpty()) {
-            stitchEdges();
-            buildWaterDisplayList();
+        // Water geometry is built via the render-resource pipeline; avoid building it on the draw thread.
+        if (!renderResourcesBuilt || waterPatches.isEmpty()) {
+            return;
         }
+
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT);
         glDisable(GL_LIGHTING);
         glDisable(GL_TEXTURE_2D);
