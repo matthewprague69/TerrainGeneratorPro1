@@ -1100,10 +1100,15 @@ public class Chunk {
             float waveAtten3 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx2, patch.wz2, cameraWx, cameraWz);
             float waveAtten4 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx1, patch.wz2, cameraWx, cameraWz);
 
-            float waveWy1 = (waveAtten1 <= 0f) ? surface1 : getWaterHeightAt(surface1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
-            float waveWy2 = (waveAtten2 <= 0f) ? surface2 : getWaterHeightAt(surface2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
-            float waveWy3 = (waveAtten3 <= 0f) ? surface3 : getWaterHeightAt(surface3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
-            float waveWy4 = (waveAtten4 <= 0f) ? surface4 : getWaterHeightAt(surface4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
+            float speed1 = waterSimChunk.sampleSpeed((patch.wx1 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float speed2 = waterSimChunk.sampleSpeed((patch.wx2 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float speed3 = waterSimChunk.sampleSpeed((patch.wx2 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+            float speed4 = waterSimChunk.sampleSpeed((patch.wx1 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+
+            float waveWy1 = (waveAtten1 <= 0f) ? surface1 : getWaterHeightAt(surface1, depth1, speed1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
+            float waveWy2 = (waveAtten2 <= 0f) ? surface2 : getWaterHeightAt(surface2, depth2, speed2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
+            float waveWy3 = (waveAtten3 <= 0f) ? surface3 : getWaterHeightAt(surface3, depth3, speed3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
+            float waveWy4 = (waveAtten4 <= 0f) ? surface4 : getWaterHeightAt(surface4, depth4, speed4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
 
             float wy1 = lerp(surface1, waveWy1, waveAtten1);
             float wy2 = lerp(surface2, waveWy2, waveAtten2);
@@ -1298,6 +1303,29 @@ public class Chunk {
         float windStrength = manager.getWindStrength();
         float windCalmToStorm = smoothstep01(windStrength);
         // Keep water almost flat at 0 wind, then ramp quickly as wind rises.
+        float windAmplitudeBoost = 0.005f + windCalmToStorm * 1.995f;
+        float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
+        float wetness = smoothstep01(clamp01(simulatedDepth / 0.30f));
+        float detailRipple = getWaveOffset(wx, wz, timeSeconds, waveScale)
+                * (waveStrength * 0.44f * largeSwellBoost * windAmplitudeBoost) * wetness;
+
+        float bedHeight = simulatedSurface - simulatedDepth;
+        float minimumSurface = bedHeight + Math.min(simulatedDepth, MIN_RENDERABLE_WATER_DEPTH * 0.5f);
+        return Math.max(minimumSurface, simulatedSurface + detailRipple);
+    }
+
+    private float getWaterHeightAt(float simulatedSurface, float simulatedDepth, float simulatedSpeed,
+                                   float wx, float wz, float timeSeconds, boolean frozen, float waveScale) {
+        if (frozen) {
+            return simulatedSurface;
+        }
+
+        float openWater = clamp01((simulatedDepth - 1.8f) / 7.0f);
+        float waveStrength = openWater * openWater;
+        float vastWater = smoothstep01(clamp01((simulatedDepth - 4.0f) / 8.0f));
+        float velocityBoost = smoothstep01(clamp01(simulatedSpeed / 0.22f));
+        float windStrength = manager.getWindStrength();
+        float windCalmToStorm = smoothstep01(windStrength);
         float windAmplitudeBoost = 0.005f + windCalmToStorm * 1.995f;
         float largeSwellBoost = 1.0f + (WATER_LARGE_SWELL_MULTIPLIER - 1.0f) * vastWater * (0.55f + velocityBoost * 0.45f);
         float wetness = smoothstep01(clamp01(simulatedDepth / 0.30f));
