@@ -30,6 +30,11 @@ public class Main {
     private Player player;
     private SkyRenderer sky;
     private ShadowRenderer shadowRenderer;
+    private int shadowMapSize = 2048;
+    private float[] cachedLightMatrix = null;
+    private float[] cachedShadowDir = new float[] { 0f, -1f, 0f };
+    private int shadowUpdateIntervalFrames = 1;
+    private int shadowFrameCounter = 0;
 
     private boolean fullscreen = false;
     private int windowedWidth = 1600;
@@ -102,7 +107,44 @@ public class Main {
         primaryMonitor = glfwGetPrimaryMonitor();
         glfwShowWindow(window);
 
-        shadowRenderer = new ShadowRenderer(2048);
+        String renderer = glGetString(GL_RENDERER);
+        String vendor = glGetString(GL_VENDOR);
+        String gpuInfo = ((vendor == null ? "" : vendor) + " " + (renderer == null ? "" : renderer)).toLowerCase(Locale.ROOT);
+        if (gpuInfo.contains("intel") || gpuInfo.contains("uhd") || gpuInfo.contains("iris")
+                || gpuInfo.contains("vega 8") || gpuInfo.contains("radeon graphics")) {
+            shadowMapSize = 1024;
+            shadowUpdateIntervalFrames = 2;
+            terrain.setShadowRenderDistance(Math.min(terrain.getShadowRenderDistance(), 8));
+        }
+        shadowRenderer = new ShadowRenderer(shadowMapSize);
+    }
+
+
+    private boolean shouldRefreshShadowMap(float[] currentShadowDir) {
+        if (cachedLightMatrix == null || shadowFrameCounter % shadowUpdateIntervalFrames == 0) {
+            return true;
+        }
+        return shadowDirectionChanged(currentShadowDir);
+    }
+
+    private boolean shadowDirectionChanged(float[] currentShadowDir) {
+        float dx = currentShadowDir[0] - cachedShadowDir[0];
+        float dy = currentShadowDir[1] - cachedShadowDir[1];
+        float dz = currentShadowDir[2] - cachedShadowDir[2];
+        float deltaSq = dx * dx + dy * dy + dz * dz;
+        return deltaSq > 0.0004f;
+    }
+
+    private void tuneShadowUpdateRate(TerrainManager.PerformanceSnapshot snapshot) {
+        TerrainManager.StageStats depthStats = snapshot.stages.get(TerrainManager.PipelineStage.DRAW_DEPTH);
+        long depthNanos = depthStats != null ? depthStats.nanos : 0L;
+        double depthMs = depthNanos / 1_000_000.0;
+
+        if (depthMs > 5.0) {
+            shadowUpdateIntervalFrames = Math.min(4, shadowUpdateIntervalFrames + 1);
+        } else if (depthMs < 2.0) {
+            shadowUpdateIntervalFrames = Math.max(1, shadowUpdateIntervalFrames - 1);
+        }
     }
 
     private void setupProjection() {
@@ -292,6 +334,8 @@ public class Main {
         PixelTextRenderer.drawText("Draw load chunks terrain/water/depth=" + snapshot.terrainChunksDrawn + "/"
                 + snapshot.waterChunksDrawn + "/" + snapshot.depthChunksDrawn
                 + " | visible features=" + snapshot.visibleFeatures, panelX + 12f, y, 1.0f);
+        y -= 16f;
+        PixelTextRenderer.drawText("Shadow update cadence: every " + shadowUpdateIntervalFrames + " frame(s)", panelX + 12f, y, 1.0f);
         y -= 20f;
 
         long total = Math.max(1L, snapshot.estimatedFrameNanos);
@@ -318,7 +362,7 @@ public class Main {
     private void drawMenuOverlay(int width, int height, double mouseX, double mouseY) {
         UIRenderer.begin2D(width, height);
         float panelWidth = 520f;
-        float panelHeight = 740f;
+        float panelHeight = 780f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
 
@@ -354,6 +398,8 @@ public class Main {
         rowY -= 40;
         drawMenuRow("Shadow render distance", terrain.getShadowRenderDistance(), panelX + 20, rowY,
                 mouseX, mouseY);
+        rowY -= 40;
+        drawMenuRowText("Visual quality", getVisualQualityLabel(), panelX + 20, rowY, mouseX, mouseY);
         rowY -= 40;
         drawMenuRowText("Fullscreen", fullscreen ? "ON" : "OFF", panelX + 20, rowY, mouseX, mouseY);
         rowY -= 40;
@@ -421,7 +467,7 @@ public class Main {
 
     private void handleMenuClick(double mouseX, double mouseY, int width, int height) {
         float panelWidth = 520f;
-        float panelHeight = 740f;
+        float panelHeight = 780f;
         float panelX = (width - panelWidth) * 0.5f;
         float panelY = (height - panelHeight) * 0.5f;
         float rowY = panelY + panelHeight - 80;
@@ -482,7 +528,11 @@ public class Main {
             return;
         }
         rowY -= 40;
-        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 14);
+        if (handleRowClick(mouseX, mouseY, panelX + 20, rowY, 14)) {
+            return;
+        }
+        rowY -= 40;
+        handleRowClick(mouseX, mouseY, panelX + 20, rowY, 15);
     }
 
     private boolean handleRowClick(double mouseX, double mouseY, float x, float y, int rowIndex) {
@@ -527,25 +577,28 @@ public class Main {
                 terrain.setShadowRenderDistance(terrain.getShadowRenderDistance() + delta);
                 break;
             case 8:
-                toggleFullscreen();
+                terrain.setVisualQualityPreset(terrain.getVisualQualityPreset() + delta);
                 break;
             case 9:
-                changeResolution(delta);
+                toggleFullscreen();
                 break;
             case 10:
+                changeResolution(delta);
+                break;
+            case 11:
                 vsyncEnabled = !vsyncEnabled;
                 applyVSync();
                 break;
-            case 11:
+            case 12:
                 terrain.setWeatherType(adjustWeatherType(terrain.getWeatherType(), delta));
                 break;
-            case 12:
+            case 13:
                 terrain.setWindDirectionDegrees(terrain.getWindDirectionDegrees() + delta * 15f);
                 break;
-            case 13:
+            case 14:
                 terrain.setWindStrength(terrain.getWindStrength() + delta * 0.05f);
                 break;
-            case 14:
+            case 15:
                 sky.setTimeSpeed(sky.getTimeSpeed() + delta * 0.25f);
                 break;
             default:
@@ -591,6 +644,18 @@ public class Main {
 
     private String getImpostorQualityLabel() {
         switch (terrain.getImpostorQualityPreset()) {
+            case 2:
+                return "High";
+            case 1:
+                return "Medium";
+            default:
+                return "Low";
+        }
+    }
+
+
+    private String getVisualQualityLabel() {
+        switch (terrain.getVisualQualityPreset()) {
             case 2:
                 return "High";
             case 1:
@@ -752,11 +817,28 @@ public class Main {
             terrain.update(player.getX(), player.getFootY(), player.getZ(), frustum, dt);
             sky.update(dt);
 
+            TerrainManager.PerformanceSnapshot perfSnapshot = terrain.getPerformanceSnapshot();
+            tuneShadowUpdateRate(perfSnapshot);
+
             float[] shadowDir = sky.getShadowDirection();
             float[] lightDir = sky.getLightDirection();
             float lightStrength = sky.getSkyBrightness();
             float[] lightColor = sky.getLightColor();
-            float[] lightMatrix = shadowRenderer.renderShadowMap(
+
+            if (shouldRefreshShadowMap(shadowDir)) {
+                cachedLightMatrix = shadowRenderer.renderShadowMap(
+                        terrain,
+                        shadowDir,
+                        player.getX(),
+                        player.getY(),
+                        player.getZ(),
+                        framebufferWidth,
+                        framebufferHeight
+                );
+                cachedShadowDir = shadowDir.clone();
+            }
+            shadowFrameCounter++;
+            float[] lightMatrix = cachedLightMatrix != null ? cachedLightMatrix : shadowRenderer.renderShadowMap(
                     terrain,
                     shadowDir,
                     player.getX(),
@@ -814,12 +896,18 @@ public class Main {
 
     public void run() {
         init();
-        loop();
-        TextureLoader.disposeAll();
-        glfwFreeCallbacks(window);
-        glfwDestroyWindow(window);
-        glfwTerminate();
-        glfwSetErrorCallback(null).free();
+        try {
+            loop();
+        } finally {
+            if (terrain != null) {
+                terrain.shutdown();
+            }
+            TextureLoader.disposeAll();
+            glfwFreeCallbacks(window);
+            glfwDestroyWindow(window);
+            glfwTerminate();
+            glfwSetErrorCallback(null).free();
+        }
     }
 
     private float[] readModelViewMatrix() {

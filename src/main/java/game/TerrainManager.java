@@ -16,6 +16,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 public class TerrainManager {
     public enum PipelineStage {
@@ -30,6 +32,7 @@ public class TerrainManager {
         DISPOSE_FAR_CHUNKS,
         PROCESS_PENDING_CHUNK_GENERATIONS,
         PROCESS_PENDING_FEATURE_GENERATIONS,
+        UPDATE_WATER_SIMULATION,
         DRAW_TERRAIN_AND_FEATURES,
         DRAW_WATER,
         DRAW_DEPTH
@@ -101,6 +104,8 @@ public class TerrainManager {
     private static final int AVAILABLE_CORES = Math.max(1, Runtime.getRuntime().availableProcessors());
     private static final int CHUNK_GENERATOR_THREADS = Math.max(2, Math.min(8, AVAILABLE_CORES));
     private static final int FEATURE_GENERATOR_THREADS = Math.max(1, Math.min(4, AVAILABLE_CORES / 2));
+    private static final int WATER_SIMULATION_THREADS = Math.max(1, Math.min(AVAILABLE_CORES, 6));
+    private static final int CULLING_THREADS = Math.max(1, Math.min(AVAILABLE_CORES, 8));
     private static final int MAX_CHUNKS_PER_FRAME = 20;
     private static final int MAX_FEATURE_CHUNKS_PER_FRAME = 4;
     private static final long CHUNK_BUDGET_NS = 10_000_000L;
@@ -151,6 +156,16 @@ public class TerrainManager {
         t.setDaemon(true);
         return t;
     });
+    private final ExecutorService waterSimulationExecutor = Executors.newFixedThreadPool(WATER_SIMULATION_THREADS, r -> {
+        Thread t = new Thread(r, "water-simulation");
+        t.setDaemon(true);
+        return t;
+    });
+    private final ExecutorService cullingExecutor = Executors.newFixedThreadPool(CULLING_THREADS, r -> {
+        Thread t = new Thread(r, "chunk-culling");
+        t.setDaemon(true);
+        return t;
+    });
     private final OpenSimplexNoise terrainNoise;
     private final BiomeRegionGenerator regionGenerator;
     private final SkyRenderer skyRenderer;
@@ -184,6 +199,7 @@ public class TerrainManager {
     private int grassDetailDistance;
     private int impostorAngleCount = 1;
     private int impostorQualityPreset = 1;
+    private int visualQualityPreset = 2;
     private int impostorHighQualityDistance = 10;
     private float windDirectionDegrees = 45f;
     private float windStrength = 0.5f;
@@ -207,6 +223,53 @@ public class TerrainManager {
     private int perfVisibleFeatures = 0;
     private Frustum lastCameraFrustum = null;
     private long waterSimulationFrameId = 0L;
+    private long visibleChunkFrameId = 0L;
+    private int visibleChunkFramePcx = Integer.MIN_VALUE;
+    private int visibleChunkFramePcz = Integer.MIN_VALUE;
+    private Frustum visibleChunkFrameFrustum = null;
+    private final List<ChunkDistanceEntry> visibleRenderChunks = new ArrayList<>();
+    private final List<ChunkDistanceEntry> visibleShadowChunks = new ArrayList<>();
+
+    private static final class ChunkDistanceEntry {
+        private final Chunk chunk;
+        private final int distance;
+
+        private ChunkDistanceEntry(Chunk chunk, int distance) {
+            this.chunk = chunk;
+            this.distance = distance;
+        }
+    }
+
+    private static final class WaterSimulationTask {
+        private final Chunk chunk;
+        private final float dtSeconds;
+
+        private WaterSimulationTask(Chunk chunk, float dtSeconds) {
+            this.chunk = chunk;
+            this.dtSeconds = dtSeconds;
+        }
+    }
+
+    private static final class VisibleChunkBucket {
+        private final List<ChunkDistanceEntry> renderEntries = new ArrayList<>();
+        private final List<ChunkDistanceEntry> shadowEntries = new ArrayList<>();
+    }
+
+    private static final class LodUpdateRequest {
+        private final long key;
+        private final int cx;
+        private final int cz;
+        private final int targetLod;
+        private final int distance;
+
+        private LodUpdateRequest(long key, int cx, int cz, int targetLod, int distance) {
+            this.key = key;
+            this.cx = cx;
+            this.cz = cz;
+            this.targetLod = targetLod;
+            this.distance = distance;
+        }
+    }
 
     public TerrainManager(long seed, float scale, int renderDist, SkyRenderer skyRenderer) {
         this(seed, scale, renderDist, renderDist - 1,  skyRenderer);
@@ -444,19 +507,68 @@ public class TerrainManager {
     }
 
     private void refreshChunkLods(int pcx, int pcz, Frustum frustum) {
-        for (long key : neededKeys) {
+        ArrayList<Long> neededSnapshot = new ArrayList<>(neededKeys);
+        if (neededSnapshot.isEmpty()) {
+            return;
+        }
+
+        List<LodUpdateRequest> requests = collectLodUpdateRequests(neededSnapshot, pcx, pcz, frustum);
+        requests.sort(Comparator.comparingInt(r -> r.distance));
+        for (LodUpdateRequest request : requests) {
+            queueChunkGeneration(request.key, request.cx, request.cz, request.targetLod, request.distance);
+        }
+    }
+
+    private List<LodUpdateRequest> collectLodUpdateRequests(List<Long> neededSnapshot, int pcx, int pcz,
+                                                            Frustum frustum) {
+        int workers = Math.max(1, Math.min(CULLING_THREADS, neededSnapshot.size()));
+        if (workers == 1 || neededSnapshot.size() < 64) {
+            List<LodUpdateRequest> requests = new ArrayList<>();
+            collectLodUpdateRequestsInto(neededSnapshot, 0, neededSnapshot.size(), pcx, pcz, frustum, requests);
+            return requests;
+        }
+
+        int batchSize = (neededSnapshot.size() + workers - 1) / workers;
+        List<Future<List<LodUpdateRequest>>> futures = new ArrayList<>(workers);
+        for (int i = 0; i < workers; i++) {
+            final int from = i * batchSize;
+            if (from >= neededSnapshot.size()) {
+                break;
+            }
+            final int to = Math.min(neededSnapshot.size(), from + batchSize);
+            futures.add(cullingExecutor.submit(() -> {
+                List<LodUpdateRequest> requests = new ArrayList<>();
+                collectLodUpdateRequestsInto(neededSnapshot, from, to, pcx, pcz, frustum, requests);
+                return requests;
+            }));
+        }
+
+        List<LodUpdateRequest> merged = new ArrayList<>();
+        for (Future<List<LodUpdateRequest>> future : futures) {
+            try {
+                merged.addAll(future.get());
+            } catch (Exception ignored) {
+            }
+        }
+        return merged;
+    }
+
+    private void collectLodUpdateRequestsInto(List<Long> neededSnapshot, int from, int to, int pcx, int pcz,
+                                              Frustum frustum, List<LodUpdateRequest> out) {
+        for (int i = from; i < to; i++) {
+            long key = neededSnapshot.get(i);
             int cx = (int) (key >> 32);
             int cz = (int) key;
             int dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
-            int targetLOD = computeTargetLod(dist);
+            int targetLod = computeTargetLod(dist);
             Chunk existing = chunks.get(key);
-            if (existing == null || existing.getLOD() == targetLOD) {
+            if (existing == null || existing.getLOD() == targetLod) {
                 continue;
             }
             boolean forceNear = dist <= LOD_PRIORITY_RADIUS;
             boolean visible = frustum != null && isChunkVisible(frustum, cx, cz);
             if (forceNear || visible) {
-                queueChunkGeneration(key, cx, cz, targetLOD, dist);
+                out.add(new LodUpdateRequest(key, cx, cz, targetLod, dist));
             }
         }
     }
@@ -1089,23 +1201,17 @@ public class TerrainManager {
         long start = System.nanoTime();
         enableFogDynamic();
 
-        int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
-        int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        ensureVisibleChunkLists(wx, wz);
         int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
         int renderedTerrainChunks = 0;
         int renderedFeatures = 0;
-        for (Chunk c : chunks.values()) {
-            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > renderDist) {
-                continue;
-            }
-            if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
-                continue;
-            }
+        for (ChunkDistanceEntry entry : visibleRenderChunks) {
+            Chunk c = entry.chunk;
+            int dist = entry.distance;
             c.drawTerrainAndFeatures(dist, impostorDistance, grassDetailDistance,
-                    featureRenderDist, weatherSystem.getSnowCoverage());
+                    featureRenderDist, visualQualityPreset <= 0 ? 0f : weatherSystem.getSnowCoverage());
             renderedTerrainChunks++;
             renderedFeatures += c.getFeatures().size();
         }
@@ -1121,31 +1227,62 @@ public class TerrainManager {
         float waterTimeSeconds = (float) (System.nanoTime() * 1.0e-9);
         final float baseWaterSimDt = 1.0f / 60.0f;
         waterSimulationFrameId++;
-        int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
-        int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
-        int renderedWaterChunks = 0;
-        for (Chunk c : chunks.values()) {
-            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > renderDist) {
-                continue;
-            }
-            if (lastCameraFrustum != null && !isChunkVisible(lastCameraFrustum, c.cx, c.cz)) {
-                continue;
-            }
-            if (!weatherSystem.isWaterFrozen()) {
+        ensureVisibleChunkLists(wx, wz);
+
+        long waterUpdateStart = System.nanoTime();
+        List<WaterSimulationTask> waterSimulationTasks = new ArrayList<>();
+        if (!weatherSystem.isWaterFrozen()) {
+            for (ChunkDistanceEntry entry : visibleRenderChunks) {
+                int dist = entry.distance;
                 int simulationCadenceFrames = getWaterSimulationCadenceFrames(dist);
-                long chunkKey = key(c.cx, c.cz);
+                long chunkKey = key(entry.chunk.cx, entry.chunk.cz);
                 int phase = Math.floorMod(Long.hashCode(chunkKey), simulationCadenceFrames);
                 if (Math.floorMod(waterSimulationFrameId + phase, simulationCadenceFrames) == 0) {
-                    c.updateWaterSimulation(baseWaterSimDt * simulationCadenceFrames);
+                    waterSimulationTasks.add(new WaterSimulationTask(entry.chunk,
+                            baseWaterSimDt * simulationCadenceFrames));
                 }
             }
+        }
+        runWaterSimulationTasks(waterSimulationTasks);
+        recordStage(PipelineStage.UPDATE_WATER_SIMULATION, System.nanoTime() - waterUpdateStart);
+
+        int renderedWaterChunks = 0;
+        for (ChunkDistanceEntry entry : visibleRenderChunks) {
+            Chunk c = entry.chunk;
+            int dist = entry.distance;
             c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
                     weatherSystem.getIceThickness(), waterTimeSeconds, dist, wx, wz);
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;
         recordStage(PipelineStage.DRAW_WATER, System.nanoTime() - start);
+    }
+
+    private void runWaterSimulationTasks(List<WaterSimulationTask> tasks) {
+        if (tasks.isEmpty()) {
+            return;
+        }
+
+        if (WATER_SIMULATION_THREADS <= 1 || tasks.size() <= 1) {
+            for (WaterSimulationTask task : tasks) {
+                task.chunk.updateWaterSimulationStep(task.dtSeconds);
+            }
+        } else {
+            List<Future<?>> futures = new ArrayList<>(tasks.size());
+            for (WaterSimulationTask task : tasks) {
+                futures.add(waterSimulationExecutor.submit(() -> task.chunk.updateWaterSimulationStep(task.dtSeconds)));
+            }
+            for (Future<?> future : futures) {
+                try {
+                    future.get();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        for (WaterSimulationTask task : tasks) {
+            task.chunk.synchronizeWaterSimulationEdges();
+        }
     }
 
     private static int getWaterSimulationCadenceFrames(int chunkDistance) {
@@ -1160,17 +1297,14 @@ public class TerrainManager {
 
     public void drawDepth(float wx, float wz) {
         long start = System.nanoTime();
-        int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
-        int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        ensureVisibleChunkLists(wx, wz);
         int impostorDistance = Math.min(this.featureImpostorDistance, featureRenderDist);
         int grassDetailDistance = Math.min(this.grassDetailDistance, featureRenderDist);
 
         int renderedDepthChunks = 0;
-        for (Chunk c : chunks.values()) {
-            int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
-            if (dist > shadowRenderDist) {
-                continue;
-            }
+        for (ChunkDistanceEntry entry : visibleShadowChunks) {
+            Chunk c = entry.chunk;
+            int dist = entry.distance;
             c.renderDepth(dist, impostorDistance, grassDetailDistance,
                     featureRenderDist);
             renderedDepthChunks++;
@@ -1201,6 +1335,96 @@ public class TerrainManager {
         glFogfv(GL_FOG_COLOR, fogColorBuffer);
 
         glHint(GL_FOG_HINT, GL_NICEST);
+    }
+
+    private void ensureVisibleChunkLists(float wx, float wz) {
+        int pcx = (int) Math.floor(wx / (Chunk.SIZE * scale));
+        int pcz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        if (visibleChunkFramePcx == pcx && visibleChunkFramePcz == pcz
+                && visibleChunkFrameFrustum == lastCameraFrustum) {
+            return;
+        }
+
+        visibleChunkFrameId++;
+        visibleChunkFramePcx = pcx;
+        visibleChunkFramePcz = pcz;
+        visibleChunkFrameFrustum = lastCameraFrustum;
+        visibleRenderChunks.clear();
+        visibleShadowChunks.clear();
+
+        ArrayList<Chunk> chunkSnapshot = new ArrayList<>(chunks.values());
+        if (chunkSnapshot.isEmpty()) {
+            return;
+        }
+
+        Frustum frustum = lastCameraFrustum;
+        int workers = Math.max(1, Math.min(CULLING_THREADS, chunkSnapshot.size()));
+        if (workers == 1 || chunkSnapshot.size() < 24) {
+            for (Chunk c : chunkSnapshot) {
+                int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+                boolean visible = frustum == null || isChunkVisible(frustum, c.cx, c.cz);
+                if (dist <= renderDist && visible) {
+                    visibleRenderChunks.add(new ChunkDistanceEntry(c, dist));
+                }
+                if (dist <= shadowRenderDist && visible) {
+                    visibleShadowChunks.add(new ChunkDistanceEntry(c, dist));
+                }
+            }
+            return;
+        }
+
+        int batchSize = (chunkSnapshot.size() + workers - 1) / workers;
+        List<Future<VisibleChunkBucket>> futures = new ArrayList<>(workers);
+        for (int i = 0; i < workers; i++) {
+            final int from = i * batchSize;
+            if (from >= chunkSnapshot.size()) {
+                break;
+            }
+            final int to = Math.min(chunkSnapshot.size(), from + batchSize);
+            futures.add(cullingExecutor.submit(() -> {
+                VisibleChunkBucket bucket = new VisibleChunkBucket();
+                for (int idx = from; idx < to; idx++) {
+                    Chunk c = chunkSnapshot.get(idx);
+                    int dist = Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz));
+                    boolean visible = frustum == null || isChunkVisible(frustum, c.cx, c.cz);
+                    if (dist <= renderDist && visible) {
+                        bucket.renderEntries.add(new ChunkDistanceEntry(c, dist));
+                    }
+                    if (dist <= shadowRenderDist && visible) {
+                        bucket.shadowEntries.add(new ChunkDistanceEntry(c, dist));
+                    }
+                }
+                return bucket;
+            }));
+        }
+
+        for (Future<VisibleChunkBucket> future : futures) {
+            try {
+                VisibleChunkBucket bucket = future.get();
+                visibleRenderChunks.addAll(bucket.renderEntries);
+                visibleShadowChunks.addAll(bucket.shadowEntries);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    public void shutdown() {
+        shutdownExecutor(featureGenerator);
+        shutdownExecutor(chunkGenerator);
+        shutdownExecutor(waterSimulationExecutor);
+        shutdownExecutor(cullingExecutor);
+    }
+
+    private static void shutdownExecutor(ExecutorService executor) {
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException ex) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     public float[] getFogSettings() {
@@ -1632,6 +1856,9 @@ public class TerrainManager {
     }
 
     public void renderWeatherEffects(float camX, float camY, float camZ) {
+        if (visualQualityPreset <= 0) {
+            return;
+        }
         float surfaceY = getHeight(camX, camZ);
         float minSurface = Chunk.WATER_LEVEL;
         if (weatherSystem.isWaterFrozen()) {
@@ -1640,6 +1867,14 @@ public class TerrainManager {
         surfaceY = Math.max(surfaceY, minSurface);
         float altitudeSnowStrength = Chunk.getAltitudeSnowCoverage(surfaceY);
         weatherSystem.renderPrecipitation(camX, camY, camZ, surfaceY, altitudeSnowStrength);
+    }
+
+    public void setVisualQualityPreset(int preset) {
+        visualQualityPreset = Math.max(0, Math.min(2, preset));
+    }
+
+    public int getVisualQualityPreset() {
+        return visualQualityPreset;
     }
 
     public int getSnowTexture() {
