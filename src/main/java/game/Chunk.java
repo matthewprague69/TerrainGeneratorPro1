@@ -131,6 +131,10 @@ public class Chunk {
             new LinkedHashMap<>(256, 0.75f, true);
 
     private static final class WaterPatch {
+        private final int gx1;
+        private final int gz1;
+        private final int gx2;
+        private final int gz2;
         private final float wx1;
         private final float wz1;
         private final float wx2;
@@ -148,10 +152,15 @@ public class Chunk {
         private final float depth3;
         private final float depth4;
 
-        private WaterPatch(float wx1, float wz1, float wx2, float wz2,
+        private WaterPatch(int gx1, int gz1, int gx2, int gz2,
+                           float wx1, float wz1, float wx2, float wz2,
                            float wy1, float wy2, float wy3, float wy4,
                            float terrainY1, float terrainY2, float terrainY3, float terrainY4,
                            float depth1, float depth2, float depth3, float depth4) {
+            this.gx1 = gx1;
+            this.gz1 = gz1;
+            this.gx2 = gx2;
+            this.gz2 = gz2;
             this.wx1 = wx1;
             this.wz1 = wz1;
             this.wx2 = wx2;
@@ -976,7 +985,7 @@ public class Chunk {
                 float wx2 = (cx * SIZE + x2) * scale;
                 float wz2 = (cz * SIZE + z2) * scale;
 
-                nextWaterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2,
+                nextWaterPatches.add(new WaterPatch(x, z, x2, z2, wx1, wz1, wx2, wz2,
                         y00 + d00, y10 + d10, y11 + d11, y01 + d01,
                         y00, y10, y11, y01,
                         d00, d10, d11, d01));
@@ -1064,6 +1073,7 @@ public class Chunk {
         syncWaterSimEdgesFromNeighbors();
 
         float texScale = 0.12f;
+        boolean animateWaves = !frozen && chunkDistance <= 6;
         float[] lightDir = manager.getLightDirection();
         float lx = -lightDir[0];
         float ly = -lightDir[1];
@@ -1072,15 +1082,15 @@ public class Chunk {
 
         glBegin(GL_TRIANGLES);
         for (WaterPatch patch : waterPatches) {
-            float surface1 = waterSimChunk.sampleSurface((patch.wx1 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
-            float surface2 = waterSimChunk.sampleSurface((patch.wx2 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
-            float surface3 = waterSimChunk.sampleSurface((patch.wx2 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
-            float surface4 = waterSimChunk.sampleSurface((patch.wx1 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+            float surface1 = waterSimChunk.getSurfaceAtGrid(patch.gx1, patch.gz1);
+            float surface2 = waterSimChunk.getSurfaceAtGrid(patch.gx2, patch.gz1);
+            float surface3 = waterSimChunk.getSurfaceAtGrid(patch.gx2, patch.gz2);
+            float surface4 = waterSimChunk.getSurfaceAtGrid(patch.gx1, patch.gz2);
 
-            float depth1 = waterSimChunk.sampleDepth((patch.wx1 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
-            float depth2 = waterSimChunk.sampleDepth((patch.wx2 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
-            float depth3 = waterSimChunk.sampleDepth((patch.wx2 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
-            float depth4 = waterSimChunk.sampleDepth((patch.wx1 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+            float depth1 = waterSimChunk.getDepthAtGrid(patch.gx1, patch.gz1);
+            float depth2 = waterSimChunk.getDepthAtGrid(patch.gx2, patch.gz1);
+            float depth3 = waterSimChunk.getDepthAtGrid(patch.gx2, patch.gz2);
+            float depth4 = waterSimChunk.getDepthAtGrid(patch.gx1, patch.gz2);
 
             boolean wet1 = depth1 >= MIN_RENDERABLE_WATER_DEPTH;
             boolean wet2 = depth2 >= MIN_RENDERABLE_WATER_DEPTH;
@@ -1095,10 +1105,10 @@ public class Chunk {
             float waveScale3 = getWaveScale(surface3, patch.terrainY3);
             float waveScale4 = getWaveScale(surface4, patch.terrainY4);
 
-            float waveAtten1 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx1, patch.wz1, cameraWx, cameraWz);
-            float waveAtten2 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx2, patch.wz1, cameraWx, cameraWz);
-            float waveAtten3 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx2, patch.wz2, cameraWx, cameraWz);
-            float waveAtten4 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx1, patch.wz2, cameraWx, cameraWz);
+            float waveAtten1 = animateWaves ? getWaveAttenuationAtDistance(patch.wx1, patch.wz1, cameraWx, cameraWz) : 0f;
+            float waveAtten2 = animateWaves ? getWaveAttenuationAtDistance(patch.wx2, patch.wz1, cameraWx, cameraWz) : 0f;
+            float waveAtten3 = animateWaves ? getWaveAttenuationAtDistance(patch.wx2, patch.wz2, cameraWx, cameraWz) : 0f;
+            float waveAtten4 = animateWaves ? getWaveAttenuationAtDistance(patch.wx1, patch.wz2, cameraWx, cameraWz) : 0f;
 
             float waveWy1 = (waveAtten1 <= 0f) ? surface1 : getWaterHeightAt(surface1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
             float waveWy2 = (waveAtten2 <= 0f) ? surface2 : getWaterHeightAt(surface2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
