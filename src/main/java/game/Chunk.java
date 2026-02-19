@@ -127,6 +127,7 @@ public class Chunk {
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
     private static final float WATER_FOAM_FALL_RANGE = 1.55f;
     private static final float MIN_RENDERABLE_WATER_DEPTH = 0.06f;
+    private static final float WATER_CONNECTIVITY_DEPTH_EPSILON = 0.001f;
     private static final LinkedHashMap<String, ImpostorEntry> IMPOSTOR_TEXTURES =
             new LinkedHashMap<>(256, 0.75f, true);
 
@@ -961,10 +962,10 @@ public class Chunk {
                 float d01 = waterSimChunk.getDepthAtGrid(x, z2);
                 float d11 = waterSimChunk.getDepthAtGrid(x2, z2);
 
-                boolean oceanWet00 = d00 >= MIN_RENDERABLE_WATER_DEPTH && y00 < WATER_LEVEL + 0.02f;
-                boolean oceanWet10 = d10 >= MIN_RENDERABLE_WATER_DEPTH && y10 < WATER_LEVEL + 0.02f;
-                boolean oceanWet01 = d01 >= MIN_RENDERABLE_WATER_DEPTH && y01 < WATER_LEVEL + 0.02f;
-                boolean oceanWet11 = d11 >= MIN_RENDERABLE_WATER_DEPTH && y11 < WATER_LEVEL + 0.02f;
+                boolean oceanWet00 = d00 >= WATER_CONNECTIVITY_DEPTH_EPSILON && y00 < WATER_LEVEL + MIN_RENDERABLE_WATER_DEPTH;
+                boolean oceanWet10 = d10 >= WATER_CONNECTIVITY_DEPTH_EPSILON && y10 < WATER_LEVEL + MIN_RENDERABLE_WATER_DEPTH;
+                boolean oceanWet01 = d01 >= WATER_CONNECTIVITY_DEPTH_EPSILON && y01 < WATER_LEVEL + MIN_RENDERABLE_WATER_DEPTH;
+                boolean oceanWet11 = d11 >= WATER_CONNECTIVITY_DEPTH_EPSILON && y11 < WATER_LEVEL + MIN_RENDERABLE_WATER_DEPTH;
                 int oceanCorners = (oceanWet00 ? 1 : 0) + (oceanWet10 ? 1 : 0) + (oceanWet01 ? 1 : 0) + (oceanWet11 ? 1 : 0);
                 if (oceanCorners == 0) {
                     x = x2;
