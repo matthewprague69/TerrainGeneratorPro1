@@ -1149,13 +1149,16 @@ public class TerrainManager {
     }
 
     private static int getWaterSimulationCadenceFrames(int chunkDistance) {
-        if (chunkDistance <= 2) {
+        if (chunkDistance <= 1) {
             return 1;
         }
-        if (chunkDistance <= 6) {
+        if (chunkDistance <= 3) {
             return 2;
         }
-        return 4;
+        if (chunkDistance <= 7) {
+            return 4;
+        }
+        return 6;
     }
 
     public void drawDepth(float wx, float wz) {

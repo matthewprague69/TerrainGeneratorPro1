@@ -1061,7 +1061,6 @@ public class Chunk {
         }
 
         ensureWaterSimInitialized();
-        syncWaterSimEdgesFromNeighbors();
 
         float texScale = 0.12f;
         float[] lightDir = manager.getLightDirection();
@@ -1069,6 +1068,10 @@ public class Chunk {
         float ly = -lightDir[1];
         float lz = -lightDir[2];
         boolean highQualityShading = chunkDistance <= 4;
+        boolean lowQualityWave = chunkDistance > 2;
+        float animatedTimeSeconds = lowQualityWave
+                ? quantizeWaveTime(timeSeconds, 1.0f / 24.0f)
+                : timeSeconds;
 
         glBegin(GL_TRIANGLES);
         for (WaterPatch patch : waterPatches) {
@@ -1100,15 +1103,15 @@ public class Chunk {
             float waveAtten3 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx2, patch.wz2, cameraWx, cameraWz);
             float waveAtten4 = frozen ? 0f : getWaveAttenuationAtDistance(patch.wx1, patch.wz2, cameraWx, cameraWz);
 
-            float speed1 = waterSimChunk.sampleSpeed((patch.wx1 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
-            float speed2 = waterSimChunk.sampleSpeed((patch.wx2 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
-            float speed3 = waterSimChunk.sampleSpeed((patch.wx2 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
-            float speed4 = waterSimChunk.sampleSpeed((patch.wx1 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+            float speed1 = (waveAtten1 <= 0f) ? 0f : waterSimChunk.sampleSpeed((patch.wx1 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float speed2 = (waveAtten2 <= 0f) ? 0f : waterSimChunk.sampleSpeed((patch.wx2 / scale) - (cx * SIZE), (patch.wz1 / scale) - (cz * SIZE));
+            float speed3 = (waveAtten3 <= 0f) ? 0f : waterSimChunk.sampleSpeed((patch.wx2 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
+            float speed4 = (waveAtten4 <= 0f) ? 0f : waterSimChunk.sampleSpeed((patch.wx1 / scale) - (cx * SIZE), (patch.wz2 / scale) - (cz * SIZE));
 
-            float waveWy1 = (waveAtten1 <= 0f) ? surface1 : getWaterHeightAt(surface1, depth1, speed1, patch.wx1, patch.wz1, timeSeconds, frozen, waveScale1);
-            float waveWy2 = (waveAtten2 <= 0f) ? surface2 : getWaterHeightAt(surface2, depth2, speed2, patch.wx2, patch.wz1, timeSeconds, frozen, waveScale2);
-            float waveWy3 = (waveAtten3 <= 0f) ? surface3 : getWaterHeightAt(surface3, depth3, speed3, patch.wx2, patch.wz2, timeSeconds, frozen, waveScale3);
-            float waveWy4 = (waveAtten4 <= 0f) ? surface4 : getWaterHeightAt(surface4, depth4, speed4, patch.wx1, patch.wz2, timeSeconds, frozen, waveScale4);
+            float waveWy1 = (waveAtten1 <= 0f) ? surface1 : getWaterHeightAt(surface1, depth1, speed1, patch.wx1, patch.wz1, animatedTimeSeconds, frozen, waveScale1);
+            float waveWy2 = (waveAtten2 <= 0f) ? surface2 : getWaterHeightAt(surface2, depth2, speed2, patch.wx2, patch.wz1, animatedTimeSeconds, frozen, waveScale2);
+            float waveWy3 = (waveAtten3 <= 0f) ? surface3 : getWaterHeightAt(surface3, depth3, speed3, patch.wx2, patch.wz2, animatedTimeSeconds, frozen, waveScale3);
+            float waveWy4 = (waveAtten4 <= 0f) ? surface4 : getWaterHeightAt(surface4, depth4, speed4, patch.wx1, patch.wz2, animatedTimeSeconds, frozen, waveScale4);
 
             float wy1 = lerp(surface1, waveWy1, waveAtten1);
             float wy2 = lerp(surface2, waveWy2, waveAtten2);
@@ -1395,6 +1398,13 @@ public class Chunk {
         float depth = Math.max(0f, baseWaterHeight - terrainHeight);
         float openWaterFactor = clamp01((depth - 0.8f) / 6.0f);
         return 0.95f + openWaterFactor * 4.05f;
+    }
+
+    private static float quantizeWaveTime(float timeSeconds, float stepSeconds) {
+        if (stepSeconds <= 0f) {
+            return timeSeconds;
+        }
+        return (float) (Math.floor(timeSeconds / stepSeconds) * stepSeconds);
     }
 
     private static float clamp01(float value) {
