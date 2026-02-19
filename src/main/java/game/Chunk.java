@@ -1068,7 +1068,7 @@ public class Chunk {
         float lx = -lightDir[0];
         float ly = -lightDir[1];
         float lz = -lightDir[2];
-
+        boolean highQualityShading = chunkDistance <= 4;
 
         glBegin(GL_TRIANGLES);
         for (WaterPatch patch : waterPatches) {
@@ -1132,20 +1132,20 @@ public class Chunk {
             // Triangle 1: (1,2,3)
             if (wet1 && wet2 && wet3) {
                 submitWaterVertex(patch.wx1, patch.wz1, wy1, surface1, patch.terrainY1,
-                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature);
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature, highQualityShading);
                 submitWaterVertex(patch.wx2, patch.wz1, wy2, surface2, patch.terrainY2,
-                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale2, dx2, dz2, curvature);
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale2, dx2, dz2, curvature, highQualityShading);
                 submitWaterVertex(patch.wx2, patch.wz2, wy3, surface3, patch.terrainY3,
-                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature);
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature, highQualityShading);
             }
             // Triangle 2: (1,3,4)
             if (wet1 && wet3 && wet4) {
                 submitWaterVertex(patch.wx1, patch.wz1, wy1, surface1, patch.terrainY1,
-                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature);
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale1, dx1, dz1, curvature, highQualityShading);
                 submitWaterVertex(patch.wx2, patch.wz2, wy3, surface3, patch.terrainY3,
-                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature);
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale3, dx3, dz3, curvature, highQualityShading);
                 submitWaterVertex(patch.wx1, patch.wz2, wy4, surface4, patch.terrainY4,
-                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale4, dx4, dz4, curvature);
+                        timeSeconds, frozen, lx, ly, lz, texScale, waveScale4, dx4, dz4, curvature, highQualityShading);
             }
         }
         glEnd();
@@ -1153,7 +1153,7 @@ public class Chunk {
 
     private void submitWaterVertex(float wx, float wz, float wy, float baseY, float terrainY,
                                    float timeSeconds, boolean frozen, float lx, float ly, float lz, float texScale,
-                                   float waveScale, float dx, float dz, float curvature) {
+                                   float waveScale, float dx, float dz, float curvature, boolean highQualityShading) {
         if (frozen) {
             glColor4f(1f, 1f, 1f, 1f);
             glNormal3f(0f, 1f, 0f);
@@ -1169,6 +1169,26 @@ public class Chunk {
             glNormal3f(nx, ny, nz);
 
             float diffuse = Math.max(0f, nx * lx + ny * ly + nz * lz);
+
+            if (!highQualityShading) {
+                float depth = Math.max(0f, baseY - terrainY);
+                float depth01 = clamp01(depth / 8.0f);
+                float altitude01 = clamp01((baseY - WATER_LEVEL) / 18f);
+                float shallowR = lerp(0.23f, 0.34f, altitude01);
+                float shallowG = lerp(0.60f, 0.74f, altitude01);
+                float shallowB = lerp(0.70f, 0.84f, altitude01);
+                float deepR = lerp(0.06f, 0.14f, altitude01);
+                float deepG = lerp(0.21f, 0.42f, altitude01);
+                float deepB = lerp(0.40f, 0.73f, altitude01);
+                float baseR = lerp(shallowR, deepR, depth01);
+                float baseG = lerp(shallowG, deepG, depth01);
+                float baseB = lerp(shallowB, deepB, depth01);
+                float lit = 0.52f + diffuse * 0.48f;
+                glColor4f(baseR * lit, baseG * lit, baseB * lit, 0.86f);
+                glTexCoord2f(wx * texScale, wz * texScale);
+                glVertex3f(wx, wy, wz);
+                return;
+            }
             float waveOffset = center;
             float waveVelocity = -waveOffset * 0.35f;
             float crest = clamp01(waveOffset / (WATER_WAVE_AMPLITUDE * waveScale * 0.95f + 0.0001f));
