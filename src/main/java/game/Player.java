@@ -28,10 +28,10 @@ public class Player {
     private final float moveSpeed = 50f;
     private static final float SWIM_SPEED_MULTIPLIER = 0.45f;
     private static final float SWIM_UP_ACCEL = 14f;
-    private static final float SWIM_DOWN_ACCEL = 10f;
+    private static final float SWIM_DOWN_ACCEL = 18f;
     private static final float WATER_GRAVITY_SCALE = 0.25f;
     private static final float WATER_DRAG = 2.8f;
-    private static final float WATER_BUOYANCY = 8.8f;
+    private static final float WATER_BUOYANCY = 9.6f;
     private static final float WATER_SURFACE_FLOAT_OFFSET = 0.12f;
     private static final float WATER_IDLE_BOB_AMPLITUDE = 0.08f;
     private static final float WATER_IDLE_BOB_SPEED = 1.8f;
@@ -39,10 +39,24 @@ public class Player {
     private static final float WATER_ENTRY_SINK_MAX = 0.38f;
     private static final float WATER_WAVE_FOLLOW_FORCE = 11.5f;
     private static final float WATER_IDLE_STICKINESS = 7.0f;
+    private static final float WATER_SWIM_ACCEL_RESPONSE = 4.8f;
+    private static final float WATER_SWIM_LATERAL_DRAG = 1.45f;
+    private static final float WATER_WAVE_SLOPE_PUSH = 3.0f;
+    private static final float WATER_WAVE_VERTICAL_ACCEL_COUPLING = 0.65f;
+    private static final float WATER_DIVE_BUOYANCY_REDUCTION = 0.58f;
+    private static final float SWIM_RIPPLE_BASE_RADIUS = 0.9f;
+    private static final float SWIM_RIPPLE_SPEED_RADIUS = 0.65f;
+    private static final float SWIM_RIPPLE_BASE_IMPULSE = 0.18f;
+    private static final float SWIM_RIPPLE_SPEED_IMPULSE = 0.65f;
+    private static final float SWIM_RIPPLE_INTERVAL = 0.08f;
 
     private boolean wasInWater = false;
     private float previousWaterSurfaceY = Chunk.WATER_LEVEL;
+    private float previousWaterSurfaceVelocity = 0f;
     private float entrySinkOffset = 0f;
+    private float waterVelocityX = 0f;
+    private float waterVelocityZ = 0f;
+    private float swimRippleTimer = 0f;
 
     // Terrain for collision
     private final TerrainManager tm;
@@ -80,21 +94,62 @@ public class Player {
         float nextX = x;
         float nextZ = z;
 
+        float inputX = 0f;
+        float inputZ = 0f;
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-            nextX += forwardX * speed;
-            nextZ += forwardZ * speed;
+            inputX += forwardX;
+            inputZ += forwardZ;
         }
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-            nextX -= forwardX * speed;
-            nextZ -= forwardZ * speed;
+            inputX -= forwardX;
+            inputZ -= forwardZ;
         }
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-            nextX -= rightX * speed;
-            nextZ -= rightZ * speed;
+            inputX -= rightX;
+            inputZ -= rightZ;
         }
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-            nextX += rightX * speed;
-            nextZ += rightZ * speed;
+            inputX += rightX;
+            inputZ += rightZ;
+        }
+
+        float inputLen = (float) Math.sqrt(inputX * inputX + inputZ * inputZ);
+        if (inputLen > 0.0001f) {
+            inputX /= inputLen;
+            inputZ /= inputLen;
+        }
+
+        if (inWater) {
+            float sampleOffset = 0.75f;
+            float surfL = tm.getWaterSurfaceHeight(x - sampleOffset, z);
+            float surfR = tm.getWaterSurfaceHeight(x + sampleOffset, z);
+            float surfB = tm.getWaterSurfaceHeight(x, z - sampleOffset);
+            float surfF = tm.getWaterSurfaceHeight(x, z + sampleOffset);
+            float waveSlopeX = (surfR - surfL) / (2f * sampleOffset);
+            float waveSlopeZ = (surfF - surfB) / (2f * sampleOffset);
+
+            float swimSpeed = moveSpeed * SWIM_SPEED_MULTIPLIER;
+            float targetVelX = inputX * swimSpeed;
+            float targetVelZ = inputZ * swimSpeed;
+
+            float accelBlend = Math.min(1f, dt * WATER_SWIM_ACCEL_RESPONSE);
+            waterVelocityX += (targetVelX - waterVelocityX) * accelBlend;
+            waterVelocityZ += (targetVelZ - waterVelocityZ) * accelBlend;
+
+            waterVelocityX += (-waveSlopeX) * WATER_WAVE_SLOPE_PUSH * dt;
+            waterVelocityZ += (-waveSlopeZ) * WATER_WAVE_SLOPE_PUSH * dt;
+
+            float lateralDamp = Math.max(0f, 1f - WATER_SWIM_LATERAL_DRAG * dt);
+            waterVelocityX *= lateralDamp;
+            waterVelocityZ *= lateralDamp;
+
+            nextX += waterVelocityX * dt;
+            nextZ += waterVelocityZ * dt;
+        } else {
+            nextX += inputX * speed;
+            nextZ += inputZ * speed;
+            waterVelocityX *= Math.max(0f, 1f - dt * 6.0f);
+            waterVelocityZ *= Math.max(0f, 1f - dt * 6.0f);
         }
 
         // --- Terrain Feature Collision Check ---
@@ -118,6 +173,20 @@ public class Player {
         float movedDist = (float) Math.sqrt((x - prevX) * (x - prevX) + (z - prevZ) * (z - prevZ));
         float horizontalSpeed = dt > 0.00001f ? movedDist / dt : 0f;
 
+        if (inWater) {
+            swimRippleTimer -= dt;
+            float swimSpeed = (float) Math.sqrt(waterVelocityX * waterVelocityX + waterVelocityZ * waterVelocityZ);
+            float speed01 = Math.min(1f, swimSpeed / (moveSpeed * SWIM_SPEED_MULTIPLIER + 0.0001f));
+            if (swimRippleTimer <= 0f && speed01 > 0.04f) {
+                float radius = SWIM_RIPPLE_BASE_RADIUS + SWIM_RIPPLE_SPEED_RADIUS * speed01;
+                float impulse = SWIM_RIPPLE_BASE_IMPULSE + SWIM_RIPPLE_SPEED_IMPULSE * speed01;
+                tm.disturbWater(x, z, radius, impulse);
+                swimRippleTimer = SWIM_RIPPLE_INTERVAL * (1.1f - speed01 * 0.45f);
+            }
+        } else {
+            swimRippleTimer = 0f;
+        }
+
         boolean spacePressed = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
         boolean shiftPressed = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
                 || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
@@ -127,11 +196,17 @@ public class Player {
                 float entryImpact = Math.max(0f, -velocityY);
                 entrySinkOffset = Math.min(WATER_ENTRY_SINK_MAX, entryImpact * 0.06f);
                 previousWaterSurfaceY = waterSurfaceY;
+                previousWaterSurfaceVelocity = 0f;
             }
 
+            float surfaceVelocity = dt > 0.00001f ? (waterSurfaceY - previousWaterSurfaceY) / dt : 0f;
+            float surfaceAcceleration = dt > 0.00001f
+                    ? (surfaceVelocity - previousWaterSurfaceVelocity) / dt : 0f;
             float waveLiftVelocity = (waterSurfaceY - previousWaterSurfaceY) * WATER_WAVE_FOLLOW_FORCE;
             velocityY += waveLiftVelocity;
+            velocityY += surfaceAcceleration * WATER_WAVE_VERTICAL_ACCEL_COUPLING * dt;
             previousWaterSurfaceY = waterSurfaceY;
+            previousWaterSurfaceVelocity = surfaceVelocity;
 
             velocityY -= gravity * WATER_GRAVITY_SCALE * dt;
             velocityY -= velocityY * Math.min(1f, WATER_DRAG * dt);
@@ -142,11 +217,13 @@ public class Player {
 
             float time = (float) (System.nanoTime() * 1.0e-9);
             float idleBob = (float) Math.sin(time * WATER_IDLE_BOB_SPEED) * WATER_IDLE_BOB_AMPLITUDE;
-            float targetSurfaceY = waterSurfaceY + eyeHeight - WATER_SURFACE_FLOAT_OFFSET + idleBob - entrySinkOffset;
-            velocityY += (targetSurfaceY - y) * WATER_BUOYANCY * dt;
+            float diveOffset = shiftPressed ? 0.42f : 0f;
+            float targetSurfaceY = waterSurfaceY + eyeHeight - WATER_SURFACE_FLOAT_OFFSET + idleBob - entrySinkOffset - diveOffset;
+            float buoyancy = shiftPressed ? WATER_BUOYANCY * WATER_DIVE_BUOYANCY_REDUCTION : WATER_BUOYANCY;
+            velocityY += (targetSurfaceY - y) * buoyancy * dt;
 
             // When floating mostly still, directly follow wave trajectory to avoid looking anchored.
-            float movement01 = Math.min(1f, horizontalSpeed / 2.4f);
+            float movement01 = Math.min(1f, (horizontalSpeed + (float)Math.sqrt(waterVelocityX * waterVelocityX + waterVelocityZ * waterVelocityZ)) / 3.6f);
             float input01 = (spacePressed || shiftPressed) ? 1f : 0f;
             float active01 = Math.max(movement01, input01);
             float idleFollow = (1f - active01) * Math.min(1f, dt * WATER_IDLE_STICKINESS);
@@ -154,9 +231,11 @@ public class Player {
 
             if (spacePressed) {
                 velocityY += SWIM_UP_ACCEL * dt;
+                tm.disturbWater(x, z, 1.15f, 0.35f);
             }
             if (shiftPressed) {
                 velocityY -= SWIM_DOWN_ACCEL * dt;
+                tm.disturbWater(x, z, 1.0f, 0.28f);
             }
 
             onGround = false;
@@ -170,6 +249,9 @@ public class Player {
         }
         prevSpacePressed = spacePressed;
         wasInWater = inWater;
+        if (!inWater) {
+            previousWaterSurfaceVelocity *= Math.max(0f, 1f - dt * 6.0f);
+        }
 
         y += velocityY * dt;
 

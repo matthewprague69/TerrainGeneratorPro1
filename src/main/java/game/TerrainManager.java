@@ -660,8 +660,11 @@ public class TerrainManager {
         float minZ = cz * Chunk.SIZE * scale;
         float maxX = (cx + 1) * Chunk.SIZE * scale;
         float maxZ = (cz + 1) * Chunk.SIZE * scale;
-        float minY = -200f;
-        float maxY = 1000f;
+
+        Chunk chunk = chunks.get(key(cx, cz));
+        float minY = chunk != null ? chunk.getVisibleMinHeight() : -200f;
+        float maxY = chunk != null ? chunk.getVisibleMaxHeight() : 1000f;
+
         return frustum.isBoxVisible(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
@@ -1061,6 +1064,10 @@ public class TerrainManager {
     }
 
     public float getWaterSurfaceHeight(float wx, float wz) {
+        if (weatherSystem.isWaterFrozen()) {
+            return Chunk.WATER_LEVEL + weatherSystem.getIceThickness();
+        }
+
         int cx = (int) Math.floor(wx / (Chunk.SIZE * scale));
         int cz = (int) Math.floor(wz / (Chunk.SIZE * scale));
         Chunk c = chunks.get(key(cx, cz));
@@ -1068,6 +1075,39 @@ public class TerrainManager {
             return Chunk.WATER_LEVEL;
         }
         return c.getWaterSurfaceAtWorld(wx, wz);
+    }
+
+    public void disturbWater(float wx, float wz, float radiusWorld, float impulse) {
+        int cx = (int) Math.floor(wx / (Chunk.SIZE * scale));
+        int cz = (int) Math.floor(wz / (Chunk.SIZE * scale));
+        Chunk center = chunks.get(key(cx, cz));
+        if (center != null) {
+            center.disturbWaterAtWorld(wx, wz, radiusWorld, impulse);
+        }
+
+        // Also disturb neighboring chunks near borders so ripples remain continuous.
+        float border = Math.max(scale * 1.5f, radiusWorld);
+        float chunkMinX = cx * Chunk.SIZE * scale;
+        float chunkMinZ = cz * Chunk.SIZE * scale;
+        float chunkMaxX = (cx + 1) * Chunk.SIZE * scale;
+        float chunkMaxZ = (cz + 1) * Chunk.SIZE * scale;
+
+        if (wx - chunkMinX < border) {
+            Chunk left = chunks.get(key(cx - 1, cz));
+            if (left != null) left.disturbWaterAtWorld(wx, wz, radiusWorld, impulse * 0.92f);
+        }
+        if (chunkMaxX - wx < border) {
+            Chunk right = chunks.get(key(cx + 1, cz));
+            if (right != null) right.disturbWaterAtWorld(wx, wz, radiusWorld, impulse * 0.92f);
+        }
+        if (wz - chunkMinZ < border) {
+            Chunk top = chunks.get(key(cx, cz - 1));
+            if (top != null) top.disturbWaterAtWorld(wx, wz, radiusWorld, impulse * 0.92f);
+        }
+        if (chunkMaxZ - wz < border) {
+            Chunk bottom = chunks.get(key(cx, cz + 1));
+            if (bottom != null) bottom.disturbWaterAtWorld(wx, wz, radiusWorld, impulse * 0.92f);
+        }
     }
 
     public boolean isPositionInWater(float wx, float wy, float wz) {
@@ -1128,12 +1168,14 @@ public class TerrainManager {
             }
             if (!weatherSystem.isWaterFrozen()) {
                 int simulationCadenceFrames = getWaterSimulationCadenceFrames(dist);
-                if (waterSimulationFrameId % simulationCadenceFrames == 0) {
+                long chunkKey = key(c.cx, c.cz);
+                int phase = Math.floorMod(Long.hashCode(chunkKey), simulationCadenceFrames);
+                if (Math.floorMod(waterSimulationFrameId + phase, simulationCadenceFrames) == 0) {
                     c.updateWaterSimulation(baseWaterSimDt * simulationCadenceFrames);
                 }
             }
             c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
-                    weatherSystem.getIceThickness(), waterTimeSeconds);
+                    weatherSystem.getIceThickness(), waterTimeSeconds, dist, wx, wz);
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;

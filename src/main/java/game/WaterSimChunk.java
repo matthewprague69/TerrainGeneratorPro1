@@ -16,6 +16,8 @@ public class WaterSimChunk {
     private final float[][] tmpDepth;
     private final float[][] tmpVelX;
     private final float[][] tmpVelZ;
+    private final float[][] disturbance;
+    private final float[][] tmpDisturbance;
 
     public WaterSimChunk(int gridSize) {
         this.gridSize = gridSize;
@@ -27,6 +29,8 @@ public class WaterSimChunk {
         this.tmpDepth = new float[gridSize + 1][gridSize + 1];
         this.tmpVelX = new float[gridSize + 1][gridSize + 1];
         this.tmpVelZ = new float[gridSize + 1][gridSize + 1];
+        this.disturbance = new float[gridSize + 1][gridSize + 1];
+        this.tmpDisturbance = new float[gridSize + 1][gridSize + 1];
     }
 
     public void initializeFromTerrainAndSurface(float[][] terrainHeights, float waterLevel) {
@@ -41,6 +45,7 @@ public class WaterSimChunk {
                 maxSurface[x][z] = targetSurface;
                 velX[x][z] = 0f;
                 velZ[x][z] = 0f;
+                disturbance[x][z] = 0f;
             }
         }
     }
@@ -65,6 +70,28 @@ public class WaterSimChunk {
         float sx0 = lerp(s00, s10, tx);
         float sx1 = lerp(s01, s11, tx);
         return lerp(sx0, sx1, tz);
+    }
+
+    public float sampleDisturbance(float localX, float localZ) {
+        float sx = clamp(localX, 0f, gridSize);
+        float sz = clamp(localZ, 0f, gridSize);
+
+        int x0 = (int) Math.floor(sx);
+        int z0 = (int) Math.floor(sz);
+        int x1 = Math.min(gridSize, x0 + 1);
+        int z1 = Math.min(gridSize, z0 + 1);
+
+        float tx = sx - x0;
+        float tz = sz - z0;
+
+        float d00 = disturbance[x0][z0];
+        float d10 = disturbance[x1][z0];
+        float d01 = disturbance[x0][z1];
+        float d11 = disturbance[x1][z1];
+
+        float dx0 = lerp(d00, d10, tx);
+        float dx1 = lerp(d01, d11, tx);
+        return clamp(lerp(dx0, dx1, tz), 0f, 1f);
     }
 
     public float sampleSpeed(float localX, float localZ) {
@@ -123,6 +150,7 @@ public class WaterSimChunk {
             waterDepth[0][z] = nDepth;
             velX[0][z] = nUx;
             velZ[0][z] = nUz;
+            disturbance[0][z] = neighbor.disturbance[gridSize][z];
         }
     }
 
@@ -137,6 +165,7 @@ public class WaterSimChunk {
             waterDepth[gridSize][z] = nDepth;
             velX[gridSize][z] = nUx;
             velZ[gridSize][z] = nUz;
+            disturbance[gridSize][z] = neighbor.disturbance[0][z];
         }
     }
 
@@ -151,6 +180,7 @@ public class WaterSimChunk {
             waterDepth[x][0] = nDepth;
             velX[x][0] = nUx;
             velZ[x][0] = nUz;
+            disturbance[x][0] = neighbor.disturbance[x][gridSize];
         }
     }
 
@@ -165,6 +195,55 @@ public class WaterSimChunk {
             waterDepth[x][gridSize] = nDepth;
             velX[x][gridSize] = nUx;
             velZ[x][gridSize] = nUz;
+            disturbance[x][gridSize] = neighbor.disturbance[x][0];
+        }
+    }
+
+
+    public void disturb(float localX, float localZ, float radius, float impulse) {
+        float cx = clamp(localX, 0f, gridSize);
+        float cz = clamp(localZ, 0f, gridSize);
+        float r = Math.max(0.25f, radius);
+        float strength = impulse;
+
+        int minX = Math.max(0, (int) Math.floor(cx - r - 1f));
+        int maxX = Math.min(gridSize, (int) Math.ceil(cx + r + 1f));
+        int minZ = Math.max(0, (int) Math.floor(cz - r - 1f));
+        int maxZ = Math.min(gridSize, (int) Math.ceil(cz + r + 1f));
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                float dx = x - cx;
+                float dz = z - cz;
+                float dist = (float) Math.sqrt(dx * dx + dz * dz);
+                if (dist > r) {
+                    continue;
+                }
+
+                float falloff = 1f - (dist / r);
+                float pulse = falloff * falloff * (3f - 2f * falloff);
+
+                float bed = bedHeight[x][z];
+                float maxDepth = Math.max(0f, maxSurface[x][z] - bed);
+                if (maxDepth <= 0.0001f) {
+                    continue;
+                }
+
+                float depth = waterDepth[x][z];
+                float pressure = clamp(depth / maxDepth, 0f, 1f);
+                float response = 0.35f + pressure * 0.65f;
+
+                float radialX = dist > 0.0001f ? dx / dist : 0f;
+                float radialZ = dist > 0.0001f ? dz / dist : 0f;
+
+                float velKick = strength * pulse * response;
+                velX[x][z] += radialX * velKick;
+                velZ[x][z] += radialZ * velKick;
+
+                float depthKick = Math.abs(strength) * pulse * 0.02f * response;
+                waterDepth[x][z] = clamp(depth + depthKick, 0f, maxDepth);
+                disturbance[x][z] = clamp(disturbance[x][z] + Math.abs(strength) * pulse * 0.45f, 0f, 1f);
+            }
         }
     }
 
@@ -175,6 +254,8 @@ public class WaterSimChunk {
         float damping = (float) Math.pow(0.92f, frameScale);
         float pressureBlend = 0.24f * frameScale;
         float diffusion = 0.12f * frameScale;
+        float disturbanceDecay = (float) Math.pow(0.82f, frameScale);
+        float disturbanceDiffusion = 0.14f * frameScale;
 
         // Pass 1: terrain-aware velocity update.
         for (int x = 0; x <= gridSize; x++) {
@@ -235,6 +316,15 @@ public class WaterSimChunk {
                 depth += (pressureDepth - depth) * pressureBlend;
 
                 tmpDepth[x][z] = clamp(depth, 0f, maxDepth);
+
+                float centerDisturbance = disturbance[x][z];
+                float avgDisturbance = (disturbance[xl][z] + disturbance[xr][z] + disturbance[x][zb] + disturbance[x][zf]) * 0.25f;
+                float disturbanceSpeed = Math.abs(tmpVelX[x][z]) + Math.abs(tmpVelZ[x][z]);
+                float disturbanceAdvect = centerDisturbance * disturbanceSpeed * 0.05f;
+                float nextDisturbance = centerDisturbance * disturbanceDecay;
+                nextDisturbance += (avgDisturbance - centerDisturbance) * disturbanceDiffusion;
+                nextDisturbance += disturbanceAdvect;
+                tmpDisturbance[x][z] = clamp(nextDisturbance, 0f, 1f);
             }
         }
 
@@ -250,6 +340,7 @@ public class WaterSimChunk {
 
                 velX[x][z] = tmpVelX[x][z] * terrainCollisionDamp;
                 velZ[x][z] = tmpVelZ[x][z] * terrainCollisionDamp;
+                disturbance[x][z] = tmpDisturbance[x][z];
             }
         }
     }
