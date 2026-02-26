@@ -62,7 +62,6 @@ public class Chunk {
     private final int lod;
 
     private final float[][] heights = new float[SIZE + 1][SIZE + 1];
-    private final float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
     private float cachedMaxAltitudeSnowCoverage = -1f;
     private final List<Feature> features = new ArrayList<>();
     private final boolean[][] featureMask = new boolean[SIZE][SIZE];
@@ -126,6 +125,7 @@ public class Chunk {
     private static final float WATER_FOAM_SLOPE_RANGE = 0.24f;
     private static final float WATER_FOAM_FALL_SPEED = 0.28f;
     private static final float WATER_FOAM_FALL_RANGE = 1.55f;
+    private static final float MIN_RENDERABLE_WATER_DEPTH = 0.06f;
     private static final LinkedHashMap<String, ImpostorEntry> IMPOSTOR_TEXTURES =
             new LinkedHashMap<>(256, 0.75f, true);
 
@@ -167,13 +167,12 @@ public class Chunk {
         public final int lod;
         public final Biome biome;
         public final float[][] heights;
-        public final float[][] riverSurface;
         public final boolean[][] featureMask;
         public final boolean[][] lakeMask;
         public final List<Feature> lakes;
 
         public ChunkBuildData(int cx, int cz, int lod, Biome biome, float[][] heights, boolean[][] featureMask,
-                              boolean[][] lakeMask, List<Feature> lakes, float[][] riverSurface) {
+                              boolean[][] lakeMask, List<Feature> lakes) {
             this.cx = cx;
             this.cz = cz;
             this.lod = lod;
@@ -182,7 +181,6 @@ public class Chunk {
             this.featureMask = featureMask;
             this.lakeMask = lakeMask;
             this.lakes = lakes;
-            this.riverSurface = riverSurface;
         }
     }
 
@@ -219,19 +217,17 @@ public class Chunk {
         public final float scale;
         public final Biome biome;
         public final float[][] heights;
-        public final float[][] riverSurface;
         public final boolean[][] featureMask;
         public final boolean[][] lakeMask;
         public final long seed;
 
         public FeatureGenerationInput(int cx, int cz, float scale, Biome biome, float[][] heights,
-                                      float[][] riverSurface, boolean[][] featureMask, boolean[][] lakeMask, long seed) {
+                                      boolean[][] featureMask, boolean[][] lakeMask, long seed) {
             this.cx = cx;
             this.cz = cz;
             this.scale = scale;
             this.biome = biome;
             this.heights = heights;
-            this.riverSurface = riverSurface;
             this.featureMask = featureMask;
             this.lakeMask = lakeMask;
             this.seed = seed;
@@ -300,7 +296,6 @@ public class Chunk {
         final int lodOctaves = Math.max(baseOctaves, OCTAVES - lodPenalty);
 
         float[][] heights = new float[SIZE + 1][SIZE + 1];
-        float[][] riverSurface = new float[SIZE + 1][SIZE + 1];
         boolean[][] featureMask = new boolean[SIZE][SIZE];
         boolean[][] lakeMask = new boolean[SIZE][SIZE];
         List<Feature> lakes = new ArrayList<>();
@@ -381,11 +376,9 @@ public class Chunk {
             }
         }
 
-        resetRiverSurface(riverSurface);
-        applyCavesAndRavines(heights, riverSurface, cx, cz, scale, terrainNoise, manager.getSeed());
 
         LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, lakes, manager);
-        return new ChunkBuildData(cx, cz, lod, biome, heights, featureMask, lakeMask, lakes, riverSurface);
+        return new ChunkBuildData(cx, cz, lod, biome, heights, featureMask, lakeMask, lakes);
     }
 
     private void generate(boolean generateFeatures) {
@@ -474,8 +467,6 @@ public class Chunk {
             }
         }
 
-        resetRiverSurface(riverSurface);
-        applyCavesAndRavines(heights, riverSurface, cx, cz, scale, terrainNoise, manager.getSeed());
 
 
         LakeGenerator.generateLakes(cx, cz, scale, biome, heights, featureMask, lakeMask, features, manager);
@@ -557,7 +548,7 @@ public class Chunk {
     }
 
     public FeatureGenerationInput createFeatureGenerationInput() {
-        return new FeatureGenerationInput(cx, cz, scale, biome, heights, riverSurface,
+        return new FeatureGenerationInput(cx, cz, scale, biome, heights,
                 copyMask(featureMask), lakeMask, manager.getSeed());
     }
 
@@ -591,7 +582,6 @@ public class Chunk {
         if (left != null) {
             for (int z = 0; z <= SIZE; z++) {
                 heights[0][z] = left.heights[SIZE][z];
-                riverSurface[0][z] = left.riverSurface[SIZE][z];
             }
         }
 
@@ -599,14 +589,12 @@ public class Chunk {
         if (top != null) {
             for (int x = 0; x <= SIZE; x++) {
                 heights[x][0] = top.heights[x][SIZE];
-                riverSurface[x][0] = top.riverSurface[x][SIZE];
             }
         }
 
         Chunk topLeft = manager.getChunk(cx - 1, cz - 1);
         if (topLeft != null) {
             heights[0][0] = topLeft.heights[SIZE][SIZE];
-            riverSurface[0][0] = topLeft.riverSurface[SIZE][SIZE];
         }
     }
 
@@ -734,19 +722,11 @@ public class Chunk {
 
     private float getSnowBaseHeightAtVertex(int x, int z, boolean frozenWater, float iceThickness) {
         float base = heights[x][z];
-        if (!frozenWater) {
+        if (!frozenWater || base >= WATER_LEVEL) {
             return base;
         }
 
-        float river = riverSurface[x][z];
-        boolean hasRiverWater = river > Float.NEGATIVE_INFINITY / 2;
-        boolean hasStandingWater = base < WATER_LEVEL;
-        if (!hasRiverWater && !hasStandingWater) {
-            return base;
-        }
-
-        float liquidSurface = hasRiverWater ? river : WATER_LEVEL;
-        float frozenSurface = liquidSurface + Math.max(0f, iceThickness);
+        float frozenSurface = WATER_LEVEL + Math.max(0f, iceThickness);
         return Math.max(base, frozenSurface);
     }
 
@@ -811,13 +791,8 @@ public class Chunk {
             return 0f;
         }
 
-        if (manager.isWaterFrozen()) {
-            float river = riverSurface[x][z];
-            boolean hasRiverWater = river > Float.NEGATIVE_INFINITY / 2;
-            boolean hasStandingWater = heights[x][z] < WATER_LEVEL;
-            if (hasRiverWater || hasStandingWater) {
-                clampedCoverage = Math.min(clampedCoverage, manager.getWaterSnowCoverage());
-            }
+        if (manager.isWaterFrozen() && heights[x][z] < WATER_LEVEL) {
+            clampedCoverage = Math.min(clampedCoverage, manager.getWaterSnowCoverage());
         }
 
         float wx = (cx * SIZE + x) * scale;
@@ -968,60 +943,28 @@ public class Chunk {
                 float y01 = heights[x][z2];
                 float y11 = heights[x2][z2];
 
-                float r00 = riverSurface[x][z];
-                float r10 = riverSurface[x2][z];
-                float r01 = riverSurface[x][z2];
-                float r11 = riverSurface[x2][z2];
-                boolean river00 = r00 > Float.NEGATIVE_INFINITY / 2;
-                boolean river10 = r10 > Float.NEGATIVE_INFINITY / 2;
-                boolean river01 = r01 > Float.NEGATIVE_INFINITY / 2;
-                boolean river11 = r11 > Float.NEGATIVE_INFINITY / 2;
+                float d00 = waterSimChunk.getDepthAtGrid(x, z);
+                float d10 = waterSimChunk.getDepthAtGrid(x2, z);
+                float d01 = waterSimChunk.getDepthAtGrid(x, z2);
+                float d11 = waterSimChunk.getDepthAtGrid(x2, z2);
 
-                int riverCorners = (river00 ? 1 : 0) + (river10 ? 1 : 0) + (river01 ? 1 : 0) + (river11 ? 1 : 0);
-                boolean hasRiverWater = riverCorners > 0;
-                boolean hasOceanWater = y00 < WATER_LEVEL || y10 < WATER_LEVEL || y01 < WATER_LEVEL || y11 < WATER_LEVEL;
-
-                if (hasRiverWater) {
-                    // River patches should be constrained to river channels only and must not flood low terrain.
-                    if (riverCorners < 2) {
-                        continue;
-                    }
-                    boolean adjacentRiverPair = (river00 && river10) || (river10 && river11)
-                            || (river11 && river01) || (river01 && river00);
-                    if (riverCorners == 2 && !adjacentRiverPair) {
-                        // Skip diagonal-only cases that produce stretched river sheets over banks.
-                        continue;
-                    }
-
-                    float wx1 = (cx * SIZE + x) * scale;
-                    float wz1 = (cz * SIZE + z) * scale;
-                    float wx2 = (cx * SIZE + x2) * scale;
-                    float wz2 = (cz * SIZE + z2) * scale;
-
-                    float riverLevelSum = (river00 ? r00 : 0f) + (river10 ? r10 : 0f) + (river11 ? r11 : 0f)
-                            + (river01 ? r01 : 0f);
-                    float riverLevel = riverLevelSum / riverCorners;
-
-                    float wy1 = river00 ? r00 : riverLevel;
-                    float wy2 = river10 ? r10 : riverLevel;
-                    float wy3 = river11 ? r11 : riverLevel;
-                    float wy4 = river01 ? r01 : riverLevel;
-
-                    waterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2, wy1, wy2, wy3, wy4,
-                            y00, y10, y11, y01));
+                boolean oceanWet00 = d00 >= MIN_RENDERABLE_WATER_DEPTH && y00 < WATER_LEVEL + 0.02f;
+                boolean oceanWet10 = d10 >= MIN_RENDERABLE_WATER_DEPTH && y10 < WATER_LEVEL + 0.02f;
+                boolean oceanWet01 = d01 >= MIN_RENDERABLE_WATER_DEPTH && y01 < WATER_LEVEL + 0.02f;
+                boolean oceanWet11 = d11 >= MIN_RENDERABLE_WATER_DEPTH && y11 < WATER_LEVEL + 0.02f;
+                int oceanCorners = (oceanWet00 ? 1 : 0) + (oceanWet10 ? 1 : 0) + (oceanWet01 ? 1 : 0) + (oceanWet11 ? 1 : 0);
+                if (oceanCorners < 3) {
                     continue;
                 }
 
-                if (hasOceanWater) {
-                    float wx1 = (cx * SIZE + x) * scale;
-                    float wz1 = (cz * SIZE + z) * scale;
-                    float wx2 = (cx * SIZE + x2) * scale;
-                    float wz2 = (cz * SIZE + z2) * scale;
+                float wx1 = (cx * SIZE + x) * scale;
+                float wz1 = (cz * SIZE + z) * scale;
+                float wx2 = (cx * SIZE + x2) * scale;
+                float wz2 = (cz * SIZE + z2) * scale;
 
-                    waterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2,
-                            WATER_LEVEL, WATER_LEVEL, WATER_LEVEL, WATER_LEVEL,
-                            y00, y10, y11, y01));
-                }
+                waterPatches.add(new WaterPatch(wx1, wz1, wx2, wz2,
+                        WATER_LEVEL, WATER_LEVEL, WATER_LEVEL, WATER_LEVEL,
+                        y00, y10, y11, y01));
             }
         }
     }
@@ -1033,7 +976,7 @@ public class Chunk {
             waterSimDirty = true;
         }
         if (waterSimDirty) {
-            waterSimChunk.initializeFromTerrainAndSurface(heights, riverSurface, WATER_LEVEL);
+            waterSimChunk.initializeFromTerrainAndSurface(heights, WATER_LEVEL);
             waterSimDirty = false;
         }
     }
@@ -1220,11 +1163,6 @@ public class Chunk {
             float localZ = (wz / scale) - (cz * SIZE);
             simulatedSurface = waterSimChunk.sampleSurface(localX, localZ);
             simulatedDepth = waterSimChunk.sampleDepth(localX, localZ);
-        }
-
-        // Rivers should stay calm (no stale wave movement) and sit in-channel.
-        if (Math.abs(baseHeight - WATER_LEVEL) > 0.02f) {
-            return simulatedSurface;
         }
 
         // Big waves only in deep/open water; tiny ripples near shores.
@@ -1951,12 +1889,6 @@ public class Chunk {
             float y1, float y2, float y3, float texScale) {
         float slope = (computeSlope(x1, z1) + computeSlope(x2, z2) + computeSlope(x3, z3)) / 3f;
         float height = Math.max(y1, Math.max(y2, y3));
-        if (isRiverBed(x1, z1, y1) || isRiverBed(x2, z2, y2) || isRiverBed(x3, z3, y3)) {
-            int tex = manager.getTexture(biome.rockTex);
-            addTriangleToBuilder(builders, tex, 1f, x1, z1, x2, z2, x3, z3, y1, y2, y3, texScale);
-            return;
-        }
-
         float wx = (cx * SIZE + (x1 + x2 + x3) / 3f) * scale;
         float wz = (cz * SIZE + (z1 + z2 + z3) / 3f) * scale;
         BiomeBlend blend = getBiomeBlend(wx, wz, manager);
@@ -2045,9 +1977,7 @@ public class Chunk {
             float texScale) {
         float slope = (computeSlope(x1, z1) + computeSlope(x2, z2) + computeSlope(x3, z3)) / 3f;
         float height = Math.max(y1, Math.max(y2, y3));
-        int tex = isRiverBed(x1, z1, y1) || isRiverBed(x2, z2, y2) || isRiverBed(x3, z3, y3)
-                ? manager.getTexture(biome.rockTex)
-                : pickTexture(height, slope);
+        int tex = pickTexture(height, slope);
 
         float wx1 = (cx * SIZE + x1) * scale;
         float wz1 = (cz * SIZE + z1) * scale;
@@ -2178,7 +2108,7 @@ public class Chunk {
 
     private void generateFeatures() {
         FeatureGenerationResult result = generateFeatureSpawns(
-                new FeatureGenerationInput(cx, cz, scale, biome, heights, riverSurface, featureMask, lakeMask,
+                new FeatureGenerationInput(cx, cz, scale, biome, heights, featureMask, lakeMask,
                         manager.getSeed()));
         applyFeatureGenerationResult(result);
     }
@@ -2201,82 +2131,7 @@ public class Chunk {
 
         return (count > 0) ? totalSlope / count : 1f; // 1f is max slope fallback
     }
-
-    private static void applyCavesAndRavines(float[][] heights, float[][] riverSurface, int cx, int cz, float scale,
-                                             OpenSimplexNoise terrainNoise, long seed) {
-        final double riverFreq = 0.0018;
-        final double riverWidth = 0.06;
-        final double riverBlendWidth = 0.12;
-        final double riverDepth = 8.0;
-        final double riverMaskFreq = 0.0009;
-        final double riverMaskThreshold = 0.38;
-        final float ridgeOffset = 0.55f;
-        final float surfaceNoiseAmp = 0.2f;
-        final float flowSlopeScale = 0.00075f;
-        final float minRiverDepth = 1.8f;
-        final float surfaceCarveRatio = 0.6f;
-
-        for (int x = 0; x <= SIZE; x++) {
-            for (int z = 0; z <= SIZE; z++) {
-                double wx = (cx * SIZE + x) * scale;
-                double wz = (cz * SIZE + z) * scale;
-
-                double riverNoise = terrainNoise.eval(wx * riverFreq + 2200.0, wz * riverFreq - 1300.0);
-                double warpNoise = terrainNoise.eval(wx * riverFreq * 1.6 - 500.0, wz * riverFreq * 1.6 + 900.0);
-                double riverBand = Math.abs(riverNoise + warpNoise * 0.15);
-                if (riverBand < riverBlendWidth) {
-                    double riverMask = terrainNoise.eval(wx * riverMaskFreq - 3400.0, wz * riverMaskFreq + 2600.0);
-                    double maskValue = Math.abs(riverMask);
-                    double maskBlend = 1.0 - smoothstep(riverMaskThreshold, riverMaskThreshold + 0.2, maskValue);
-                    if (maskBlend > 0.001) {
-                        double t = (riverBlendWidth - riverBand) / riverBlendWidth;
-                        double bankBlend = t * t * (3.0 - 2.0 * t) * maskBlend;
-                        float localSlope = computeSlope(heights, x, z);
-                        float slopeBoost = Math.min(1.0f, localSlope * 0.9f);
-                        double localWidth = riverWidth
-                                * (0.76 + 0.28 * (terrainNoise.eval(wx * 0.002, wz * 0.002) * 0.5 + 0.5))
-                                * (1.0 + 0.6 * slopeBoost);
-                        double depthFactor = riverBand < localWidth ? (localWidth - riverBand) / localWidth : 0.0;
-                        depthFactor = depthFactor * depthFactor * (3.0 - 2.0 * depthFactor);
-                        depthFactor = Math.max(depthFactor, bankBlend * 0.2) * maskBlend;
-                        float baseHeight = heights[x][z];
-                        float surfaceNoise = (float) (terrainNoise.eval(wx * 0.00012 + 1200.0, wz * 0.00012 - 800.0) * surfaceNoiseAmp);
-                        double flowAngle = terrainNoise.eval(wx * 0.0006 - 2000.0, wz * 0.0006 + 1500.0) * Math.PI;
-                        double flowX = Math.cos(flowAngle);
-                        double flowZ = Math.sin(flowAngle);
-                        float flowCoord = (float) (wx * flowX + wz * flowZ);
-                        float flowSlope = flowCoord * flowSlopeScale;
-                        float downhillSurface = (float) (terrainNoise.eval(wx * 0.00015 + 5000.0, wz * 0.00015 - 5000.0) * 4.0)
-                                - flowSlope;
-                        float depthNoise = (float) (terrainNoise.eval(wx * 0.004 - 2200.0, wz * 0.004 + 1900.0) * 0.5 + 0.5);
-                        float carveDepth = (float) (riverDepth * (0.7f + 0.6f * depthNoise) * depthFactor);
-                        carveDepth = Math.max(carveDepth, minRiverDepth * (float) Math.max(0.15, depthFactor));
-                        float bedHeight = baseHeight - carveDepth;
-                        float surfaceFromCarve = baseHeight - carveDepth * surfaceCarveRatio;
-                        float riverSurfaceHeight = Math.min(baseHeight - ridgeOffset * 0.35f,
-                                Math.min(surfaceFromCarve + 0.2f, downhillSurface + surfaceNoise));
-                        riverSurfaceHeight = Math.max(WATER_LEVEL, riverSurfaceHeight);
-                        float target = Math.min(bedHeight, riverSurfaceHeight - minRiverDepth);
-                        float blended = (float) (baseHeight * (1.0 - bankBlend) + target * bankBlend);
-                        heights[x][z] = blended;
-                        if (riverSurface != null) {
-                            // Only mark true channel cores as water surface; avoid painting river water onto carved banks.
-                            boolean inChannelCore = depthFactor > 0.24;
-                            if (inChannelCore) {
-                                float clampedSurface = Math.min(riverSurfaceHeight, heights[x][z] + minRiverDepth * 1.05f);
-                                riverSurface[x][z] = clampedSurface;
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
-
-    private static void resetRiverSurface(float[][] riverSurface) {
-        for (int x = 0; x < riverSurface.length; x++) {
-            Arrays.fill(riverSurface[x], Float.NEGATIVE_INFINITY);
-        }
     }
 
     private static double smoothstep(double edge0, double edge1, double x) {
@@ -2329,20 +2184,6 @@ public class Chunk {
 
         return manager.getTexture(targetBiome.grassTex);
     }
-
-
-    private boolean isRiverCell(int x, int z) {
-        return riverSurface[x][z] > Float.NEGATIVE_INFINITY / 2;
-    }
-
-    private boolean isRiverBed(int x, int z, float height) {
-        if (!isRiverCell(x, z)) {
-            return false;
-        }
-        return height <= riverSurface[x][z] + 0.02f;
-    }
-
-
 
     public float getHeight(float wx, float wz) {
         float lx = wx / scale - cx * SIZE;
@@ -2449,11 +2290,6 @@ public class Chunk {
         copyHeightsInto(data.heights, heights);
         copyMaskInto(data.featureMask, featureMask);
         copyMaskInto(data.lakeMask, lakeMask);
-        if (data.riverSurface != null) {
-            copyHeightsInto(data.riverSurface, riverSurface);
-        } else {
-            resetRiverSurface(riverSurface);
-        }
         if (data.lakes != null) {
             features.addAll(data.lakes);
         }
@@ -2543,10 +2379,6 @@ public class Chunk {
                 if (input.featureMask[x][z] || input.lakeMask[x][z]) {
                     continue;
                 }
-                if (input.riverSurface != null && input.riverSurface[x][z] > Float.NEGATIVE_INFINITY / 2) {
-                    continue;
-                }
-
                 float height = input.heights[x][z];
                 if (height < FEATURE_MIN_HEIGHT || height > FEATURE_MAX_HEIGHT) {
                     continue;
@@ -2611,10 +2443,6 @@ public class Chunk {
                             continue;
                         }
                         if (input.featureMask[px][pz] || input.lakeMask[px][pz]) {
-                            continue;
-                        }
-                        if (input.riverSurface != null
-                                && input.riverSurface[px][pz] > Float.NEGATIVE_INFINITY / 2) {
                             continue;
                         }
                         float patchHeight = input.heights[px][pz];

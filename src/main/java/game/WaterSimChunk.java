@@ -29,18 +29,13 @@ public class WaterSimChunk {
         this.tmpVelZ = new float[gridSize + 1][gridSize + 1];
     }
 
-    public void initializeFromTerrainAndSurface(float[][] terrainHeights, float[][] riverSurface, float waterLevel) {
+    public void initializeFromTerrainAndSurface(float[][] terrainHeights, float waterLevel) {
         for (int x = 0; x <= gridSize; x++) {
             for (int z = 0; z <= gridSize; z++) {
                 float bed = terrainHeights[x][z];
                 bedHeight[x][z] = bed;
 
-                float river = riverSurface[x][z];
-                boolean hasRiverWater = river > Float.NEGATIVE_INFINITY / 2f;
-                float targetSurface = hasRiverWater ? river : waterLevel;
-                if (!hasRiverWater && bed >= waterLevel) {
-                    targetSurface = bed;
-                }
+                float targetSurface = bed < waterLevel ? waterLevel : bed;
 
                 waterDepth[x][z] = Math.max(0f, targetSurface - bed);
                 maxSurface[x][z] = targetSurface;
@@ -81,6 +76,12 @@ public class WaterSimChunk {
         float ux = velX[xi][zi];
         float uz = velZ[xi][zi];
         return (float) Math.sqrt(ux * ux + uz * uz);
+    }
+
+    public float getDepthAtGrid(int x, int z) {
+        int gx = Math.min(gridSize, Math.max(0, x));
+        int gz = Math.min(gridSize, Math.max(0, z));
+        return waterDepth[gx][gz];
     }
 
 
