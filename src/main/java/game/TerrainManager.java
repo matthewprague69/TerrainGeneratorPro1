@@ -1128,12 +1128,14 @@ public class TerrainManager {
             }
             if (!weatherSystem.isWaterFrozen()) {
                 int simulationCadenceFrames = getWaterSimulationCadenceFrames(dist);
-                if (waterSimulationFrameId % simulationCadenceFrames == 0) {
+                long chunkKey = key(c.cx, c.cz);
+                int phase = Math.floorMod(Long.hashCode(chunkKey), simulationCadenceFrames);
+                if (Math.floorMod(waterSimulationFrameId + phase, simulationCadenceFrames) == 0) {
                     c.updateWaterSimulation(baseWaterSimDt * simulationCadenceFrames);
                 }
             }
             c.drawWater(weatherSystem.isWaterFrozen(), weatherSystem.getWaterSnowCoverage(),
-                    weatherSystem.getIceThickness(), waterTimeSeconds);
+                    weatherSystem.getIceThickness(), waterTimeSeconds, wx, wz);
             renderedWaterChunks++;
         }
         perfWaterChunksDrawn = renderedWaterChunks;
