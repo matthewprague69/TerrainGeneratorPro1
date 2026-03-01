@@ -2007,35 +2007,69 @@ public class Chunk {
     }
 
     private void addSkirts(Map<BatchKey, FloatBuilder> builders, int step, float texScale) {
-        boolean drawWest = shouldDrawSkirtForNeighbor(cx - 1, cz);
-        boolean drawEast = shouldDrawSkirtForNeighbor(cx + 1, cz);
-        boolean drawNorth = shouldDrawSkirtForNeighbor(cx, cz - 1);
-        boolean drawSouth = shouldDrawSkirtForNeighbor(cx, cz + 1);
+        Chunk westNeighbor = manager.getChunk(cx - 1, cz);
+        Chunk eastNeighbor = manager.getChunk(cx + 1, cz);
+        Chunk northNeighbor = manager.getChunk(cx, cz - 1);
+        Chunk southNeighbor = manager.getChunk(cx, cz + 1);
+
+        boolean drawWest = shouldDrawSkirtForNeighbor(westNeighbor);
+        boolean drawEast = shouldDrawSkirtForNeighbor(eastNeighbor);
+        boolean drawNorth = shouldDrawSkirtForNeighbor(northNeighbor);
+        boolean drawSouth = shouldDrawSkirtForNeighbor(southNeighbor);
 
         for (int x = 0; x < SIZE; x += step) {
             int x2 = Math.min(x + step, SIZE);
-            if (drawNorth) {
+            if (drawNorth && isSkirtSegmentExposed(northNeighbor, x, 0, x2, 0)) {
                 addSkirtQuad(builders, x, 0, x2, 0, heights[x][0], heights[x2][0], texScale);
             }
-            if (drawSouth) {
+            if (drawSouth && isSkirtSegmentExposed(southNeighbor, x, SIZE, x2, SIZE)) {
                 addSkirtQuad(builders, x, SIZE, x2, SIZE, heights[x][SIZE], heights[x2][SIZE], texScale);
             }
         }
 
         for (int z = 0; z < SIZE; z += step) {
             int z2 = Math.min(z + step, SIZE);
-            if (drawWest) {
+            if (drawWest && isSkirtSegmentExposed(westNeighbor, 0, z, 0, z2)) {
                 addSkirtQuad(builders, 0, z, 0, z2, heights[0][z], heights[0][z2], texScale);
             }
-            if (drawEast) {
+            if (drawEast && isSkirtSegmentExposed(eastNeighbor, SIZE, z, SIZE, z2)) {
                 addSkirtQuad(builders, SIZE, z, SIZE, z2, heights[SIZE][z], heights[SIZE][z2], texScale);
             }
         }
     }
 
-    private boolean shouldDrawSkirtForNeighbor(int neighborCx, int neighborCz) {
-        Chunk neighbor = manager.getChunk(neighborCx, neighborCz);
+    private boolean shouldDrawSkirtForNeighbor(Chunk neighbor) {
         return neighbor == null || neighbor.getLOD() != lod;
+    }
+
+    private boolean isSkirtSegmentExposed(Chunk neighbor, int x1, int z1, int x2, int z2) {
+        if (neighbor == null) {
+            return true;
+        }
+
+        float neighborY1 = sampleNeighborEdgeHeight(neighbor, x1, z1);
+        float neighborY2 = sampleNeighborEdgeHeight(neighbor, x2, z2);
+        float thisY1 = heights[x1][z1];
+        float thisY2 = heights[x2][z2];
+
+        float concealPadding = SKIRT_TOP_OFFSET + 0.01f;
+        return neighborY1 + concealPadding < thisY1 || neighborY2 + concealPadding < thisY2;
+    }
+
+    private float sampleNeighborEdgeHeight(Chunk neighbor, int x, int z) {
+        if (z == 0) {
+            return neighbor.heights[x][SIZE];
+        }
+        if (z == SIZE) {
+            return neighbor.heights[x][0];
+        }
+        if (x == 0) {
+            return neighbor.heights[SIZE][z];
+        }
+        if (x == SIZE) {
+            return neighbor.heights[0][z];
+        }
+        return neighbor.heights[Math.max(0, Math.min(SIZE, x))][Math.max(0, Math.min(SIZE, z))];
     }
 
     private void addSkirtQuad(Map<BatchKey, FloatBuilder> builders, int x1, int z1, int x2, int z2,
