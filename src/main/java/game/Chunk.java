@@ -916,7 +916,6 @@ public class Chunk {
             }
         }
 
-        addSkirts(builders, step, texScale);
 
         FloatBuilder merged = new FloatBuilder();
         for (Map.Entry<BatchKey, FloatBuilder> entry : builders.entrySet()) {
@@ -1694,6 +1693,8 @@ public class Chunk {
         float y2 = feature.y;
         float z2 = feature.z + rightZ * halfW;
 
+        boolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
+
         glEnable(GL_TEXTURE_2D);
         glDisable(GL_LIGHTING);
         glDisable(GL_CULL_FACE);
@@ -1721,6 +1722,9 @@ public class Chunk {
         glEnd();
         glDisable(GL_ALPHA_TEST);
         glDisable(GL_BLEND);
+        if (cullWasEnabled) {
+            glEnable(GL_CULL_FACE);
+        }
     }
 
     private int pickImpostorTexture(ImpostorEntry entry, Feature feature) {
